@@ -57,7 +57,7 @@ export const HEROES = [
     speed: 18, damage: 30, cooldown: 0.55, range: 7,
     ability: 'Combat strike', weapon: 'Military blade',
     imported: true, size: '92 MB',
-    model: './realistic_female.glb',
+    model: 'https://github.com/MUSTAFA-A-KHAN/Astra/releases/download/female/realistic_female.glb',
   },
 ];
 
