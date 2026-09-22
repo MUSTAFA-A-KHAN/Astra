@@ -30,7 +30,6 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   // The renderer loads only the terrain tiles required by the current camera.
   const tiles = new TilesRenderer();
   tiles.fetchOptions.mode = 'cors';
-  tiles.registerPlugin(new GLTFExtensionsPlugin());
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId, autoRefreshToken: true }));
   tiles.registerPlugin(new ReorientationPlugin({
     // Configure geographic anchor in degrees through terrain-config.js; the
