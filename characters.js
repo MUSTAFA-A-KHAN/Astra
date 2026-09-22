@@ -442,10 +442,10 @@ async function makeImported(meta) {
   const clips = (gltf.animations || []).map(clip => inPlaceClip(clip, model));
   const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
   const find = pattern => clips.find(clip => pattern.test(clip.name));
- const idle = find(/^idle$/i) || clips[0];
-const walk = find(/^walk$/i) || idle;
-const run = find(/^(sprint|run)$/i) || walk;
-const jump = find(/^jump$/i);
+  const idle = find(/^idle$/i) || clips[0];
+  const walk = find(/^walk$/i) || idle;
+  const run = find(/^(sprint|run)$/i) || walk;
+  const jump = find(/^jump$/i);
 console.log('Available animations:', clips.map(c => c.name));
   const actions = new Map();
   for (const clip of new Set([idle, walk, run, jump].filter(Boolean))) {
