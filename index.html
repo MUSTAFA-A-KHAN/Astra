@@ -90,6 +90,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff}
     <select id="character-select" class="character-select">
       <option value="rei" selected>Rei Ayanami</option>
       <option value="soldier">Soldier</option>
+      <option value="arthur">Arthur</option>
     </select>
   </div>
   <div class="wc-row">
@@ -442,6 +443,7 @@ player.group.add(placeholder);
 // Embedded directly so this works from a local HTML file.
 // ---------------------------------------------------------------------------
 const SOLDIER_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
+const ARTHUR_GLB_URL = './Arthur-rigged-under-25mb.glb';
 
 const characterSelect = document.getElementById('character-select');
 let activeCharacter = 'rei';
@@ -647,6 +649,49 @@ function loadSoldierModel() {
   });
 }
 
+function loadArthurModel() {
+  return new Promise(resolve => {
+    setProgress(0.66, 'Loading Arthur...');
+    const loader = new GLTFLoader();
+
+    loader.load(
+      ARTHUR_GLB_URL,
+      gltf => {
+        const model = gltf.scene;
+        fitCharacterModel(
+          model,
+          CONFIG.PLAYER_HEIGHT * 2.0,
+          0
+        );
+
+        const anim = setupRiggedAnimations(model, gltf.animations || []);
+
+        player.group.add(model);
+        player.model = model;
+
+        if (anim) {
+          player.mixer = anim.mixer;
+          player.idleAction = anim.actions.idle;
+          player.walkAction = anim.actions.walk;
+          player.runAction = anim.actions.run;
+          player.jumpAction = anim.actions.jump;
+          player.jumpLandAction = anim.actions.land;
+        }
+
+        placeholder.visible = false;
+        setProgress(0.82, 'Arthur loaded.');
+        resolve();
+      },
+      undefined,
+      err => {
+        console.error('Arthur GLB failed to load:', err);
+        setProgress(0.82, 'Arthur failed — keeping current character.');
+        resolve();
+      }
+    );
+  });
+}
+
 async function switchCharacter(character) {
   if (characterLoading || character === activeCharacter) return;
 
@@ -662,6 +707,8 @@ async function switchCharacter(character) {
 
   if (character === 'soldier') {
     await loadSoldierModel();
+  } else if (character === 'arthur') {
+    await loadArthurModel();
   } else {
     await loadReiModel();
   }
@@ -1335,7 +1382,7 @@ async function boot() {
     spawnCoins(50);
     updateWorldSeason();
 
-    setProgress(1, cityReady ? 'Ready — Littlest Tokyo + rigged Rei loaded.' : 'Ready — offline ground mode.');
+    setProgress(1, cityReady ? 'Ready — Littlest Tokyo + character loaded.' : 'Ready — offline ground mode.');
 
     setTimeout(() => ui.loading.classList.add('hidden'), 450);
 
