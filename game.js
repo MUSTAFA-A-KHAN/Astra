@@ -127,13 +127,20 @@ const eyeGeo=new THREE.SphereGeometry(.12,6,4),eyeMat=new THREE.MeshBasicMateria
 const enemies=[[-9,-17],[12,-30],[-17,-38],[28,-24],[-33,-12],[45,-42]].map(([x,z],i)=>{
   const group=new THREE.Group(),wisp=new THREE.Group(),core=new THREE.Mesh(enemyGeo,enemyMat); wisp.add(core);
   for(const side of [-1,1]){const eye=new THREE.Mesh(eyeGeo,eyeMat);eye.position.set(side*.27,.18,.72);wisp.add(eye);}
-  group.add(wisp);group.position.set(x,1.4,z);scene.add(group);return{group,wisp,core,x,z,hp:80,index:i,hit:0,alive:true,rig:null,swing:0,dying:0};
+  group.add(wisp);group.position.set(x,1.4,z);scene.add(group);return{group,wisp,core,x,z,hp:80,index:i,hit:0,alive:true,rig:null,swing:0,dying:0,respawn:0};
 });
 // Walking automatons replace the placeholder wisps once the shared model lands.
 // A failed download leaves the wisps in play rather than emptying the field.
 createEnemySquad(enemies.length).then(squad=>{
   squad.members.forEach((rig,i)=>{const e=enemies[i];e.rig=rig;e.wisp.visible=false;e.group.add(rig.group);e.group.position.y=0;});
 }).catch(error=>console.warn('Enemy model unavailable:',error));
+// The Reach refills itself: a felled automaton walks back out of its
+// old patrol once the player is far enough away not to see it arrive.
+const RESPAWN_DELAY=9,RESPAWN_CLEARANCE=26;
+function revive(e){
+  e.alive=true;e.hp=80;e.hit=0;e.swing=0;e.dying=0;e.respawn=0;
+  e.group.position.set(e.x,e.rig?0:1.4,e.z);e.group.scale.setScalar(1);e.group.visible=true;e.rig?.reset();
+}
 const effectGroup=new THREE.Group();scene.add(effectGroup);
 const pulse=new THREE.Mesh(new THREE.TorusGeometry(1,.045,5,40),new THREE.MeshBasicMaterial({color:'#c3f0d5',transparent:true,opacity:0,depthWrite:false}));pulse.rotation.x=-Math.PI/2;effectGroup.add(pulse);
 let pulseAge=2,pulseSize=5;
@@ -159,7 +166,7 @@ function attack(special=false){
   for(const e of enemies){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
   if(nearest){avatar.rotation.y=Math.atan2(nearest.group.position.x-position.x,nearest.group.position.z-position.z);}
   const targets=special?enemies.filter(e=>e.alive&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range):nearest?[nearest]:[];
-  for(const e of targets){e.hp-=damage;e.hit=.3;if(e.hp<=0){e.alive=false;if(e.rig)e.dying=1.8;else e.group.visible=false;progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);}}
+  for(const e of targets){e.hp-=damage;e.hit=.3;if(e.hp<=0){e.alive=false;e.respawn=RESPAWN_DELAY;if(e.rig)e.dying=1.8;else e.group.visible=false;progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);}}
   if(special){showPulse(position.x,position.z,range,heroMeta.color);if(heroMeta.id==='warden'){health=Math.min(100,health+20);updateHUD();}}
   else if(nearest){targetPoint.copy(nearest.group.position);direction.copy(targetPoint).sub(position).add(new THREE.Vector3(0,-1.6,0));bolt.position.copy(position).add(new THREE.Vector3(0,1.6,0)).addScaledVector(direction,.5);bolt.scale.set(1,direction.length(),1);bolt.quaternion.setFromUnitVectors(up,direction.normalize());bolt.material.color.set(heroMeta.color);boltAge=0;}
   else showPulse(position.x,position.z,2.5,heroMeta.color);
@@ -225,7 +232,11 @@ function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
-  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=heroMeta.speed*(run?0.5:0.1);
+  // `heroMeta.speed` is the character's top speed; a walk covers about
+  // a third of it. The old 0.1 walk multiplier moved a 3.4-unit body at
+  // barely 1 unit a second, which no walk cycle can be slowed enough to
+  // match — that mismatch was the foot-skating.
+  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=heroMeta.speed*(run?1:0.34);
   const vx=(Math.cos(yaw)*x+Math.sin(yaw)*z)*speed,vz=(-Math.sin(yaw)*x+Math.cos(yaw)*z)*speed;
   velocity.x=damp(velocity.x,vx,12,dt);velocity.z=damp(velocity.z,vz,12,dt);
   position.x+=velocity.x*dt;position.z+=velocity.z*dt;collide(position);
@@ -246,7 +257,12 @@ function updatePlayer(dt){
   $('ability-cooldown').style.height=`${abilityTimer/7*100}%`;
   for(const e of enemies){
     // A felled automaton plays its death clip out before it leaves the scene.
-    if(!e.alive){if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig.animate(dt,{state:'Dead',time});if(e.dying===0)e.group.visible=false;}continue;}
+    if(!e.alive){
+      if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig.animate(dt,{state:'Dead',time});if(e.dying===0)e.group.visible=false;}
+      e.respawn=Math.max(0,e.respawn-dt);
+      if(e.respawn===0&&e.dying===0&&Math.hypot(position.x-e.x,position.z-e.z)>RESPAWN_CLEARANCE)revive(e);
+      continue;
+    }
     e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
     const chasing=d<18&&d>1.9;
     if(chasing){e.group.position.x+=dx/d*2.9*dt;e.group.position.z+=dz/d*2.9*dt;collide(e.group.position,.8);}
@@ -320,7 +336,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');

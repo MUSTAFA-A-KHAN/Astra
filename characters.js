@@ -81,12 +81,12 @@ export const HEROES = [
 
     orientationYaw: 0,
 
-    // These are animation playback multipliers.
-    // They are NOT world movement speeds.
+    // Trim on top of the measured stride. 1 keeps the feet
+    // exactly on the ground; nudge a model that reads heavy.
     animationSpeeds: {
-      walk: 1.0,
-      run: 1.0,
-      sprint: 1.15,
+      walk: 1,
+      run: 1,
+      sprint: 1,
     },
   },
 
@@ -99,7 +99,7 @@ export const HEROES = [
       'Your original frontier wanderer. A familiar face on an unfamiliar horizon.',
     color: '#d3ac87',
     stats: { power: 85, agility: 72, magic: 36 },
-    speed: 19.2,
+    speed: 12,
     damage: 32,
     cooldown: 0.58,
     range: 7,
@@ -114,8 +114,8 @@ export const HEROES = [
 
     animationSpeeds: {
       walk: 1,
-      run: 1.0,
-      sprint: 1.15,
+      run: 1,
+      sprint: 1,
     },
   },
 
@@ -128,7 +128,7 @@ export const HEROES = [
       'A battle-tested soldier ready for the journey.',
     color: '#8fa8b8',
     stats: { power: 80, agility: 75, magic: 20 },
-    speed: 18,
+    speed: 11,
     damage: 30,
     cooldown: 0.55,
     range: 7,
@@ -144,9 +144,9 @@ export const HEROES = [
     orientationYaw: Math.PI,
 
     animationSpeeds: {
-      walk: 1.0,
-      run: 1.0,
-      sprint: 1.1,
+      walk: 1,
+      run: 1,
+      sprint: 1,
     },
   },
 
@@ -159,7 +159,7 @@ export const HEROES = [
       'A battle-tested soldier ready for the journey.',
     color: '#8fa8b8',
     stats: { power: 80, agility: 75, magic: 20 },
-    speed: 18,
+    speed: 11,
     damage: 30,
     cooldown: 0.55,
     range: 7,
@@ -174,9 +174,9 @@ export const HEROES = [
     orientationYaw: 0,
 
     animationSpeeds: {
-      walk: 1.0,
-      run: 1.0,
-      sprint: 1.15,
+      walk: 1,
+      run: 1,
+      sprint: 1,
     },
   },
 ];
@@ -199,9 +199,9 @@ export const ENEMY = {
   orientationYaw: 0,
 
   animationSpeeds: {
-    walk: 1.0,
-    run: 1.0,
-    sprint: 1.1,
+    walk: 1,
+    run: 1,
+    sprint: 1,
   },
 };
 
@@ -1881,6 +1881,112 @@ function loadImportedScene(
 }
 
 /**
+ * How fast a locomotion clip's own root motion would carry the
+ * character across the ground, in world units per second.
+ *
+ * This is the number that plants the feet: played back at
+ * `worldSpeed / stride`, a clip advances its legs exactly as far
+ * as the character actually travels. Measure it before
+ * `inPlaceClip` strips the translation away; clips authored in
+ * place carry no stride and report 0.
+ */
+function clipStrideSpeed(
+  clip,
+  model,
+) {
+  if (
+    !clip ||
+    !(clip.duration > 0)
+  ) {
+    return 0;
+  }
+
+  for (
+    const track of clip.tracks
+  ) {
+    if (
+      !track.name.endsWith(
+        '.position',
+      ) ||
+      track.getValueSize() !== 3
+    ) {
+      continue;
+    }
+
+    const binding =
+      THREE.PropertyBinding.parseTrackName(
+        track.name,
+      );
+
+    const nodeName =
+      binding.objectName === 'bones'
+        ? binding.objectIndex
+        : binding.nodeName;
+
+    const node =
+      THREE.PropertyBinding.findNode(
+        model,
+        nodeName,
+      );
+
+    const rootBone =
+      node?.isBone &&
+      !node.parent?.isBone;
+
+    if (
+      !rootBone &&
+      node !== model &&
+      !/(hips|pelvis|root)$/i.test(
+        nodeName || '',
+      )
+    ) {
+      continue;
+    }
+
+    const values = track.values;
+    const last = values.length - 3;
+
+    if (last < 3) {
+      return 0;
+    }
+
+    // Track values live in the node's parent space, so the
+    // parent's world scale turns a stride into world units.
+    const parent =
+      node?.parent || model;
+
+    parent.updateWorldMatrix(
+      true,
+      false,
+    );
+
+    const scale =
+      new THREE.Vector3();
+
+    parent.matrixWorld.decompose(
+      new THREE.Vector3(),
+      new THREE.Quaternion(),
+      scale,
+    );
+
+    const dx =
+      (values[last] - values[0]) *
+      scale.x;
+
+    const dz =
+      (values[last + 2] - values[2]) *
+      scale.z;
+
+    return (
+      Math.hypot(dx, dz) /
+      clip.duration
+    );
+  }
+
+  return 0;
+}
+
+/**
  * Remove horizontal root translation.
  *
  * This keeps the game responsible for movement while
@@ -2432,6 +2538,87 @@ async function makeImported(
   console.groupEnd();
 
   /**
+   * Measured gait speeds, in world units per second.
+   *
+   * Each sanitized clip keeps its source's index, so the original
+   * root motion is still there to measure. A clip authored in
+   * place reports no stride, and falls back to a share of body
+   * height per second — the proportions a walk, a run and a
+   * sprint hold across characters of any size.
+   */
+  const strideOf = clip => {
+    const measured =
+      clipStrideSpeed(
+        sourceClips[
+          clips.indexOf(clip)
+        ],
+        model,
+      );
+
+    // An in-place clip still drifts a few billionths of a unit.
+    // Anything slower than a crawl is that float noise, not a
+    // stride, and must fall through to the estimate.
+    return measured >
+      targetHeight * 0.15
+      ? measured
+      : 0;
+  };
+
+  const stride = {
+    walk:
+      strideOf(walk) ||
+      targetHeight * 0.8,
+
+    run:
+      strideOf(run) ||
+      targetHeight * 1.9,
+
+    sprint:
+      strideOf(sprint) ||
+      targetHeight * 2.6,
+  };
+
+  // Gait selection assumes the band is ordered, whatever the
+  // source clips happen to measure.
+  stride.run = Math.max(
+    stride.run,
+    stride.walk * 1.4,
+  );
+
+  stride.sprint = Math.max(
+    stride.sprint,
+    stride.run,
+  );
+
+  /**
+   * A character breaks into the next gait at the geometric mean
+   * of the two strides, so each clip runs nearest its authored
+   * speed. Sprint stays a deliberate input unless the model
+   * actually ships a distinct sprint.
+   */
+  const runAbove =
+    Math.sqrt(
+      stride.walk * stride.run,
+    );
+
+  const sprintAbove =
+    sprint && sprint !== run
+      ? Math.sqrt(
+          stride.run *
+            stride.sprint,
+        )
+      : Infinity;
+
+  console.log(
+    `[${meta.name}] gait speeds`,
+    {
+      stride,
+      runAbove,
+      sprintAbove,
+    },
+  );
+
+  /**
    * State → clip mapping.
    */
   const stateClips = {
@@ -2549,15 +2736,15 @@ async function makeImported(
   let death = 0;
 
   /**
-   * These are now explicitly animation multipliers.
-   *
-   * They are NOT movement speeds.
+   * Per-character trim on top of the measured gait, for models
+   * whose clips read a little heavy or a little light. 1 means
+   * "play it exactly as fast as the character is travelling".
    */
   const speeds =
     meta.animationSpeeds || {
-      walk: 0.85,
-      run: 1.0,
-      sprint: 1.15,
+      walk: 1,
+      run: 1,
+      sprint: 1,
     };
 
   const baseHeight =
@@ -2677,6 +2864,19 @@ async function makeImported(
        * ↓
        * Idle
        */
+      /**
+       * The gait follows how fast the character is actually
+       * travelling. Choosing it from a `moving` flag alone is
+       * what made every hero stroll at sprinting speed.
+       */
+      const gait =
+        sprinting ||
+        speed >= sprintAbove
+          ? 'Sprint'
+          : speed >= runAbove
+            ? 'Run'
+            : 'Walk';
+
       const nextState =
         state ||
         (
@@ -2685,11 +2885,7 @@ async function makeImported(
             : jumping
               ? 'Jump'
               : moving
-                ? (
-                    sprinting
-                      ? 'Sprint'
-                      : 'Walk'
-                  )
+                ? gait
                 : 'Idle'
         );
 
@@ -2736,37 +2932,40 @@ async function makeImported(
         nextState === 'Sprint';
 
       /**
-       * IMPORTANT FIX
+       * Match the stride to the travel.
        *
-       * DO NOT DO:
-       *
-       * speed / referenceSpeed
-       *
-       * That caused Arthur's walk to become 2.5x
-       * and makes different GLBs behave incorrectly.
-       *
-       * Movement speed and animation speed are
-       * now independent.
+       * A flat multiplier cannot do this: it leaves the feet
+       * skating whenever movement speed and the clip's authored
+       * speed disagree. Dividing by the gait's measured stride
+       * plants them, and the clamp keeps a character who outruns
+       * their own animation from looking frantic.
        */
       let targetRate = 1;
 
-      if (locomotion) {
-        if (
+      if (
+        locomotion &&
+        Number.isFinite(speed)
+      ) {
+        const reference =
           nextState === 'Walk'
-        ) {
-          targetRate =
-            speeds.walk;
-        } else if (
-          nextState === 'Run'
-        ) {
-          targetRate =
-            speeds.run;
-        } else if (
-          nextState === 'Sprint'
-        ) {
-          targetRate =
-            speeds.sprint;
-        }
+            ? stride.walk
+            : nextState === 'Sprint'
+              ? stride.sprint
+              : stride.run;
+
+        const trim =
+          nextState === 'Walk'
+            ? speeds.walk
+            : nextState === 'Sprint'
+              ? speeds.sprint
+              : speeds.run;
+
+        targetRate =
+          THREE.MathUtils.clamp(
+            speed / reference,
+            0.65,
+            1.75,
+          ) * (trim || 1);
       }
 
       /**
@@ -2864,6 +3063,40 @@ async function makeImported(
       fitted.position.y =
         baseHeight -
         landing;
+    },
+
+    /**
+     * Snap back to idle with no crossfade, for a rig that is
+     * being reused — a respawn should not fade out of the death
+     * pose it was left clamped in.
+     */
+    reset() {
+      if (disposed) {
+        return;
+      }
+
+      mixer?.stopAllAction();
+
+      playbackRate = 1;
+      activeState = 'Idle';
+      lean = 0;
+      landing = 0;
+      death = 0;
+
+      facing.rotation.x = 0;
+      facing.rotation.z = 0;
+      fitted.position.y = baseHeight;
+
+      current =
+        idle
+          ? actions.get(idle)
+          : null;
+
+      current
+        ?.reset()
+        .setEffectiveWeight(1)
+        .setEffectiveTimeScale(1)
+        .play();
     },
 
     dispose() {
