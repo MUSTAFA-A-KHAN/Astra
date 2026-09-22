@@ -1,5 +1,5 @@
 import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/+esm';
-import { CesiumIonAuthPlugin, ReorientationPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/+esm';
+import { CesiumIonAuthPlugin, ReorientationPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/+esm';
 
 // Optional Cesium World Terrain integration for Astra.
 // The terrain itself is streamed from Cesium ion; no terrain files are bundled
