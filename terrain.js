@@ -12,8 +12,6 @@ const DEG2RAD = Math.PI / 180;
 export async function createStreamedTerrain(scene, camera, renderer, {
   token = window.ASTRA_CESIUM_ION_TOKEN || '',
   assetId = DEFAULT_ASSET_ID,
-  centerLongitude = 0,
-  centerLatitude = 0,
   enabled = true,
 } = {}) {
   if (!enabled || !token) {
