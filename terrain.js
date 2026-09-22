@@ -31,6 +31,7 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   const tiles = new TilesRenderer();
   tiles.fetchOptions.mode = 'cors';
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId, autoRefreshToken: true }));
+  tiles.registerPlugin(new GLTFExtensionsPlugin());
   tiles.registerPlugin(new ReorientationPlugin({
     // Configure geographic anchor in degrees through terrain-config.js; the
     // renderer expects radians. Defaults keep the feature opt-in and inert.
