@@ -39,6 +39,29 @@
 <dialog id="menu-dialog" aria-labelledby="dialog-title"><div class="dialog-header"><div><div class="eyebrow" id="dialog-eyebrow">TAKE A BREATH</div><h2 id="dialog-title">Your journey</h2></div><button class="icon-button" id="close-dialog" aria-label="Close menu">×</button></div><div id="dialog-content"></div></dialog>
 <div id="loading" role="status"><div class="loading-mark">✧</div><h2>ASTRA</h2><p id="load-message">A little world. A little magic.</p><div class="loading-line"><i></i></div><button id="retry-button" hidden onclick="location.reload()">Try again</button></div>
 <noscript><div class="fatal-error">Enable JavaScript to explore Astra.</div></noscript>
-<script>window.addEventListener('error',function(){if(!window.astraReady){document.getElementById('load-message').textContent='The world could not load. Check your connection and try again.';document.getElementById('retry-button').hidden=false;}});setTimeout(function(){if(!window.astraReady){document.getElementById('load-message').textContent='Still preparing the world. Check your connection if this continues.';document.getElementById('retry-button').hidden=false;}},20000);</script>
+<script>
+(function () {
+  function showBootError(message) {
+    if (window.astraReady) return;
+    var loadMessage = document.getElementById('load-message');
+    var retryButton = document.getElementById('retry-button');
+    if (loadMessage) loadMessage.textContent = message || 'The world could not load. Check the browser console for details.';
+    if (retryButton) retryButton.hidden = false;
+  }
+  window.addEventListener('error', function (event) {
+    var message = event && event.error && event.error.message
+      ? 'Startup error: ' + event.error.message
+      : (event && event.message ? 'Startup error: ' + event.message : '');
+    showBootError(message);
+  });
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event && event.reason;
+    showBootError('Startup error: ' + (reason && reason.message ? reason.message : String(reason || 'Unknown error')));
+  });
+  setTimeout(function () {
+    if (!window.astraReady) showBootError('Still preparing the world. Check the browser console if this continues.');
+  }, 20000);
+})();
+</script>
 <script type="module" src="./game.js"></script>
 </body></html>
