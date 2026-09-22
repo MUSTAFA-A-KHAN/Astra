@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 export class CharacterManager {
   constructor({ assetManager, animationManager, heroes, createBuiltin }) {
     this.assets = assetManager;
@@ -18,7 +20,7 @@ export class CharacterManager {
 
     const character = meta.imported
       ? await this.#loadImported(meta, { signal })
-      : this.createBuiltin(meta);
+      : await this.createBuiltin(meta);
 
     this.instances.set(meta.id, character);
     return character;
