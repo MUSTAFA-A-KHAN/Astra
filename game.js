@@ -227,7 +227,14 @@ function updatePlayer(dt){
   jumpVelocity-=23*dt;position.y=Math.max(0,position.y+jumpVelocity*dt);if(position.y===0)jumpVelocity=0;
   avatar.position.copy(position);
   if(Math.hypot(velocity.x,velocity.z)>.2&&attackTimer<=0){const target=Math.atan2(velocity.x,velocity.z);avatar.rotation.y+=Math.atan2(Math.sin(target-avatar.rotation.y),Math.cos(target-avatar.rotation.y))*(1-Math.exp(-14*dt));}
-  hero.animate(dt,{speed:Math.hypot(velocity.x,velocity.z),moving:length>.08,sprinting:run,attacking:attackTimer>heroMeta.cooldown*.45,time});
+  hero.animate(dt,{
+  speed:Math.hypot(velocity.x,velocity.z),
+  moving:length>.08,
+  sprinting:run,
+  jumping:position.y>0.01,
+  attacking:attackTimer>heroMeta.cooldown*.45,
+  time
+});
   if(Math.hypot(position.x+45,position.z-25)<12)health=Math.min(100,health+dt*12);
   const nearShrine=Math.hypot(position.x,position.z+50)<10;$('interaction-hint').hidden=!(nearShrine&&questStage()===2);
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);

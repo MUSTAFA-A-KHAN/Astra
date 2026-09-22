@@ -442,17 +442,21 @@ async function makeImported(meta) {
   const clips = (gltf.animations || []).map(clip => inPlaceClip(clip, model));
   const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
   const find = pattern => clips.find(clip => pattern.test(clip.name));
-  const idle = find(/idle/i) || clips[0];
-  const walk = find(/^walk|jog/i) || idle;
-  const run = find(/sprint|run/i) || walk;
+ const idle = find(/^idle$/i) || clips[0];
+const walk = find(/^walk$/i) || idle;
+const run = find(/^(sprint|run)$/i) || walk;
+const jump = find(/^jump$/i);
+console.log('Available animations:', clips.map(c => c.name));
   const actions = new Map();
-  for (const clip of new Set([idle, walk, run].filter(Boolean))) actions.set(clip, mixer.clipAction(clip));
+  for (const clip of new Set([idle, walk, run, jump].filter(Boolean))) {
+  actions.set(clip, mixer.clipAction(clip));
+}
   let current = idle ? actions.get(idle) : null;
   if (current) current.play();
   let disposed = false;
-  return { group, meta, height: 3.4, mixer, animate(dt, { moving = false, sprinting = false, attacking = false, time = 0 } = {}) {
+  return { group, meta, height: 3.4, mixer, animate(dt, { moving = false, sprinting = false, jumping = false, attacking = false, time = 0 } = {}) {
     if (disposed) return;
-    const next = actions.get(moving ? sprinting ? run : walk : idle);
+    const next = actions.get(jumping ? jump : moving ? sprinting ? run : walk : idle);
     if (next && next !== current) {
       next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
       current?.fadeOut(0.22);
