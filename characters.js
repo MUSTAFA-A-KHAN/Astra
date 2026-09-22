@@ -9,116 +9,199 @@ import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
  */
 export const HEROES = [
   {
-    id: 'warden', name: 'Cael', title: 'The Warden', role: 'Vanguard',
-    description: 'A steady blade. An unbroken oath. Stand your ground with sword and shield.',
-    color: '#d9b775', stats: { power: 90, agility: 58, magic: 24 },
-    speed: 9, damage: 34, cooldown: 0.62, range: 6.2,
-    ability: 'Sunsteel strike', weapon: 'Sword & shield',
+    id: 'warden',
+    name: 'Cael',
+    title: 'The Warden',
+    role: 'Vanguard',
+    description:
+      'A steady blade. An unbroken oath. Stand your ground with sword and shield.',
+    color: '#d9b775',
+    stats: { power: 90, agility: 58, magic: 24 },
+    speed: 9,
+    damage: 34,
+    cooldown: 0.62,
+    range: 6.2,
+    ability: 'Sunsteel strike',
+    weapon: 'Sword & shield',
   },
+
   {
-    id: 'ranger', name: 'Lyra', title: 'The Wayfinder', role: 'Ranger',
-    description: 'Follow the wind beyond the familiar. A nimble scout with an unerring bow.',
-    color: '#98caa2', stats: { power: 65, agility: 95, magic: 42 },
-    speed: 10.5, damage: 24, cooldown: 0.4, range: 10,
-    ability: 'Gale arrow', weapon: 'Forest bow',
+    id: 'ranger',
+    name: 'Lyra',
+    title: 'The Wayfinder',
+    role: 'Ranger',
+    description:
+      'Follow the wind beyond the familiar. A nimble scout with an unerring bow.',
+    color: '#98caa2',
+    stats: { power: 65, agility: 95, magic: 42 },
+    speed: 10.5,
+    damage: 24,
+    cooldown: 0.4,
+    range: 10,
+    ability: 'Gale arrow',
+    weapon: 'Forest bow',
   },
+
   {
-    id: 'mage', name: 'Elowen', title: 'The Arcanist', role: 'Spellweaver',
-    description: 'Ancient light answers your call. Unravel the wild with a crystal-tipped staff.',
-    color: '#baaff1', stats: { power: 68, agility: 55, magic: 98 },
-    speed: 8.6, damage: 38, cooldown: 0.72, range: 12,
-    ability: 'Astral pulse', weapon: 'Moonstone staff',
+    id: 'mage',
+    name: 'Elowen',
+    title: 'The Arcanist',
+    role: 'Spellweaver',
+    description:
+      'Ancient light answers your call. Unravel the wild with a crystal-tipped staff.',
+    color: '#baaff1',
+    stats: { power: 68, agility: 55, magic: 98 },
+    speed: 8.6,
+    damage: 38,
+    cooldown: 0.72,
+    range: 12,
+    ability: 'Astral pulse',
+    weapon: 'Moonstone staff',
   },
+
   {
-    id: 'rei', name: 'Rei', title: 'The Wanderer', role: 'Guest adventurer',
-    description: 'Your original blue-haired adventurer, ready for a new world.',
-    color: '#a7d9f2', stats: { power: 70, agility: 86, magic: 65 },
-    speed: 10, damage: 27, cooldown: 0.5, range: 8,
-    ability: 'Spirit strike', weapon: 'Spirit energy',
+    id: 'rei',
+    name: 'Rei',
+    title: 'The Wanderer',
+    role: 'Guest adventurer',
+    description:
+      'Your original blue-haired adventurer, ready for a new world.',
+    color: '#a7d9f2',
+    stats: { power: 70, agility: 86, magic: 65 },
+    speed: 10,
+    damage: 27,
+    cooldown: 0.5,
+    range: 8,
+    ability: 'Spirit strike',
+    weapon: 'Spirit energy',
+
     imported: true,
     size: '16 MB',
     model: './rigged-model-optimized.glb',
+
     orientationYaw: 0,
+
+    // These are animation playback multipliers.
+    // They are NOT world movement speeds.
     animationSpeeds: {
-      walk: 4.2,
-      run: 8,
-      sprint: 11.5,
+      walk: 0.85,
+      run: 1.0,
+      sprint: 1.15,
     },
   },
+
   {
-    id: 'arthur', name: 'Arthur', title: 'The Outrider', role: 'Guest adventurer',
-    description: 'Your original frontier wanderer. A familiar face on an unfamiliar horizon.',
-    color: '#d3ac87', stats: { power: 85, agility: 72, magic: 36 },
-    speed: 19.2, damage: 32, cooldown: 0.58, range: 7,
-    ability: 'Frontier strike', weapon: 'Outrider prowess',
+    id: 'arthur',
+    name: 'Arthur',
+    title: 'The Outrider',
+    role: 'Guest adventurer',
+    description:
+      'Your original frontier wanderer. A familiar face on an unfamiliar horizon.',
+    color: '#d3ac87',
+    stats: { power: 85, agility: 72, magic: 36 },
+    speed: 19.2,
+    damage: 32,
+    cooldown: 0.58,
+    range: 7,
+    ability: 'Frontier strike',
+    weapon: 'Outrider prowess',
+
     imported: true,
     size: '21 MB',
     model: './Arthur-rigged-under-25mb.glb',
+
     orientationYaw: 0,
+
     animationSpeeds: {
-      walk: 1,
-      run: 3,
-      sprint: 11.5,
+      walk: 0.75,
+      run: 1.0,
+      sprint: 1.15,
     },
   },
+
   {
-    id: 'soldier', name: 'Soldier', title: 'The Soldier', role: 'Guest adventurer',
-    description: 'A battle-tested soldier ready for the journey.',
-    color: '#8fa8b8', stats: { power: 80, agility: 75, magic: 20 },
-    speed: 18, damage: 30, cooldown: 0.55, range: 7,
-    ability: 'Combat strike', weapon: 'Military blade',
+    id: 'soldier',
+    name: 'Soldier',
+    title: 'The Soldier',
+    role: 'Guest adventurer',
+    description:
+      'A battle-tested soldier ready for the journey.',
+    color: '#8fa8b8',
+    stats: { power: 80, agility: 75, magic: 20 },
+    speed: 18,
+    damage: 30,
+    cooldown: 0.55,
+    range: 7,
+    ability: 'Combat strike',
+    weapon: 'Military blade',
+
     imported: true,
     size: 'External GLB',
-    model: 'https://threejs.org/examples/models/gltf/Soldier.glb',
+    model:
+      'https://threejs.org/examples/models/gltf/Soldier.glb',
+
+    // Soldier.glb faces the opposite direction from Astra movement.
     orientationYaw: Math.PI,
+
     animationSpeeds: {
-      walk: 2,
-      run: 8.4,
-      sprint: 11.8,
+      walk: 1.0,
+      run: 1.0,
+      sprint: 1.1,
     },
   },
+
   {
-    id: 'female-soldier', name: 'Female-Soldier', title: 'The Soldier', role: 'Guest adventurer',
-    description: 'A battle-tested soldier ready for the journey.',
-    color: '#8fa8b8', stats: { power: 80, agility: 75, magic: 20 },
-    speed: 18, damage: 30, cooldown: 0.55, range: 7,
-    ability: 'Combat strike', weapon: 'Military blade',
+    id: 'female-soldier',
+    name: 'Female-Soldier',
+    title: 'The Soldier',
+    role: 'Guest adventurer',
+    description:
+      'A battle-tested soldier ready for the journey.',
+    color: '#8fa8b8',
+    stats: { power: 80, agility: 75, magic: 20 },
+    speed: 18,
+    damage: 30,
+    cooldown: 0.55,
+    range: 7,
+    ability: 'Combat strike',
+    weapon: 'Military blade',
+
     imported: true,
     size: '92 MB',
-    model: 'https://github.com/MUSTAFA-A-KHAN/Astra/releases/download/female/realistic_female.glb',
+    model:
+      'https://github.com/MUSTAFA-A-KHAN/Astra/releases/download/female/realistic_female.glb',
+
     orientationYaw: 0,
+
     animationSpeeds: {
-      walk: 4.2,
-      run: 8,
-      sprint: 11.5,
+      walk: 0.85,
+      run: 1.0,
+      sprint: 1.15,
     },
   },
 ];
 
 /**
- * The hostiles of the Reach.
- *
- * Three's expressive robot ships with Idle, Walking, Running,
- * Punch and Death clips, which is exactly the vocabulary the
- * chase loop drives. One download serves the whole squad.
+ * Enemy
  */
 export const ENEMY = {
   id: 'automaton',
   name: 'Rogue Automaton',
   title: 'The Restless',
   role: 'Hostile',
-  description: 'A hollow machine still walking its old patrol.',
+  description:
+    'A hollow machine still walking its old patrol.',
   color: '#9380b0',
   imported: true,
   model:
     'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
-  // Shorter than an adventurer, so a crowd never reads as a wall.
   height: 2.6,
   orientationYaw: 0,
+
   animationSpeeds: {
-    walk: 2.2,
-    run: 4.4,
-    sprint: 6,
+    walk: 1.0,
+    run: 1.0,
+    sprint: 1.1,
   },
 };
 
@@ -163,7 +246,9 @@ const palettes = {
   },
 };
 
-// One vertex-colored mesh per moving segment keeps detail inexpensive on mobile GPUs.
+/**
+ * Lightweight geometry builder.
+ */
 class Sculpt {
   constructor() {
     this.parts = [];
@@ -176,7 +261,9 @@ class Sculpt {
     scale = [1, 1, 1],
     rotation = [0, 0, 0],
   ) {
-    const geo = geometry.index ? geometry.toNonIndexed() : geometry;
+    const geo = geometry.index
+      ? geometry.toNonIndexed()
+      : geometry;
 
     if (geo !== geometry) {
       geometry.dispose();
@@ -184,19 +271,24 @@ class Sculpt {
 
     geo.deleteAttribute('uv');
 
-    const transform = new THREE.Matrix4().compose(
-      new THREE.Vector3(...position),
-      new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(...rotation),
-      ),
-      new THREE.Vector3(...scale),
-    );
+    const transform =
+      new THREE.Matrix4().compose(
+        new THREE.Vector3(...position),
+        new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(...rotation),
+        ),
+        new THREE.Vector3(...scale),
+      );
 
     geo.applyMatrix4(transform);
 
     const tint = new THREE.Color(color);
-    const count = geo.attributes.position.count;
-    const colors = new Float32Array(count * 3);
+
+    const count =
+      geo.attributes.position.count;
+
+    const colors =
+      new Float32Array(count * 3);
 
     for (let i = 0; i < count; i++) {
       colors[i * 3] = tint.r;
@@ -214,7 +306,12 @@ class Sculpt {
     return this;
   }
 
-  box(color, position, scale, rotation) {
+  box(
+    color,
+    position,
+    scale,
+    rotation,
+  ) {
     return this.add(
       new THREE.BoxGeometry(1, 1, 1),
       color,
@@ -224,7 +321,12 @@ class Sculpt {
     );
   }
 
-  ball(color, position, scale, rotation) {
+  ball(
+    color,
+    position,
+    scale,
+    rotation,
+  ) {
     return this.add(
       new THREE.IcosahedronGeometry(1, 1),
       color,
@@ -234,7 +336,12 @@ class Sculpt {
     );
   }
 
-  gem(color, position, scale, rotation) {
+  gem(
+    color,
+    position,
+    scale,
+    rotation,
+  ) {
     return this.add(
       new THREE.OctahedronGeometry(1),
       color,
@@ -268,18 +375,29 @@ class Sculpt {
     );
   }
 
-  beam(color, start, end, radius, sides = 6) {
-    const a = new THREE.Vector3(...start);
-    const b = new THREE.Vector3(...end);
+  beam(
+    color,
+    start,
+    end,
+    radius,
+    sides = 6,
+  ) {
+    const a =
+      new THREE.Vector3(...start);
 
-    const direction = b.clone().sub(a);
+    const b =
+      new THREE.Vector3(...end);
 
-    const rotation = new THREE.Euler().setFromQuaternion(
-      new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        direction.clone().normalize(),
-      ),
-    );
+    const direction =
+      b.clone().sub(a);
+
+    const rotation =
+      new THREE.Euler().setFromQuaternion(
+        new THREE.Quaternion().setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          direction.clone().normalize(),
+        ),
+      );
 
     return this.cylinder(
       color,
@@ -294,11 +412,24 @@ class Sculpt {
   }
 
   mesh(material) {
-    const geometry = mergeGeometries(this.parts, false);
+    const geometry =
+      mergeGeometries(
+        this.parts,
+        false,
+      );
 
-    this.parts.forEach(part => part.dispose());
+    this.parts.forEach(
+      part => part.dispose(),
+    );
 
-    const mesh = new THREE.Mesh(geometry, material);
+    this.parts.length = 0;
+
+    const mesh =
+      new THREE.Mesh(
+        geometry,
+        material,
+      );
+
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
@@ -306,30 +437,64 @@ class Sculpt {
   }
 }
 
-function capeGeometry(width = 1.05, length = 1.5) {
+function capeGeometry(
+  width = 1.05,
+  length = 1.5,
+) {
   const vertices = [];
+
   const columns = 6;
   const rows = 5;
 
   const point = (x, y) => {
-    const spread = 0.68 + y * 0.52;
+    const spread =
+      0.68 + y * 0.52;
 
     return [
-      (x - 0.5) * width * spread,
+      (x - 0.5) *
+        width *
+        spread,
+
       -y * length,
-      -0.18
-        - y * 0.21
-        - Math.sin(x * Math.PI) * 0.14
-        + Math.cos(x * Math.PI * 6) * y * 0.045,
+
+      -0.18 -
+        y * 0.21 -
+        Math.sin(x * Math.PI) * 0.14 +
+        Math.cos(x * Math.PI * 6) *
+          y *
+          0.045,
     ];
   };
 
   for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < columns; x++) {
-      const a = point(x / columns, y / rows);
-      const b = point((x + 1) / columns, y / rows);
-      const c = point(x / columns, (y + 1) / rows);
-      const d = point((x + 1) / columns, (y + 1) / rows);
+    for (
+      let x = 0;
+      x < columns;
+      x++
+    ) {
+      const a =
+        point(
+          x / columns,
+          y / rows,
+        );
+
+      const b =
+        point(
+          (x + 1) / columns,
+          y / rows,
+        );
+
+      const c =
+        point(
+          x / columns,
+          (y + 1) / rows,
+        );
+
+      const d =
+        point(
+          (x + 1) / columns,
+          (y + 1) / rows,
+        );
 
       vertices.push(
         ...a,
@@ -342,11 +507,15 @@ function capeGeometry(width = 1.05, length = 1.5) {
     }
   }
 
-  const geometry = new THREE.BufferGeometry();
+  const geometry =
+    new THREE.BufferGeometry();
 
   geometry.setAttribute(
     'position',
-    new THREE.Float32BufferAttribute(vertices, 3),
+    new THREE.Float32BufferAttribute(
+      vertices,
+      3,
+    ),
   );
 
   geometry.computeVertexNormals();
@@ -356,39 +525,63 @@ function capeGeometry(width = 1.05, length = 1.5) {
 
 function makeBuiltin(meta) {
   const p = palettes[meta.id];
-  const mage = meta.id === 'mage';
-  const ranger = meta.id === 'ranger';
 
-  const group = new THREE.Group();
-  group.name = meta.name;
+  const mage =
+    meta.id === 'mage';
 
-  const body = new THREE.Group();
+  const ranger =
+    meta.id === 'ranger';
+
+  const group =
+    new THREE.Group();
+
+  group.name =
+    meta.name;
+
+  const body =
+    new THREE.Group();
+
   group.add(body);
 
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.82,
-    metalness: 0.08,
-    flatShading: true,
-  });
+  const material =
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.82,
+      metalness: 0.08,
+      flatShading: true,
+    });
 
-  const clothMaterial = material.clone();
-  clothMaterial.side = THREE.DoubleSide;
+  const clothMaterial =
+    material.clone();
 
-  const glowMaterial = new THREE.MeshStandardMaterial({
-    color: '#b4f5fa',
-    emissive: '#4cbfdd',
-    emissiveIntensity: 0.85,
-    roughness: 0.32,
-    flatShading: true,
-  });
+  clothMaterial.side =
+    THREE.DoubleSide;
 
-  const addSegment = (parent, position, sculpt) => {
-    const joint = new THREE.Group();
-    joint.position.set(...position);
+  const glowMaterial =
+    new THREE.MeshStandardMaterial({
+      color: '#b4f5fa',
+      emissive: '#4cbfdd',
+      emissiveIntensity: 0.85,
+      roughness: 0.32,
+      flatShading: true,
+    });
+
+  const addSegment = (
+    parent,
+    position,
+    sculpt,
+  ) => {
+    const joint =
+      new THREE.Group();
+
+    joint.position.set(
+      ...position,
+    );
 
     if (sculpt) {
-      joint.add(sculpt.mesh(material));
+      joint.add(
+        sculpt.mesh(material),
+      );
     }
 
     parent.add(joint);
@@ -396,61 +589,62 @@ function makeBuiltin(meta) {
     return joint;
   };
 
-  const torso = new Sculpt()
-    .cylinder(
-      p.cloth,
-      [0, 1.95, 0],
-      0.56,
-      0.39,
-      1.04,
-      8,
-      [1, 1, 0.67],
-    )
-    .cylinder(
-      p.dark,
-      [0, 1.34, 0],
-      0.43,
-      0.47,
-      0.34,
-      8,
-      [1, 1, 0.69],
-    )
-    .cylinder(
-      p.leather,
-      [0, 1.59, 0],
-      0.438,
-      0.425,
-      0.14,
-      8,
-      [1, 1, 0.74],
-    )
-    .box(
-      p.metal,
-      [0, 1.59, 0.328],
-      [0.21, 0.19, 0.055],
-    )
-    .box(
-      p.dark,
-      [0, 1.59, 0.36],
-      [0.105, 0.095, 0.028],
-    )
-    .cylinder(
-      p.skin,
-      [0, 2.65, 0],
-      0.15,
-      0.18,
-      0.31,
-      8,
-    )
-    .cylinder(
-      p.light,
-      [0, 2.48, 0],
-      0.31,
-      0.41,
-      0.20,
-      8,
-      [1, 1, 0.8],
-    );
+  const torso =
+    new Sculpt()
+      .cylinder(
+        p.cloth,
+        [0, 1.95, 0],
+        0.56,
+        0.39,
+        1.04,
+        8,
+        [1, 1, 0.67],
+      )
+      .cylinder(
+        p.dark,
+        [0, 1.34, 0],
+        0.43,
+        0.47,
+        0.34,
+        8,
+        [1, 1, 0.69],
+      )
+      .cylinder(
+        p.leather,
+        [0, 1.59, 0],
+        0.438,
+        0.425,
+        0.14,
+        8,
+        [1, 1, 0.74],
+      )
+      .box(
+        p.metal,
+        [0, 1.59, 0.328],
+        [0.21, 0.19, 0.055],
+      )
+      .box(
+        p.dark,
+        [0, 1.59, 0.36],
+        [0.105, 0.095, 0.028],
+      )
+      .cylinder(
+        p.skin,
+        [0, 2.65, 0],
+        0.15,
+        0.18,
+        0.31,
+        8,
+      )
+      .cylinder(
+        p.light,
+        [0, 2.48, 0],
+        0.31,
+        0.41,
+        0.20,
+        8,
+        [1, 1, 0.8],
+      );
 
   if (meta.id === 'warden') {
     torso
@@ -528,7 +722,6 @@ function makeBuiltin(meta) {
         [0.10, 0.08, 0.025],
       );
 
-    // A quiver and six feathered arrows stay merged with the chest.
     torso.cylinder(
       p.leather,
       [0.3, 2.05, -0.44],
@@ -541,20 +734,35 @@ function makeBuiltin(meta) {
     );
 
     for (let i = 0; i < 6; i++) {
-      const x = 0.30 + (i % 3) * 0.065;
-      const z = -0.46 + Math.floor(i / 3) * 0.07;
+      const x =
+        0.30 +
+        (i % 3) * 0.065;
+
+      const z =
+        -0.46 +
+        Math.floor(i / 3) * 0.07;
 
       torso.beam(
         p.edge,
         [x, 2.35, z],
-        [x + 0.15, 2.98 + (i % 2) * 0.07, z],
+        [
+          x + 0.15,
+          2.98 +
+            (i % 2) * 0.07,
+          z,
+        ],
         0.014,
         4,
       );
 
       torso.gem(
         p.light,
-        [x + 0.145, 2.87 + (i % 2) * 0.07, z],
+        [
+          x + 0.145,
+          2.87 +
+            (i % 2) * 0.07,
+          z,
+        ],
         [0.063, 0.14, 0.022],
         [0, 0, -0.24],
       );
@@ -614,67 +822,79 @@ function makeBuiltin(meta) {
       );
   }
 
-  body.add(torso.mesh(material));
+  body.add(
+    torso.mesh(material),
+  );
 
-  const face = new Sculpt()
-    .ball(
-      p.skin,
-      [0, 0.02, 0.008],
-      [0.325, 0.375, 0.30],
-    )
-    .ball(
-      p.skin,
-      [-0.325, 0.01, 0],
-      [0.065, 0.11, 0.065],
-    )
-    .ball(
-      p.skin,
-      [0.325, 0.01, 0],
-      [0.065, 0.11, 0.065],
-    )
-    .ball(
-      p.skin,
-      [0, -0.045, 0.301],
-      [0.055, 0.075, 0.060],
-    )
-    .box(
-      '#efdfce',
-      [-0.13, 0.045, 0.28],
-      [0.11, 0.040, 0.035],
-      [0, -0.2, 0],
-    )
-    .box(
-      '#efdfce',
-      [0.13, 0.045, 0.28],
-      [0.11, 0.040, 0.035],
-      [0, 0.2, 0],
-    )
-    .box(
-      p.eyes,
-      [-0.115, 0.045, 0.301],
-      [0.04, 0.042, 0.016],
-    )
-    .box(
-      p.eyes,
-      [0.115, 0.045, 0.301],
-      [0.04, 0.042, 0.016],
-    )
-    .box(
-      '#533e3c',
-      [0, -0.17, 0.262],
-      [0.092, 0.016, 0.018],
-    )
-    .ball(
-      p.hair,
-      [0, 0.19, -0.045],
-      [0.343, 0.245, 0.302],
-    );
+  const face =
+    new Sculpt()
+      .ball(
+        p.skin,
+        [0, 0.02, 0.008],
+        [0.325, 0.375, 0.30],
+      )
+      .ball(
+        p.skin,
+        [-0.325, 0.01, 0],
+        [0.065, 0.11, 0.065],
+      )
+      .ball(
+        p.skin,
+        [0.325, 0.01, 0],
+        [0.065, 0.11, 0.065],
+      )
+      .ball(
+        p.skin,
+        [0, -0.045, 0.301],
+        [0.055, 0.075, 0.060],
+      )
+      .box(
+        '#efdfce',
+        [-0.13, 0.045, 0.28],
+        [0.11, 0.040, 0.035],
+        [0, -0.2, 0],
+      )
+      .box(
+        '#efdfce',
+        [0.13, 0.045, 0.28],
+        [0.11, 0.040, 0.035],
+        [0, 0.2, 0],
+      )
+      .box(
+        p.eyes,
+        [-0.115, 0.045, 0.301],
+        [0.04, 0.042, 0.016],
+      )
+      .box(
+        p.eyes,
+        [0.115, 0.045, 0.301],
+        [0.04, 0.042, 0.016],
+      )
+      .box(
+        '#533e3c',
+        [0, -0.17, 0.262],
+        [0.092, 0.016, 0.018],
+      )
+      .ball(
+        p.hair,
+        [0, 0.19, -0.045],
+        [0.343, 0.245, 0.302],
+      );
 
   for (let i = 0; i < 5; i++) {
     face.gem(
       p.hair,
-      [(i - 2) * 0.115, 0.21 - i * 0.014, 0.235],
-      [0.097, 0.16 + (i % 2) * 0.05, 0.10],
+      [
+        (i - 2) * 0.115,
+        0.21 - i * 0.014,
+        0.235,
+      ],
+      [
+        0.097,
+        0.16 +
+          (i % 2) * 0.05,
+        0.10,
+      ],
       [0, 0, -0.25],
     );
   }
@@ -749,11 +969,12 @@ function makeBuiltin(meta) {
       );
   }
 
-  const head = addSegment(
-    body,
-    [0, 2.98, 0.025],
-    face,
-  );
+  const head =
+    addSegment(
+      body,
+      [0, 2.98, 0.025],
+      face,
+    );
 
   const hips = [];
   const knees = [];
@@ -761,55 +982,60 @@ function makeBuiltin(meta) {
   const elbows = [];
 
   for (const side of [-1, 1]) {
-    const leg = new Sculpt()
-      .cylinder(
-        p.dark,
-        [0, -0.255, 0],
-        0.195,
-        0.155,
-        0.59,
-        7,
-        [1, 1, 0.92],
-      )
-      .ball(
-        mage ? p.light : p.leather,
-        [0, -0.51, 0.065],
-        [0.165, 0.145, 0.175],
+    const leg =
+      new Sculpt()
+        .cylinder(
+          p.dark,
+          [0, -0.255, 0],
+          0.195,
+          0.155,
+          0.59,
+          7,
+          [1, 1, 0.92],
+        )
+        .ball(
+          mage
+            ? p.light
+            : p.leather,
+          [0, -0.51, 0.065],
+          [0.165, 0.145, 0.175],
+        );
+
+    const hip =
+      addSegment(
+        body,
+        [side * 0.24, 1.20, 0],
+        leg,
       );
 
-    const hip = addSegment(
-      body,
-      [side * 0.24, 1.20, 0],
-      leg,
-    );
-
-    const lower = new Sculpt()
-      .cylinder(
-        p.boots,
-        [0, -0.26, 0],
-        0.167,
-        0.15,
-        0.48,
-        7,
-      )
-      .cylinder(
-        p.leather,
-        [0, -0.06, 0],
-        0.19,
-        0.177,
-        0.14,
-        7,
-      )
-      .box(
-        p.boots,
-        [0, -0.455, 0.09],
-        [0.32, 0.20, 0.47],
-      )
-      .box(
-        '#24292a',
-        [0, -0.535, 0.09],
-        [0.33, 0.065, 0.48],
-      );
+    const lower =
+      new Sculpt()
+        .cylinder(
+          p.boots,
+          [0, -0.26, 0],
+          0.167,
+          0.15,
+          0.48,
+          7,
+        )
+        .cylinder(
+          p.leather,
+          [0, -0.06, 0],
+          0.19,
+          0.177,
+          0.14,
+          7,
+        )
+        .box(
+          p.boots,
+          [0, -0.455, 0.09],
+          [0.32, 0.20, 0.47],
+        )
+        .box(
+          '#24292a',
+          [0, -0.535, 0.09],
+          [0.33, 0.065, 0.48],
+        );
 
     if (meta.id === 'warden') {
       lower.box(
@@ -819,29 +1045,33 @@ function makeBuiltin(meta) {
       );
     }
 
-    const knee = addSegment(
-      hip,
-      [0, -0.63, 0],
-      lower,
-    );
+    const knee =
+      addSegment(
+        hip,
+        [0, -0.63, 0],
+        lower,
+      );
 
     hips.push(hip);
     knees.push(knee);
 
-    const upper = new Sculpt()
-      .cylinder(
-        p.cloth,
-        [0, -0.20, 0],
-        0.20,
-        0.15,
-        0.5,
-        7,
-      )
-      .ball(
-        meta.id === 'warden' ? p.metal : p.light,
-        [side * 0.025, 0.02, 0],
-        [0.275, 0.22, 0.29],
-      );
+    const upper =
+      new Sculpt()
+        .cylinder(
+          p.cloth,
+          [0, -0.20, 0],
+          0.20,
+          0.15,
+          0.5,
+          7,
+        )
+        .ball(
+          meta.id === 'warden'
+            ? p.metal
+            : p.light,
+          [side * 0.025, 0.02, 0],
+          [0.275, 0.22, 0.29],
+        );
 
     if (meta.id === 'warden') {
       upper.ball(
@@ -851,34 +1081,46 @@ function makeBuiltin(meta) {
       );
     }
 
-    const shoulder = addSegment(
-      body,
-      [side * 0.59, 2.44, 0],
-      upper,
-    );
-
-    const lowerArm = new Sculpt()
-      .cylinder(
-        mage ? p.cloth : p.skin,
-        [0, -0.18, 0],
-        0.13,
-        mage ? 0.205 : 0.105,
-        0.40,
-        7,
-      )
-      .cylinder(
-        mage ? p.edge : p.leather,
-        [0, -0.27, 0],
-        mage ? 0.198 : 0.137,
-        mage ? 0.208 : 0.13,
-        0.10,
-        7,
-      )
-      .ball(
-        p.skin,
-        [0, -0.47, 0.015],
-        [0.12, 0.16, 0.125],
+    const shoulder =
+      addSegment(
+        body,
+        [side * 0.59, 2.44, 0],
+        upper,
       );
+
+    const lowerArm =
+      new Sculpt()
+        .cylinder(
+          mage
+            ? p.cloth
+            : p.skin,
+          [0, -0.18, 0],
+          0.13,
+          mage
+            ? 0.205
+            : 0.105,
+          0.40,
+          7,
+        )
+        .cylinder(
+          mage
+            ? p.edge
+            : p.leather,
+          [0, -0.27, 0],
+          mage
+            ? 0.198
+            : 0.137,
+          mage
+            ? 0.208
+            : 0.13,
+          0.10,
+          7,
+        )
+        .ball(
+          p.skin,
+          [0, -0.47, 0.015],
+          [0.12, 0.16, 0.125],
+        );
 
     if (meta.id === 'warden') {
       lowerArm.box(
@@ -888,17 +1130,19 @@ function makeBuiltin(meta) {
       );
     }
 
-    const elbow = addSegment(
-      shoulder,
-      [0, -0.50, 0],
-      lowerArm,
-    );
+    const elbow =
+      addSegment(
+        shoulder,
+        [0, -0.50, 0],
+        lowerArm,
+      );
 
     shoulders.push(shoulder);
     elbows.push(elbow);
   }
 
-  const cape = new THREE.Group();
+  const cape =
+    new THREE.Group();
 
   cape.position.set(
     0,
@@ -913,14 +1157,18 @@ function makeBuiltin(meta) {
           mage ? 1.12 : 1.14,
           ranger ? 1.02 : 1.65,
         ),
-        mage ? p.dark : p.cloth,
+        mage
+          ? p.dark
+          : p.cloth,
       )
       .mesh(clothMaterial),
   );
 
   body.add(cape);
 
-  const weapons = new Sculpt();
+  const weapons =
+    new Sculpt();
+
   let crystal;
 
   if (meta.id === 'warden') {
@@ -954,44 +1202,50 @@ function makeBuiltin(meta) {
         [0.024, 0.75, 0.018],
       );
 
-    const sword = weapons.mesh(material);
-    sword.rotation.x = -0.25;
+    const sword =
+      weapons.mesh(material);
+
+    sword.rotation.x =
+      -0.25;
 
     elbows[1].add(sword);
 
-    const shield = new Sculpt()
-      .cylinder(
-        p.metal,
-        [0, -0.32, 0.22],
-        0.47,
-        0.47,
-        0.12,
-        7,
-        [1, 1, 1.2],
-        [Math.PI / 2, 0, 0],
-      )
-      .cylinder(
-        p.cloth,
-        [0, -0.32, 0.3],
-        0.39,
-        0.39,
-        0.05,
-        7,
-        [1, 1, 1.2],
-        [Math.PI / 2, 0, 0],
-      )
-      .gem(
-        p.edge,
-        [0, -0.32, 0.36],
-        [0.17, 0.25, 0.055],
-      )
-      .gem(
-        p.light,
-        [0, -0.32, 0.41],
-        [0.087, 0.145, 0.025],
-      );
+    const shield =
+      new Sculpt()
+        .cylinder(
+          p.metal,
+          [0, -0.32, 0.22],
+          0.47,
+          0.47,
+          0.12,
+          7,
+          [1, 1, 1.2],
+          [Math.PI / 2, 0, 0],
+        )
+        .cylinder(
+          p.cloth,
+          [0, -0.32, 0.3],
+          0.39,
+          0.39,
+          0.05,
+          7,
+          [1, 1, 1.2],
+          [Math.PI / 2, 0, 0],
+        )
+        .gem(
+          p.edge,
+          [0, -0.32, 0.36],
+          [0.17, 0.25, 0.055],
+        )
+        .gem(
+          p.light,
+          [0, -0.32, 0.41],
+          [0.087, 0.145, 0.025],
+        );
 
-    elbows[0].add(shield.mesh(material));
+    elbows[0].add(
+      shield.mesh(material),
+    );
   } else if (ranger) {
     const bowPoints = [
       [0.10, 0.52, 0.02],
@@ -1003,7 +1257,11 @@ function makeBuiltin(meta) {
       [0.10, -1.48, 0.02],
     ];
 
-    for (let i = 0; i < bowPoints.length - 1; i++) {
+    for (
+      let i = 0;
+      i < bowPoints.length - 1;
+      i++
+    ) {
       weapons.beam(
         i === 2 || i === 3
           ? p.leather
@@ -1037,7 +1295,9 @@ function makeBuiltin(meta) {
       0.045,
     );
 
-    elbows[0].add(weapons.mesh(material));
+    elbows[0].add(
+      weapons.mesh(material),
+    );
   } else {
     weapons
       .beam(
@@ -1069,23 +1329,40 @@ function makeBuiltin(meta) {
         .beam(
           p.metal,
           [0.10, 0.89, 0.035],
-          [0.10 + side * 0.22, 1.14, 0.035],
+          [
+            0.10 + side * 0.22,
+            1.14,
+            0.035,
+          ],
           0.039,
         )
         .beam(
           p.edge,
-          [0.10 + side * 0.22, 1.14, 0.035],
-          [0.10 + side * 0.15, 1.40, 0.035],
+          [
+            0.10 + side * 0.22,
+            1.14,
+            0.035,
+          ],
+          [
+            0.10 + side * 0.15,
+            1.40,
+            0.035,
+          ],
           0.032,
         );
     }
 
-    elbows[1].add(weapons.mesh(material));
-
-    crystal = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.23),
-      glowMaterial,
+    elbows[1].add(
+      weapons.mesh(material),
     );
+
+    crystal =
+      new THREE.Mesh(
+        new THREE.OctahedronGeometry(
+          0.23,
+        ),
+        glowMaterial,
+      );
 
     crystal.position.set(
       0.10,
@@ -1093,7 +1370,8 @@ function makeBuiltin(meta) {
       0.035,
     );
 
-    crystal.scale.y = 1.45;
+    crystal.scale.y =
+      1.45;
 
     elbows[1].add(crystal);
   }
@@ -1125,22 +1403,6 @@ function makeBuiltin(meta) {
       0.1,
     );
 
-    /**
-     * IMPORTANT:
-     *
-     * Explicit `state` always wins.
-     *
-     * Without an explicit state:
-     *   - stationary -> Idle
-     *   - moving normally -> Walk
-     *   - sprinting -> Sprint
-     *
-     * This prevents imported GLB characters from always
-     * jumping directly into their Run animation.
-     *
-     * `Run` is still fully supported when game.js explicitly
-     * passes state: 'Run'.
-     */
     activeState =
       state ||
       (
@@ -1149,49 +1411,61 @@ function makeBuiltin(meta) {
           : jumping
             ? 'Jump'
             : moving
-              ? (sprinting ? 'Sprint' : 'Walk')
+              ? (
+                  sprinting
+                    ? 'Sprint'
+                    : 'Walk'
+                )
               : 'Idle'
       );
 
-    attacking ||= activeState === 'Attack';
+    attacking ||=
+      activeState === 'Attack';
 
     const airborne =
       activeState === 'Jump' ||
       activeState === 'Fall';
 
-    locomotion = THREE.MathUtils.damp(
-      locomotion,
-      moving &&
-        !airborne &&
-        activeState !== 'Dead'
-        ? 1
-        : 0,
-      10,
-      dt,
-    );
+    locomotion =
+      THREE.MathUtils.damp(
+        locomotion,
+        moving &&
+          !airborne &&
+          activeState !== 'Dead'
+          ? 1
+          : 0,
+        10,
+        dt,
+      );
 
-    landing = THREE.MathUtils.damp(
-      landing,
-      activeState === 'Land' ? 1 : 0,
-      18,
-      dt,
-    );
+    landing =
+      THREE.MathUtils.damp(
+        landing,
+        activeState === 'Land'
+          ? 1
+          : 0,
+        18,
+        dt,
+      );
 
-    death = THREE.MathUtils.damp(
-      death,
-      activeState === 'Dead' ? 1 : 0,
-      6,
-      dt,
-    );
+    death =
+      THREE.MathUtils.damp(
+        death,
+        activeState === 'Dead'
+          ? 1
+          : 0,
+        6,
+        dt,
+      );
 
-    attackAmount = THREE.MathUtils.damp(
-      attackAmount,
-      attacking ? 1 : 0,
-      attacking ? 24 : 10,
-      dt,
-    );
+    attackAmount =
+      THREE.MathUtils.damp(
+        attackAmount,
+        attacking ? 1 : 0,
+        attacking ? 24 : 10,
+        dt,
+      );
 
-    // Phase advances by distance travelled, including acceleration and braking.
     phase +=
       dt *
       Math.max(0, speed) /
@@ -1217,7 +1491,9 @@ function makeBuiltin(meta) {
       );
 
     body.position.y =
-      Math.abs(Math.sin(phase)) *
+      Math.abs(
+        Math.sin(phase),
+      ) *
         locomotion *
         0.065 +
       Math.sin(time * 1.8) *
@@ -1235,7 +1511,9 @@ function makeBuiltin(meta) {
               : 0.025
         ) +
       (airborne ? -0.05 : 0) +
-      (activeState === 'Hit' ? -0.15 : 0);
+      (activeState === 'Hit'
+        ? -0.15
+        : 0);
 
     body.rotation.z =
       death * 1.35;
@@ -1255,16 +1533,25 @@ function makeBuiltin(meta) {
       Math.sin(time * 1.15) *
       0.02;
 
-    hips[0].rotation.x = stride;
-    hips[1].rotation.x = -stride;
+    hips[0].rotation.x =
+      stride;
+
+    hips[1].rotation.x =
+      -stride;
 
     knees[0].rotation.x =
-      -Math.max(0, -Math.sin(phase)) *
+      -Math.max(
+        0,
+        -Math.sin(phase),
+      ) *
       locomotion *
       0.65;
 
     knees[1].rotation.x =
-      -Math.max(0, Math.sin(phase)) *
+      -Math.max(
+        0,
+        Math.sin(phase),
+      ) *
       locomotion *
       0.65;
 
@@ -1294,7 +1581,8 @@ function makeBuiltin(meta) {
 
     shoulders[0].rotation.z =
       0.10 +
-      Math.sin(time * 1.8) * 0.014;
+      Math.sin(time * 1.8) *
+        0.014;
 
     shoulders[1].rotation.z =
       -0.10 -
@@ -1323,10 +1611,12 @@ function makeBuiltin(meta) {
     cape.rotation.x =
       -0.06 -
       locomotion * 0.24 +
-      Math.sin(time * 3.3) * 0.055;
+      Math.sin(time * 3.3) *
+        0.055;
 
     cape.rotation.z =
-      Math.sin(time * 2.7) * 0.025 +
+      Math.sin(time * 2.7) *
+        0.025 +
       stride * 0.07;
 
     if (crystal) {
@@ -1335,7 +1625,8 @@ function makeBuiltin(meta) {
 
       glowMaterial.emissiveIntensity =
         0.85 +
-        Math.sin(time * 2.5) * 0.15 +
+        Math.sin(time * 2.5) *
+          0.15 +
         attackAmount * 0.6;
     }
   };
@@ -1365,7 +1656,6 @@ function makeBuiltin(meta) {
 
       disposed = true;
 
-      // Some variants do not use every prepared material.
       disposeObject(
         group,
         [
@@ -1378,64 +1668,96 @@ function makeBuiltin(meta) {
   };
 }
 
+/**
+ * Dispose a complete THREE hierarchy.
+ */
 function disposeObject(
   object,
   extraMaterials = [],
 ) {
-  const geometries = new Set();
-  const materials = new Set(extraMaterials);
-  const textures = new Set();
-  const images = new Set();
-  const skeletons = new Set();
+  const geometries =
+    new Set();
+
+  const materials =
+    new Set(extraMaterials);
+
+  const textures =
+    new Set();
+
+  const images =
+    new Set();
+
+  const skeletons =
+    new Set();
 
   object.traverse(child => {
     if (child.geometry) {
-      geometries.add(child.geometry);
+      geometries.add(
+        child.geometry,
+      );
     }
 
-    const list = Array.isArray(child.material)
-      ? child.material
-      : child.material
-        ? [child.material]
-        : [];
+    const list =
+      Array.isArray(child.material)
+        ? child.material
+        : child.material
+          ? [child.material]
+          : [];
 
     for (const material of list) {
       materials.add(material);
 
-      for (const value of Object.values(material)) {
+      for (
+        const value of Object.values(
+          material,
+        )
+      ) {
         if (value?.isTexture) {
           textures.add(value);
         }
       }
     }
 
-    if (child.isSkinnedMesh && child.skeleton) {
-      skeletons.add(child.skeleton);
+    if (
+      child.isSkinnedMesh &&
+      child.skeleton
+    ) {
+      skeletons.add(
+        child.skeleton,
+      );
     }
   });
 
   skeletons.forEach(
-    skeleton => skeleton.dispose(),
+    skeleton =>
+      skeleton.dispose(),
   );
 
   geometries.forEach(
-    geometry => geometry.dispose(),
+    geometry =>
+      geometry.dispose(),
   );
 
   materials.forEach(
-    material => material.dispose(),
+    material =>
+      material.dispose(),
   );
 
   textures.forEach(texture => {
     if (texture.image) {
-      images.add(texture.image);
+      images.add(
+        texture.image,
+      );
     }
 
     texture.dispose();
   });
 
   images.forEach(image => {
-    if (typeof image.close === 'function') {
+    if (
+      typeof image.close ===
+      'function'
+    ) {
       image.close();
     }
   });
@@ -1443,195 +1765,243 @@ function disposeObject(
   object.removeFromParent();
 }
 
+/**
+ * Load an imported GLB.
+ */
 function loadImportedScene(
   url,
   timeout = 30000,
 ) {
-  // Fetch can be aborted; parsing cannot.
-  // A late parse must still release its images.
-  return new Promise((resolve, reject) => {
-    const controller =
-      new AbortController();
+  return new Promise(
+    (resolve, reject) => {
+      const controller =
+        new AbortController();
 
-    let settled = false;
+      let settled = false;
 
-    const timer = setTimeout(() => {
-      settled = true;
-      controller.abort();
+      const timer =
+        setTimeout(() => {
+          settled = true;
 
-      reject(
-        new Error(
-          'Character loading took too long. Please select it again to retry.',
-        ),
-      );
-    }, timeout);
+          controller.abort();
 
-    const absoluteURL =
-      new URL(
-        url,
-        window.location.href,
-      );
-
-    fetch(
-      absoluteURL,
-      {
-        signal: controller.signal,
-        credentials: 'same-origin',
-      },
-    )
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(
-            `Character download failed (${response.status}).`,
+          reject(
+            new Error(
+              'Character loading took too long. Please select it again to retry.',
+            ),
           );
-        }
+        }, timeout);
 
-        return response.arrayBuffer();
-      })
-      .then(buffer => {
-        if (settled) {
-          return null;
-        }
-
-        return new GLTFLoader().parseAsync(
-          buffer,
-          new URL(
-            '.',
-            absoluteURL,
-          ).href,
+      const absoluteURL =
+        new URL(
+          url,
+          window.location.href,
         );
-      })
-      .then(gltf => {
-        if (!gltf) {
-          return;
-        }
 
-        if (settled) {
-          const discarded =
-            new THREE.Group();
-
-          for (
-            const scene of new Set(
-              gltf.scenes ||
-              [gltf.scene],
-            )
-          ) {
-            if (scene) {
-              discarded.add(scene);
-            }
+      fetch(
+        absoluteURL,
+        {
+          signal:
+            controller.signal,
+          credentials:
+            'same-origin',
+        },
+      )
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(
+              `Character download failed (${response.status}).`,
+            );
           }
 
-          disposeObject(discarded);
-          return;
-        }
+          return response.arrayBuffer();
+        })
+        .then(buffer => {
+          if (settled) {
+            return null;
+          }
 
-        settled = true;
-        clearTimeout(timer);
-        resolve(gltf);
-      })
-      .catch(error => {
-        if (settled) {
-          return;
-        }
+          return new GLTFLoader()
+            .parseAsync(
+              buffer,
+              new URL(
+                '.',
+                absoluteURL,
+              ).href,
+            );
+        })
+        .then(gltf => {
+          if (!gltf) {
+            return;
+          }
 
-        settled = true;
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
+          if (settled) {
+            const discarded =
+              new THREE.Group();
+
+            for (
+              const scene of new Set(
+                gltf.scenes ||
+                  [gltf.scene],
+              )
+            ) {
+              if (scene) {
+                discarded.add(
+                  scene,
+                );
+              }
+            }
+
+            disposeObject(
+              discarded,
+            );
+
+            return;
+          }
+
+          settled = true;
+
+          clearTimeout(timer);
+
+          resolve(gltf);
+        })
+        .catch(error => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+
+          clearTimeout(timer);
+
+          reject(error);
+        });
+    },
+  );
 }
 
 /**
- * Remove horizontal root translation only.
- * Finger, limb and vertical gait tracks stay intact.
+ * Remove horizontal root translation.
+ *
+ * This keeps the game responsible for movement while
+ * preserving the actual leg/limb animation.
  */
 function inPlaceClip(
   clip,
   model,
   rootPositions,
 ) {
-  const sanitized = clip.clone();
+  const sanitized =
+    clip.clone();
 
   sanitized.tracks =
-    sanitized.tracks.map(track => {
-      if (
-        !track.name.endsWith('.position') ||
-        track.getValueSize() !== 3
-      ) {
+    sanitized.tracks.map(
+      track => {
+        if (
+          !track.name.endsWith(
+            '.position',
+          ) ||
+          track.getValueSize() !== 3
+        ) {
+          return track;
+        }
+
+        const binding =
+          THREE.PropertyBinding
+            .parseTrackName(
+              track.name,
+            );
+
+        const nodeName =
+          binding.objectName ===
+          'bones'
+            ? binding.objectIndex
+            : binding.nodeName;
+
+        const node =
+          THREE.PropertyBinding
+            .findNode(
+              model,
+              nodeName,
+            );
+
+        const rootBone =
+          node?.isBone &&
+          !node.parent?.isBone;
+
+        if (
+          !rootBone &&
+          node !== model &&
+          !/(hips|pelvis|root)$/i.test(
+            nodeName || '',
+          )
+        ) {
+          return track;
+        }
+
+        if (
+          !rootPositions.has(
+            track.name,
+          )
+        ) {
+          rootPositions.set(
+            track.name,
+            [
+              track.values[0],
+              track.values[2],
+            ],
+          );
+        }
+
+        const origin =
+          rootPositions.get(
+            track.name,
+          );
+
+        for (
+          let i = 0;
+          i < track.values.length;
+          i += 3
+        ) {
+          track.values[i] =
+            origin[0];
+
+          track.values[i + 2] =
+            origin[1];
+        }
+
         return track;
-      }
-
-      const binding =
-        THREE.PropertyBinding.parseTrackName(
-          track.name,
-        );
-
-      const nodeName =
-        binding.objectName === 'bones'
-          ? binding.objectIndex
-          : binding.nodeName;
-
-      const node =
-        THREE.PropertyBinding.findNode(
-          model,
-          nodeName,
-        );
-
-      const rootBone =
-        node?.isBone &&
-        !node.parent?.isBone;
-
-      if (
-        !rootBone &&
-        node !== model &&
-        !/(hips|pelvis|root)$/i.test(
-          nodeName || '',
-        )
-      ) {
-        return track;
-      }
-
-      // All clips use the idle clip's horizontal root origin.
-      // Locking each clip to its own first key produces a visible
-      // pop every time the gait changes.
-      if (
-        !rootPositions.has(track.name)
-      ) {
-        rootPositions.set(
-          track.name,
-          [
-            track.values[0],
-            track.values[2],
-          ],
-        );
-      }
-
-      const origin =
-        rootPositions.get(track.name);
-
-      for (
-        let i = 0;
-        i < track.values.length;
-        i += 3
-      ) {
-        track.values[i] =
-          origin[0];
-
-        track.values[i + 2] =
-          origin[1];
-      }
-
-      return track;
-    });
+      },
+    );
 
   return sanitized;
 }
 
 /**
- * `preloaded` reuses an already downloaded glTF, so a squad of
- * clones costs one request. `shared` marks a rig whose geometry,
- * materials and textures belong to that source and must outlive it:
- * such a rig releases only its own skeleton and mixer.
+ * Find an animation using several aliases.
+ */
+function findAnimation(
+  clips,
+  patterns,
+) {
+  for (const pattern of patterns) {
+    const result =
+      clips.find(clip =>
+        pattern.test(
+          clip.name,
+        ),
+      );
+
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Imported GLB character.
  */
 async function makeImported(
   meta,
@@ -1646,7 +2016,8 @@ async function makeImported(
       meta.model,
     );
 
-  const model = gltf.scene;
+  const model =
+    gltf.scene;
 
   if (!model) {
     throw new Error(
@@ -1654,16 +2025,21 @@ async function makeImported(
     );
   }
 
-  const group = new THREE.Group();
-  group.name = meta.name;
+  const group =
+    new THREE.Group();
+
+  group.name =
+    meta.name;
+
   group.add(model);
 
-  model.updateMatrixWorld(true);
+  model.updateMatrixWorld(
+    true,
+  );
 
   const bounds =
-    new THREE.Box3().setFromObject(
-      model,
-    );
+    new THREE.Box3()
+      .setFromObject(model);
 
   const size =
     bounds.getSize(
@@ -1688,26 +2064,34 @@ async function makeImported(
     );
   }
 
-  // Normalize character height.
+  /**
+   * Normalize model height.
+   */
   model.scale.multiplyScalar(
     targetHeight / size.y,
   );
 
-  model.updateMatrixWorld(true);
+  model.updateMatrixWorld(
+    true,
+  );
 
-  bounds.setFromObject(model);
+  bounds.setFromObject(
+    model,
+  );
 
   const center =
     bounds.getCenter(
       new THREE.Vector3(),
     );
 
-  // Offset the wrapper so root animation does not overwrite normalization.
-  // Facing belongs to an unanimated wrapper, never to the imported rig.
-  //
-  // Three's sample Soldier faces -Z;
-  // Astra's movement convention is +Z.
-  const facing = new THREE.Group();
+  /**
+   * Orientation wrapper.
+   *
+   * Animation never modifies this wrapper.
+   */
+  const facing =
+    new THREE.Group();
+
   facing.name =
     'Asset orientation';
 
@@ -1716,10 +2100,14 @@ async function makeImported(
 
   group.add(facing);
 
+  /**
+   * Fitted wrapper.
+   */
   const fitted =
     new THREE.Group();
 
   facing.add(fitted);
+
   fitted.add(model);
 
   fitted.position.set(
@@ -1728,6 +2116,9 @@ async function makeImported(
     -center.z,
   );
 
+  /**
+   * Character mesh setup.
+   */
   model.traverse(child => {
     if (!child.isMesh) {
       return;
@@ -1736,19 +2127,23 @@ async function makeImported(
     child.castShadow = true;
     child.receiveShadow = true;
 
-    // Imported animation bounds can exclude extended limbs
-    // or the upper body.
+    // Imported animations can extend beyond original bounds.
     child.frustumCulled = false;
 
     const materials =
-      Array.isArray(child.material)
+      Array.isArray(
+        child.material,
+      )
         ? child.material
         : [child.material];
 
     materials
       .filter(Boolean)
       .forEach(material => {
-        if ('roughness' in material) {
+        if (
+          'roughness' in
+          material
+        ) {
           material.roughness =
             Math.max(
               0.48,
@@ -1761,12 +2156,62 @@ async function makeImported(
   const sourceClips =
     gltf.animations || [];
 
+  /**
+   * IMPORTANT:
+   *
+   * Print every animation and duration.
+   * This lets us immediately see what each GLB contains.
+   */
+  console.group(
+    `[${meta.name}] GLB Animation Diagnostics`,
+  );
+
+  console.log(
+    'Model:',
+    meta.model,
+  );
+
+  console.log(
+    'Animation count:',
+    sourceClips.length,
+  );
+
+  for (const clip of sourceClips) {
+    console.log(
+      `Animation: ${clip.name}`,
+      {
+        duration: clip.duration,
+        tracks:
+          clip.tracks.length,
+        tracksInfo:
+          clip.tracks.map(
+            track => ({
+              name:
+                track.name,
+              valueSize:
+                track.getValueSize(),
+            }),
+          ),
+      },
+    );
+  }
+
+  console.groupEnd();
+
   const rootPositions =
     new Map();
 
+  /**
+   * Establish idle/root origin first.
+   */
   const sourceIdle =
-    sourceClips.find(
-      clip => /idle/i.test(clip.name),
+    findAnimation(
+      sourceClips,
+      [
+        /^idle$/i,
+        /idle/i,
+        /standing/i,
+      ],
     );
 
   if (sourceIdle) {
@@ -1777,6 +2222,9 @@ async function makeImported(
     );
   }
 
+  /**
+   * Sanitize all clips.
+   */
   const clips =
     sourceClips.map(clip =>
       inPlaceClip(
@@ -1788,19 +2236,29 @@ async function makeImported(
 
   const mixer =
     clips.length
-      ? new THREE.AnimationMixer(model)
+      ? new THREE.AnimationMixer(
+          model,
+        )
       : null;
 
-  const find = pattern =>
-    clips.find(
-      clip =>
-        pattern.test(
-          clip.name,
-        ),
+  /**
+   * Animation lookup helper.
+   */
+  const find = patterns =>
+    findAnimation(
+      clips,
+      patterns,
     );
 
+  /**
+   * IDLE
+   */
   const idle =
-    find(/idle|standing/i) ||
+    find([
+      /^idle$/i,
+      /idle/i,
+      /standing/i,
+    ]) ||
     clips.find(
       clip =>
         !/t.?pose/i.test(
@@ -1810,68 +2268,175 @@ async function makeImported(
     clips[0];
 
   /**
-   * More permissive animation detection.
+   * WALK
    *
-   * Some GLBs call their animation:
-   *   Walk
-   *   Walking
-   *   walk_forward
-   *   WalkForward
-   *   Jog
-   *
-   * So don't unnecessarily reject valid walk clips.
+   * We deliberately prioritize explicit walking
+   * animations before generic movement clips.
    */
   const walk =
-    find(/^walk/i) ||
-    find(/walk/i) ||
-    find(/jog.*forward|jog$/i);
-
-  const run =
-    find(/^run/i) ||
-    find(/run/i) ||
-    find(
-      /jog.*forward|jog$/i,
-    ) ||
-    find(/sprint/i) ||
-    walk;
-
-  const sprint =
-    find(/sprint/i) ||
-    run;
-
-  const jump =
-    find(/^jump$|jump.*loop/i) ||
-    find(/jump.*start/i);
-
-  const fall =
-    find(/fall|airborne/i) ||
-    jump;
-
-  const land =
-    find(/land/i);
-
-  const attack =
-    find(
-      /attack|slash|punch|swing/i,
-    );
-
-  const hit =
-    find(
-      /hit|damage|hurt/i,
-    );
-
-  const dead =
-    find(
-      /death|dead|die/i,
-    );
+    find([
+      /^walk$/i,
+      /^walking$/i,
+      /^walk[_ -]?forward$/i,
+      /walk.*forward/i,
+      /walking/i,
+      /walk/i,
+    ]);
 
   /**
-   * State-to-clip mapping.
-   *
-   * Walk is now a real first-class locomotion state.
+   * RUN
+   */
+  const run =
+    find([
+      /^run$/i,
+      /^running$/i,
+      /^run[_ -]?forward$/i,
+      /run.*forward/i,
+      /running/i,
+      /run/i,
+      /^jog$/i,
+      /jog.*forward/i,
+      /jog/i,
+    ]);
+
+  /**
+   * SPRINT
+   */
+  const sprint =
+    find([
+      /^sprint$/i,
+      /sprint/i,
+      /fast.*run/i,
+    ]) ||
+    run ||
+    walk;
+
+  /**
+   * Jump
+   */
+  const jump =
+    find([
+      /^jump$/i,
+      /jump.*loop/i,
+      /jump.*start/i,
+      /jump/i,
+    ]);
+
+  /**
+   * Fall
+   */
+  const fall =
+    find([
+      /fall/i,
+      /airborne/i,
+    ]) ||
+    jump;
+
+  /**
+   * Land
+   */
+  const land =
+    find([
+      /^land$/i,
+      /landing/i,
+      /land/i,
+    ]);
+
+  /**
+   * Attack
+   */
+  const attack =
+    find([
+      /attack/i,
+      /slash/i,
+      /punch/i,
+      /swing/i,
+      /strike/i,
+    ]);
+
+  /**
+   * Hit
+   */
+  const hit =
+    find([
+      /hit/i,
+      /damage/i,
+      /hurt/i,
+      /reaction/i,
+    ]);
+
+  /**
+   * Death
+   */
+  const dead =
+    find([
+      /death/i,
+      /dead/i,
+      /die/i,
+    ]);
+
+  console.group(
+    `[${meta.name}] Selected Animations`,
+  );
+
+  console.log(
+    'Idle:',
+    idle?.name || 'NONE',
+  );
+
+  console.log(
+    'Walk:',
+    walk?.name || 'NONE',
+  );
+
+  console.log(
+    'Run:',
+    run?.name || 'NONE',
+  );
+
+  console.log(
+    'Sprint:',
+    sprint?.name || 'NONE',
+  );
+
+  console.log(
+    'Jump:',
+    jump?.name || 'NONE',
+  );
+
+  console.log(
+    'Fall:',
+    fall?.name || 'NONE',
+  );
+
+  console.log(
+    'Land:',
+    land?.name || 'NONE',
+  );
+
+  console.log(
+    'Attack:',
+    attack?.name || 'NONE',
+  );
+
+  console.log(
+    'Hit:',
+    hit?.name || 'NONE',
+  );
+
+  console.log(
+    'Death:',
+    dead?.name || 'NONE',
+  );
+
+  console.groupEnd();
+
+  /**
+   * State → clip mapping.
    */
   const stateClips = {
-    Idle: idle,
+    Idle:
+      idle,
 
     Walk:
       walk ||
@@ -1915,7 +2480,11 @@ async function makeImported(
       idle,
   };
 
-  const actions = new Map();
+  /**
+   * Build actions.
+   */
+  const actions =
+    new Map();
 
   for (
     const clip of new Set(
@@ -1926,10 +2495,15 @@ async function makeImported(
   ) {
     actions.set(
       clip,
-      mixer.clipAction(clip),
+      mixer.clipAction(
+        clip,
+      ),
     );
   }
 
+  /**
+   * One-shot animations.
+   */
   for (
     const clip of [
       land,
@@ -1947,7 +2521,8 @@ async function makeImported(
 
     actions
       .get(clip)
-      .clampWhenFinished = true;
+      .clampWhenFinished =
+      true;
   }
 
   let current =
@@ -1956,25 +2531,37 @@ async function makeImported(
       : null;
 
   if (current) {
-    current.play();
+    current
+      .setEffectiveWeight(1)
+      .play();
   }
 
   let disposed = false;
   let activeState = 'Idle';
+
+  /**
+   * Animation playback multiplier.
+   */
   let playbackRate = 1;
+
   let lean = 0;
   let landing = 0;
   let death = 0;
 
-  const baseHeight =
-    fitted.position.y;
-
+  /**
+   * These are now explicitly animation multipliers.
+   *
+   * They are NOT movement speeds.
+   */
   const speeds =
     meta.animationSpeeds || {
-      walk: 4.2,
-      run: 8,
-      sprint: 11.5,
+      walk: 0.85,
+      run: 1.0,
+      sprint: 1.15,
     };
+
+  const baseHeight =
+    fitted.position.y;
 
   return {
     group,
@@ -1985,19 +2572,71 @@ async function makeImported(
     get diagnostics() {
       return {
         imported: true,
+
         animations:
           clips.map(
             clip => clip.name,
           ),
+
+        selectedAnimations: {
+          idle:
+            idle?.name ||
+            null,
+
+          walk:
+            walk?.name ||
+            null,
+
+          run:
+            run?.name ||
+            null,
+
+          sprint:
+            sprint?.name ||
+            null,
+
+          jump:
+            jump?.name ||
+            null,
+
+          fall:
+            fall?.name ||
+            null,
+
+          land:
+            land?.name ||
+            null,
+
+          attack:
+            attack?.name ||
+            null,
+
+          hit:
+            hit?.name ||
+            null,
+
+          dead:
+            dead?.name ||
+            null,
+        },
+
         activeAction:
-          current?.getClip()
-            .name || null,
-        state: activeState,
+          current
+            ?.getClip()
+            ?.name ||
+          null,
+
+        state:
+          activeState,
+
         playbackRate,
+
         orientationYaw:
           facing.rotation.y,
+
         rootMotion:
           'in-place',
+
         disposed,
       };
     },
@@ -2024,17 +2663,19 @@ async function makeImported(
       );
 
       /**
-       * Animation state priority:
+       * State priority:
        *
-       * 1. Explicit `state`
-       * 2. Attack
-       * 3. Jump
-       * 4. Sprint
-       * 5. Walk
-       * 6. Idle
-       *
-       * Previously normal movement became Run here.
-       * That is why the Walk animation disappeared.
+       * Explicit state
+       * ↓
+       * Attack
+       * ↓
+       * Jump
+       * ↓
+       * Sprint
+       * ↓
+       * Walk
+       * ↓
+       * Idle
        */
       const nextState =
         state ||
@@ -2055,14 +2696,19 @@ async function makeImported(
       attacking ||=
         nextState === 'Attack';
 
+      /**
+       * Get animation for state.
+       */
       const next =
         actions.get(
-          stateClips[nextState] ||
+          stateClips[
+            nextState
+          ] ||
           idle,
         );
 
       /**
-       * Smoothly transition between animation states.
+       * Smooth transition.
        */
       if (
         next &&
@@ -2074,13 +2720,15 @@ async function makeImported(
           .fadeIn(0.18)
           .play();
 
-        current?.fadeOut(0.18);
+        current?.fadeOut(
+          0.18,
+        );
 
         current = next;
       }
 
       /**
-       * All locomotion states drive the gait.
+       * Locomotion states.
        */
       const locomotion =
         nextState === 'Walk' ||
@@ -2088,43 +2736,47 @@ async function makeImported(
         nextState === 'Sprint';
 
       /**
-       * Determine animation playback speed
-       * from the actual animation selected.
+       * IMPORTANT FIX
+       *
+       * DO NOT DO:
+       *
+       * speed / referenceSpeed
+       *
+       * That caused Arthur's walk to become 2.5x
+       * and makes different GLBs behave incorrectly.
+       *
+       * Movement speed and animation speed are
+       * now independent.
        */
-      const clip =
-        current?.getClip();
+      let targetRate = 1;
 
-      const referenceSpeed =
-        /walk/i.test(
-          clip?.name || '',
-        )
-          ? speeds.walk
-          : /sprint/i.test(
-              clip?.name || '',
-            )
-            ? speeds.sprint
-            : speeds.run;
+      if (locomotion) {
+        if (
+          nextState === 'Walk'
+        ) {
+          targetRate =
+            speeds.walk;
+        } else if (
+          nextState === 'Run'
+        ) {
+          targetRate =
+            speeds.run;
+        } else if (
+          nextState === 'Sprint'
+        ) {
+          targetRate =
+            speeds.sprint;
+        }
+      }
 
       /**
-       * Adjust animation playback rate
-       * based on actual movement speed.
+       * Smooth playback-rate changes.
        */
-      const targetRate =
-        locomotion &&
-        Number.isFinite(speed)
-          ? THREE.MathUtils.clamp(
-              speed /
-                referenceSpeed,
-              0.12,
-              2.5,
-            )
-          : 1;
-
       playbackRate =
         THREE.MathUtils.damp(
           playbackRate,
           targetRate,
-          16,
+          12,
           dt,
         );
 
@@ -2142,7 +2794,8 @@ async function makeImported(
         current?.setEffectiveTimeScale(
           Math.max(
             1,
-            land.duration / 0.28,
+            land.duration /
+              0.28,
           ),
         );
       }
@@ -2150,21 +2803,22 @@ async function makeImported(
       activeState =
         nextState;
 
+      /**
+       * Advance animation.
+       */
       mixer?.update(dt);
 
       /**
-       * Small procedural adjustments
-       * for states not explicitly animated
-       * by the imported GLB.
+       * Procedural fallback adjustments.
        */
       lean =
         THREE.MathUtils.damp(
           lean,
           nextState === 'Hit' &&
-          !hit
+            !hit
             ? -0.12
             : attacking &&
-              !attack
+                !attack
               ? 0.07
               : 0,
           18,
@@ -2175,7 +2829,7 @@ async function makeImported(
         THREE.MathUtils.damp(
           landing,
           nextState === 'Land' &&
-          !land
+            !land
             ? 0.09
             : 0,
           20,
@@ -2186,7 +2840,7 @@ async function makeImported(
         THREE.MathUtils.damp(
           death,
           nextState === 'Dead' &&
-          !dead
+            !dead
             ? 1.25
             : 0,
           6,
@@ -2220,37 +2874,72 @@ async function makeImported(
       disposed = true;
 
       mixer?.stopAllAction();
-      mixer?.uncacheRoot(model);
+
+      mixer?.uncacheRoot(
+        model,
+      );
 
       if (shared) {
         group.removeFromParent();
       } else {
-        disposeObject(group);
+        disposeObject(
+          group,
+        );
       }
     },
   };
 }
 
+/**
+ * Create a hero.
+ */
 export async function createHero(
   id = 'warden',
 ) {
   const meta =
     HEROES.find(
-      hero => hero.id === id,
+      hero =>
+        hero.id === id,
     ) ||
     HEROES[0];
 
-  return meta.imported
-    ? makeImported(meta)
-    : makeBuiltin(meta);
+  const hero =
+    meta.imported
+      ? await makeImported(
+          meta,
+        )
+      : makeBuiltin(
+          meta,
+        );
+
+  console.log(
+    'Selected character:',
+    hero.meta.name,
+  );
+
+  console.log(
+    'Animations:',
+    hero.diagnostics.animations,
+  );
+
+  console.log(
+    'Selected animations:',
+    hero.diagnostics.selectedAnimations,
+  );
+
+  console.log(
+    'Diagnostics:',
+    hero.diagnostics,
+  );
+
+  return hero;
 }
+
 /**
- * Build `count` automatons from a single download.
+ * Build count automatons from a single download.
  *
- * Every member gets its own skeleton and mixer so they can walk
- * out of step, while geometry, materials and textures stay shared.
- * Those shared buffers belong to the squad, not to any one member,
- * so only `squad.dispose()` releases them.
+ * Every member gets its own skeleton and mixer.
+ * Geometry/materials/textures remain shared.
  */
 export async function createEnemySquad(
   count = 1,
@@ -2274,12 +2963,15 @@ export async function createEnemySquad(
           meta,
           {
             preloaded: {
-              scene: cloneRigged(
-                source.scene,
-              ),
+              scene:
+                cloneRigged(
+                  source.scene,
+                ),
+
               animations:
                 source.animations,
             },
+
             shared: true,
           },
         ),
@@ -2287,10 +2979,14 @@ export async function createEnemySquad(
     }
   } catch (error) {
     members.forEach(
-      member => member.dispose(),
+      member =>
+        member.dispose(),
     );
 
-    disposeObject(source.scene);
+    disposeObject(
+      source.scene,
+    );
+
     throw error;
   }
 
@@ -2300,11 +2996,13 @@ export async function createEnemySquad(
 
     dispose() {
       members.forEach(
-        member => member.dispose(),
+        member =>
+          member.dispose(),
       );
 
-      // The source still owns every shared buffer.
-      disposeObject(source.scene);
+      disposeObject(
+        source.scene,
+      );
     },
   };
 }
