@@ -8,6 +8,9 @@
     "dev": "node tools/dev-server.mjs",
     "test": "playwright test"
   },
+  "dependencies": {
+    "3d-tiles-renderer": "^0.5.2"
+  },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "agent-browser": "^0.38.1"
