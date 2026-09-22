@@ -1,1 +1,999 @@
-The requested file reference is not currently visible. Use files.search or files.list to rediscover the file, then retry with a returned ref_id or file_id.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NYC ROAM — Manhattan 3D Building Generator</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0b0f1a}
+canvas{display:block;touch-action:none}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff}
+#hud{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;padding:16px 20px;pointer-events:none;z-index:20}
+.stat{background:rgba(10,16,30,.55);border:1px solid rgba(120,200,255,.25);border-radius:10px;padding:8px 14px;margin-right:10px;backdrop-filter:blur(8px);text-align:center;min-width:86px}
+.stat .label{font-size:10px;letter-spacing:2px;color:#6fb8ff}.stat .value{font-size:22px;font-weight:700;letter-spacing:1px}.stat-group{display:flex}
+#title-block{text-align:right}#title-block h1{font-size:20px;letter-spacing:5px;font-weight:800;color:#eaf6ff;text-shadow:0 0 18px rgba(90,180,255,.6)}#title-block p{font-size:11px;letter-spacing:3px;color:#6fb8ff}
+#controls-help{position:fixed;bottom:14px;left:20px;z-index:20;font-size:11px;line-height:1.7;color:#9fc4e8;background:rgba(10,16,30,.45);padding:10px 14px;border-radius:10px;border:1px solid rgba(120,200,255,.15);pointer-events:none}
+#controls-help b{color:#6fb8ff}
+#joystick{touch-action:none;position:fixed;bottom:24px;left:20%;transform:translateX(-50%);width:140px;height:140px;z-index:30;display:none}
+#jbase,#jknob{position:absolute;border-radius:50%}
+#jbase{width:140px;height:140px;background:radial-gradient(circle at 50% 50%,rgba(90,160,255,.15),rgba(20,30,55,.35));border:2px solid rgba(120,200,255,.35)}
+#jknob{width:56px;height:56px;left:42px;top:42px;background:radial-gradient(circle at 35% 30%,#7fc4ff,#2a5c9c);border:2px solid rgba(200,235,255,.7);box-shadow:0 0 20px rgba(90,180,255,.6)}
+#loading{position:fixed;inset:0;z-index:40;background:linear-gradient(160deg,#070b14,#101a30);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .8s ease}
+#loading.hidden{opacity:0;pointer-events:none}#loading h2{letter-spacing:4px;font-weight:300;font-size:15px;color:#a9d4ff}
+#bar-wrap{width:320px;height:4px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden}#bar{height:100%;width:0%;background:linear-gradient(90deg,#2a5c9c,#7fc4ff);transition:width .25s ease}
+#load-msg{font-size:12px;color:#5f89b8}
+#pause-overlay{position:fixed;inset:0;z-index:30;display:none;align-items:center;justify-content:center;background:rgba(5,9,18,.6);backdrop-filter:blur(4px);letter-spacing:8px;font-size:28px;font-weight:700;color:#d8ecff}
+#touch-buttons{touch-action:none;position:fixed;bottom:26px;right:24px;z-index:30;display:none}
+.tbtn{width:74px;height:74px;border-radius:50%;margin-top:12px;background:rgba(30,60,110,.5);border:2px solid rgba(120,200,255,.4);color:#cfe8ff;font-size:11px;letter-spacing:1px;font-weight:700;display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none}
+
+/* Mobile camera surface.
+   This is deliberately ABOVE the WebGPU canvas, so the second finger
+   never starts a touch gesture on the WebGPU canvas itself.
+   The joystick/buttons are above this surface (z-index:25). */
+#camera-touch{
+  position:fixed;
+  top:0;
+  right:0;
+  width:72%;
+  height:100%;
+  z-index:15;
+  display:none;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+  background:transparent;
+}
+.tbtn:active{background:rgba(90,160,255,.7)}
+@media (max-width:820px),(pointer:coarse){#controls-help{display:none}#camera-touch{display:block}#joystick,#touch-buttons{display:block}#title-block h1{font-size:15px}}
+
+#world-controls{position:fixed;top:92px;right:20px;z-index:25;width:220px;padding:12px 14px;background:rgba(10,16,30,.78);border:1px solid rgba(120,200,255,.28);border-radius:12px;backdrop-filter:blur(10px);color:#d9ecff;font-size:11px}
+#world-controls .wc-title{font-size:10px;letter-spacing:2px;color:#6fb8ff;margin-bottom:9px;font-weight:700}
+#world-controls .wc-row{display:flex;align-items:center;gap:8px;margin:7px 0}
+#world-controls label{width:52px;color:#9fc4e8}
+#world-controls input{flex:1}
+#world-controls select{flex:1;background:#111a2b;color:#d9ecff;border:1px solid rgba(120,200,255,.25);border-radius:6px;padding:5px}
+#world-time-value{width:42px;text-align:right;color:#fff;font-weight:700}
+@media (max-width:820px),(pointer:coarse){#world-controls{top:78px;right:10px;width:190px}}
+
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="stat-group">
+    <div class="stat"><div class="label">SCORE</div><div class="value" id="score">0</div></div>
+    <div class="stat"><div class="label">COINS</div><div class="value" id="coins">0</div></div>
+    <div class="stat"><div class="label">BEST</div><div class="value" id="best">0</div></div>
+  </div>
+  <div id="title-block"><h1>NYC ROAM</h1><p>PROCEDURAL NYC SKYSCRAPERS</p></div>
+</div>
+
+<div id="controls-help">
+  <div><b>W A S D / Arrows</b> — move (character turns to face direction)</div>
+  <div><b>Shift</b> — sprint &nbsp; <b>Space</b> — jump</div>
+  <div><b>Drag mouse</b> — orbit camera &nbsp; <b>Wheel</b> — zoom</div>
+  <div><b>P</b> — pause &nbsp; <b>R</b> — restart &nbsp; <b>C</b> — toggle camera mode</div>
+</div>
+
+
+<div id="world-controls">
+  <div class="wc-title">WORLD TIME &amp; SEASON</div>
+  <div class="wc-row">
+    <label>TIME</label>
+    <input id="world-time" type="range" min="0" max="24" step="0.1" value="14">
+    <span id="world-time-value">14:00</span>
+  </div>
+  <div class="wc-row">
+    <label>CHAR</label>
+    <select id="character-select" class="character-select">
+      <option value="rei" selected>Rei Ayanami</option>
+      <option value="soldier">Soldier</option>
+    </select>
+  </div>
+  <div class="wc-row">
+    <label>SEASON</label>
+    <select id="world-season">
+      <option value="spring">Spring</option>
+      <option value="summer" selected>Summer</option>
+      <option value="autumn">Autumn</option>
+      <option value="winter">Winter</option>
+    </select>
+  </div>
+</div>
+
+<div id="camera-touch"></div>
+<div id="joystick"><div id="jbase"></div><div id="jknob"></div></div>
+<div id="touch-buttons">
+  <div class="tbtn" id="btn-camera">CAMERA</div>
+  <div class="tbtn" id="btn-sprint">SPRINT</div>
+  <div class="tbtn" id="btn-jump">JUMP</div>
+</div>
+
+<div id="pause-overlay">PAUSED</div>
+
+<div id="loading">
+  <h2>NYC ROAM</h2>
+  <div id="bar-wrap"><div id="bar"></div></div>
+  <div id="load-msg">Loading city...</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.186.0/build/three.module.js",
+      "three/webgpu": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+      "three/tsl": "https://unpkg.com/three@0.186.0/build/three.tsl.js",
+      "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+const CONFIG = {
+  PLAYER_RADIUS: 2.2,
+  PLAYER_HEIGHT: 10,
+  GRAVITY: -55,
+  JUMP_SPEED: 20,
+  WALK_SPEED: 22,
+  RUN_SPEED: 40,
+  ACCEL: 10,
+  FRICTION: 8,
+  ORBIT_SENSITIVITY: 0.006,
+  CAM_MIN_PITCH: 0.12,
+  CAM_MAX_PITCH: 1.35
+};
+
+const $ = id => document.getElementById(id);
+const ui = {
+  score: $('score'),
+  coins: $('coins'),
+  best: $('best'),
+  loading: $('loading'),
+  bar: $('bar'),
+  loadMsg: $('load-msg'),
+  pauseOverlay: $('pause-overlay')
+};
+
+const worldTime = $('world-time');
+const worldTimeValue = $('world-time-value');
+const worldSeason = $('world-season');
+
+const seasonSettings = {
+  spring: { ground: 0x243326, grid: 0x3b6f57, fog: 0.00075 },
+  summer: { ground: 0x36533a, grid: 0x4f86b0, fog: 0.00045 },
+  autumn: { ground: 0x30291f, grid: 0x755b3d, fog: 0.0009 },
+  winter: { ground: 0x65707a, grid: 0x7d8fa3, fog: 0.00105 }
+};
+
+function updateWorldTime() {
+  const h = Number(worldTime.value);
+  const whole = Math.floor(h) % 24;
+  const mins = Math.floor((h - whole) * 60);
+  worldTimeValue.textContent =
+    String(whole).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+
+  // 06:00 sunrise, 18:00 sunset.
+  const daylight = Math.max(0, Math.sin(((h - 6) / 24) * Math.PI * 2));
+
+  // Keep daytime strongly illuminated. Summer noon should look like a clear
+  // sunny day rather than a dim/dusk scene.
+  sun.intensity = 0.35 + daylight * 4.65;
+  hemi.intensity = 1.0 + daylight * 1.8;
+  rim.intensity = 0.35 + daylight * 0.8;
+
+  const angle = ((h - 12) / 24) * Math.PI * 2;
+  sun.position.set(
+    player.group.position.x + Math.cos(angle) * 420,
+    80 + daylight * 430,
+    player.group.position.z + Math.sin(angle) * 420
+  );
+  sun.target.position.copy(player.group.position);
+  sun.target.updateMatrixWorld();
+
+  const nightSky = new THREE.Color(0x07101f);
+  const daySky = new THREE.Color(0x72b7ed);
+  const sky = nightSky.clone().lerp(daySky, daylight);
+  scene.background.copy(sky);
+  scene.fog.color.copy(sky);
+}
+
+function updateWorldSeason() {
+  const cfg = seasonSettings[worldSeason.value] || seasonSettings.summer;
+  ground.material.color.setHex(cfg.ground);
+  grid.material.color.setHex(cfg.grid);
+  scene.fog.density = cfg.fog;
+  updateWorldTime();
+}
+
+worldTime.addEventListener('input', updateWorldTime);
+worldSeason.addEventListener('change', updateWorldSeason);
+
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x72b7ed);
+scene.fog = new THREE.FogExp2(0x72b7ed, 0.00045);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 3000);
+camera.position.set(0, 35, 65);
+
+const IS_TOUCH_DEVICE =
+  matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints > 0;
+
+// Use WebGLRenderer here because the supplied Three.js example is a WebGL
+// example and WebGL is more reliable for this mobile touch-controlled scene.
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+// Lighting
+scene.add(new THREE.HemisphereLight(0x9ec8ff, 0x151a25, 1.5));
+
+const sun = new THREE.DirectionalLight(0xfff0d6, 2.4);
+sun.position.set(250, 420, 180);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 1200;
+sun.shadow.camera.left = -500;
+sun.shadow.camera.right = 500;
+sun.shadow.camera.top = 500;
+sun.shadow.camera.bottom = -500;
+scene.add(sun);
+scene.add(sun.target);
+
+const rim = new THREE.DirectionalLight(0x4f8dff, 0.7);
+rim.position.set(-260, 140, -220);
+scene.add(rim);
+
+// Ground — simple and cheap. The Tokyo model itself replaces the procedural
+// skyscraper generator.
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(1800, 1800),
+  new THREE.MeshStandardMaterial({
+    color: 0x1b2130,
+    roughness: 0.96,
+    metalness: 0.02
+  })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(1800, 180, 0x2f5f96, 0x233b5c);
+grid.position.y = 0.03;
+grid.material.transparent = true;
+grid.material.opacity = 0.12;
+scene.add(grid);
+
+// Subtle road strips for spatial grounding.
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x11161f, roughness: 1 });
+for (let i = -8; i <= 8; i++) {
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(24, 1800), roadMat);
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(i * 90, 0.035, 0);
+  road.receiveShadow = true;
+  scene.add(road);
+}
+
+// ---------------------------------------------------------------------------
+// Littlest Tokyo — from the supplied Three.js keyframes animation example.
+// https://threejs.org/examples/#webgl_animation_keyframes
+// ---------------------------------------------------------------------------
+const CITY_URL = 'https://threejs.org/examples/models/gltf/LittlestTokyo.glb';
+
+let cityModel = null;
+let cityMixer = null;
+let cityBox = null;
+let cityReady = false;
+
+function setProgress(v, msg) {
+  ui.bar.style.width = `${Math.round(v * 100)}%`;
+  if (msg) ui.loadMsg.textContent = msg;
+}
+
+async function loadTokyo() {
+  setProgress(0.18, 'Loading Littlest Tokyo...');
+
+  const loader = new GLTFLoader();
+
+  // Littlest Tokyo is Draco-compressed in the official Three.js example.
+  // Without DRACOLoader the GLB downloads but its geometry cannot be decoded,
+  // which is why the city was completely invisible.
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath(
+    'https://threejs.org/examples/jsm/libs/draco/gltf/'
+  );
+  loader.setDRACOLoader(dracoLoader);
+
+  return new Promise(resolve => {
+    loader.load(
+      CITY_URL,
+      gltf => {
+        cityModel = gltf.scene;
+
+        // The official example uses 0.01 because it is framed like a small
+        // desktop model viewer. For this roaming game that scale is far too
+        // small, so deliberately enlarge it for gameplay.
+        cityModel.scale.setScalar(0.22);
+        cityModel.position.set(0, 0, 0);
+
+        cityModel.traverse(obj => {
+          if (obj.isMesh) {
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+            obj.frustumCulled = true;
+
+            // Keep the Tokyo asset visually crisp without creating expensive
+            // shadow maps for every tiny mesh.
+            if (obj.material) {
+              obj.material.needsUpdate = true;
+            }
+          }
+        });
+
+        scene.add(cityModel);
+
+        // This is the keyframe animation from the official Three.js example.
+        if (gltf.animations && gltf.animations.length) {
+          cityMixer = new THREE.AnimationMixer(cityModel);
+          cityMixer.clipAction(gltf.animations[0]).play();
+        }
+
+        // IMPORTANT: calculate the bounds AFTER applying the gameplay scale.
+        // The previous version could leave the model effectively out of frame.
+        cityBox = new THREE.Box3().setFromObject(cityModel);
+
+        const center = cityBox.getCenter(new THREE.Vector3());
+        const size = cityBox.getSize(new THREE.Vector3());
+
+        // Center the whole Tokyo scene around the player.
+        cityModel.position.x -= center.x;
+        cityModel.position.z -= center.z;
+
+        // Put the lowest point exactly on the game ground.
+        cityBox.setFromObject(cityModel);
+        cityModel.position.y -= cityBox.min.y;
+
+        cityBox.setFromObject(cityModel);
+
+        console.log(
+          'Littlest Tokyo loaded:',
+          'size=', size.toArray(),
+          'bounds=', cityBox.min.toArray(), cityBox.max.toArray()
+        );
+
+        // Start close enough to see the city immediately.
+        const cityCenter = cityBox.getCenter(new THREE.Vector3());
+        camRig.target.copy(cityCenter);
+        camRig.target.y = Math.min(cityBox.max.y * 0.25, 25);
+        camRig.radius = 42;
+        camRig.desiredRadius = 42;
+        camera.position.set(0, 26, 42);
+        camera.lookAt(camRig.target);
+
+        cityReady = true;
+
+        setProgress(0.58, 'Littlest Tokyo loaded. Loading player...');
+        resolve();
+      },
+      xhr => {
+        if (xhr.total) {
+          const p = xhr.loaded / xhr.total;
+          setProgress(0.18 + p * 0.38, `Loading Tokyo ${Math.round(p * 100)}%...`);
+        }
+      },
+      err => {
+        console.error('LittlestTokyo.glb / Draco decode failed:', err);
+        setProgress(0.58, 'Tokyo failed to decode — check Console/network.');
+        resolve();
+      }
+    );
+  });
+}
+
+// Player
+const player = {
+  group: new THREE.Group(),
+  model: null,
+  velocity: new THREE.Vector3(),
+  onGround: true,
+  facing: 0,
+  displayYaw: 0,
+  speed: 0,
+  mixer: null,
+  idleAction: null,
+  walkAction: null,
+  runAction: null,
+  jumpAction: null,
+  jumpLandAction: null,
+  _jumpWasPlaying: false
+};
+
+scene.add(player.group);
+
+const placeholder = new THREE.Mesh(
+  new THREE.CapsuleGeometry(2.2, 5.8, 6, 12),
+  new THREE.MeshStandardMaterial({
+    color: 0xff6b3d,
+    roughness: 0.5,
+    metalness: 0.2
+  })
+);
+placeholder.position.y = 5.1;
+placeholder.castShadow = true;
+player.group.add(placeholder);
+
+// ---------------------------------------------------------------------------
+// Actual uploaded rigged Rei Ayanami GLB.
+// Embedded directly so this works from a local HTML file.
+// ---------------------------------------------------------------------------
+const SOLDIER_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
+
+const characterSelect = document.getElementById('character-select');
+let activeCharacter = 'rei';
+let soldierModel = null;
+let soldierMixer = null;
+let soldierActions = {};
+let characterLoading = false;
+
+const REI_GLB_URL = 'https://threejs.org/examples/models/gltf/RobotExpressive.glb';
+
+function loadReiModel() {
+  return new Promise(resolve => {
+    setProgress(0.66, 'Loading character...');
+    const loader = new GLTFLoader();
+    loader.load(REI_GLB_URL, gltf => {
+      const model = gltf.scene;
+      model.traverse(o => {
+        if (o.isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+          o.frustumCulled = false;
+        }
+      });
+      model.scale.setScalar(1);
+      model.rotation.y = 0;
+      model.updateMatrixWorld(true);
+      const rawBox = new THREE.Box3().setFromObject(model);
+      const rawSize = rawBox.getSize(new THREE.Vector3());
+      if (rawSize.y > 0.001) {
+        const targetHeight = CONFIG.PLAYER_HEIGHT * 2.0;
+        model.scale.setScalar(targetHeight / rawSize.y);
+      }
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box.min.y;
+      model.updateMatrixWorld(true);
+      player.group.add(model);
+      player.model = model;
+      player.mixer = new THREE.AnimationMixer(model);
+      const clips = gltf.animations || [];
+      const byName = Object.create(null);
+      for (const clip of clips) byName[clip.name] = clip;
+      const findClip = (...names) => {
+        for (const name of names) if (byName[name]) return byName[name];
+        return clips.find(c => names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))) || null;
+      };
+      player.idleAction = player.mixer.clipAction(findClip('Idle', 'Idle Fold Arms'));
+      player.walkAction = player.mixer.clipAction(findClip('Walk Forward', 'Walk'));
+      player.runAction = player.mixer.clipAction(findClip('Sprint', 'Jog Forward', 'Run'));
+      player.jumpAction = player.mixer.clipAction(findClip('Jump', 'Jump Start'));
+      player.jumpLandAction = player.mixer.clipAction(findClip('Jump Land'));
+      player._jumpWasPlaying = false;
+      [player.idleAction, player.walkAction, player.runAction, player.jumpAction, player.jumpLandAction].forEach(action => {
+        if (action) { action.enabled = true; action.setEffectiveWeight(0); action.play(); }
+      });
+      if (player.idleAction) player.idleAction.setEffectiveWeight(1);
+      placeholder.visible = false;
+      console.log('Character loaded:', clips.map(c => c.name));
+      setProgress(0.82, 'Character loaded.');
+      resolve();
+    }, undefined, err => {
+      console.error('Character GLB load failed:', err);
+      setProgress(0.66, 'Character failed — continuing with placeholder.');
+      resolve();
+    });
+  });
+}
+function clearPlayerCharacter() {
+  if (player.model) {
+    player.group.remove(player.model);
+    player.model = null;
+  }
+
+  if (player.reiRig) {
+    player.group.remove(player.reiRig);
+    player.reiRig = null;
+  }
+
+  if (soldierModel) {
+    player.group.remove(soldierModel);
+    soldierModel = null;
+  }
+
+  if (player.mixer) {
+    player.mixer.stopAllAction();
+    player.mixer = null;
+  }
+
+  soldierMixer = null;
+  soldierActions = {};
+  player.idleAction = null;
+  player.walkAction = null;
+  player.runAction = null;
+  player.jumpAction = null;
+  player.jumpLandAction = null;
+
+  placeholder.visible = true;
+}
+
+function setupRiggedAnimations(model, animations) {
+  if (!animations || !animations.length) return null;
+
+  const mixer = new THREE.AnimationMixer(model);
+  const byName = Object.create(null);
+
+  for (const clip of animations) byName[clip.name] = clip;
+
+  const find = (...names) => {
+    for (const n of names) {
+      if (byName[n]) return byName[n];
+    }
+
+    return animations.find(c =>
+      names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))
+    ) || null;
+  };
+
+  const actions = {
+    idle: mixer.clipAction(find('Idle', 'Idle Fold Arms') || animations[0]),
+    walk: mixer.clipAction(find('Walk Forward', 'Walk')),
+    run: mixer.clipAction(find('Sprint', 'Jog Forward', 'Run')),
+    jump: null,
+    land: null
+  };
+
+  Object.values(actions).forEach(a => {
+    if (a) {
+      a.enabled = true;
+      a.setEffectiveWeight(0);
+      a.play();
+    }
+  });
+
+  if (actions.idle) actions.idle.setEffectiveWeight(1);
+
+  return { mixer, actions };
+}
+
+function fitCharacterModel(
+  model,
+  targetHeight = CONFIG.PLAYER_HEIGHT * 2.0,
+  headingOffset = 0
+) {
+  model.scale.setScalar(1);
+  model.position.set(0, 0, 0);
+  model.rotation.y = headingOffset;
+  model.updateMatrixWorld(true);
+
+  const rawBox = new THREE.Box3().setFromObject(model);
+  const rawSize = rawBox.getSize(new THREE.Vector3());
+
+  if (rawSize.y > 0.001) {
+    model.scale.setScalar(targetHeight / rawSize.y);
+  }
+
+  model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+  model.position.y -= box.min.y;
+
+  model.updateMatrixWorld(true);
+
+  model.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.frustumCulled = false;
+    }
+  });
+}
+
+function loadSoldierModel() {
+  return new Promise(resolve => {
+    setProgress(0.66, 'Loading Soldier...');
+
+    const loader = new GLTFLoader();
+
+    loader.load(
+      SOLDIER_URL,
+      gltf => {
+        const model = gltf.scene;
+        fitCharacterModel(
+          model,
+          CONFIG.PLAYER_HEIGHT * 1.4,
+          Math.PI
+        );
+
+        const anim = setupRiggedAnimations(model, gltf.animations);
+
+        player.group.add(model);
+        player.model = model;
+        soldierModel = model;
+
+        if (anim) {
+          player.mixer = anim.mixer;
+          player.idleAction = anim.actions.idle;
+          player.walkAction = anim.actions.walk;
+          player.runAction = anim.actions.run;
+          player.jumpAction = anim.actions.jump;
+          player.jumpLandAction = anim.actions.land;
+        }
+
+        placeholder.visible = false;
+        setProgress(0.82, 'Soldier loaded.');
+        resolve();
+      },
+      undefined,
+      err => {
+        console.error('Soldier.glb failed to load:', err);
+        setProgress(0.82, 'Soldier failed — keeping current character.');
+        resolve();
+      }
+    );
+  });
+}
+
+async function switchCharacter(character) {
+  if (characterLoading || character === activeCharacter) return;
+
+  characterLoading = true;
+  activeCharacter = character;
+
+  const oldPosition = player.group.position.clone();
+  const oldVelocity = player.velocity.clone();
+  const oldFacing = player.facing;
+  const oldDisplayYaw = player.displayYaw;
+
+  clearPlayerCharacter();
+
+  if (character === 'soldier') {
+    await loadSoldierModel();
+  } else {
+    await loadReiModel();
+  }
+
+  player.group.position.copy(oldPosition);
+  player.velocity.copy(oldVelocity);
+  player.facing = oldFacing;
+  player.displayYaw = oldDisplayYaw;
+
+  characterLoading = false;
+}
+
+characterSelect.addEventListener('change', () => {
+  switchCharacter(characterSelect.value);
+});
+
+
+// Camera / input
+const camRig = {
+  target: new THREE.Vector3(),
+  yaw: Math.PI,
+  pitch: 0.5,
+  radius: 42,
+  desiredRadius: 62,
+  mode: 'orbit'
+};
+
+const keys = Object.create(null);
+
+// Mobile camera toggle: orbit/third-person <-> first-person.
+function updateCameraButton() {
+  const b = $('btn-camera');
+  if (b) b.textContent = camRig.mode === 'orbit' ? 'CAMERA' : 'FIRST';
+}
+
+const input = {
+  moveX: 0,
+  moveZ: 0,
+  sprint: false,
+  jumpQueued: false,
+  joystick: { active: false, x: 0, y: 0 }
+};
+
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+
+  if (e.code === 'KeyP') togglePause();
+  if (e.code === 'KeyR') restart();
+  if (e.code === 'KeyC') {
+    camRig.mode = camRig.mode === 'orbit' ? 'first' : 'orbit';
+    updateCameraButton();
+  }
+
+  if (e.code === 'Space') {
+    input.jumpQueued = true;
+    e.preventDefault();
+  }
+
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+});
+
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+let cameraTouchId = null;
+
+if (!IS_TOUCH_DEVICE) {
+  renderer.domElement.addEventListener('pointerdown', e => {
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    e.preventDefault();
+  }, { passive: false });
+
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (!dragging) return;
+
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+
+    camRig.yaw -= dx * CONFIG.ORBIT_SENSITIVITY;
+    camRig.pitch = THREE.MathUtils.clamp(
+      camRig.pitch + dy * CONFIG.ORBIT_SENSITIVITY,
+      CONFIG.CAM_MIN_PITCH,
+      CONFIG.CAM_MAX_PITCH
+    );
+  });
+
+  addEventListener('pointerup', () => dragging = false);
+  addEventListener('pointercancel', () => dragging = false);
+
+  renderer.domElement.addEventListener('wheel', e => {
+    camRig.desiredRadius = THREE.MathUtils.clamp(
+      camRig.desiredRadius + e.deltaY * 0.06,
+      30,
+      360
+    );
+    e.preventDefault();
+  }, { passive: false });
+}
+
+if (IS_TOUCH_DEVICE) {
+  const cameraTouch = $('camera-touch');
+
+  cameraTouch.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch' || cameraTouchId !== null) return;
+
+    cameraTouchId = e.pointerId;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    dragging = true;
+
+    try { cameraTouch.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  }, { passive: false });
+
+  cameraTouch.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch' || e.pointerId !== cameraTouchId) return;
+
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+
+    camRig.yaw -= dx * CONFIG.ORBIT_SENSITIVITY;
+    camRig.pitch = THREE.MathUtils.clamp(
+      camRig.pitch + dy * CONFIG.ORBIT_SENSITIVITY,
+      CONFIG.CAM_MIN_PITCH,
+      CONFIG.CAM_MAX_PITCH
+    );
+
+    e.preventDefault();
+  }, { passive: false });
+
+  const endCameraPointer = e => {
+    if (e.pointerId !== cameraTouchId) return;
+
+    try { cameraTouch.releasePointerCapture(e.pointerId); } catch (_) {}
+    cameraTouchId = null;
+    dragging = false;
+  };
+
+  cameraTouch.addEventListener('pointerup', endCameraPointer);
+  cameraTouch.addEventListener('pointercancel', endCameraPointer);
+  cameraTouch.addEventListener('lostpointercapture', e => {
+    if (e.pointerId === cameraTouchId) {
+      cameraTouchId = null;
+      dragging = false;
+    }
+  });
+}
+
+// Mobile joystick
+const joy = $('joystick');
+const knob = $('jknob');
+let joyId = null;
+let joyBase = { x: 0, y: 0 };
+
+function joyStart(e) {
+  const t = e.changedTouches ? e.changedTouches[0] : e;
+  const r = joy.getBoundingClientRect();
+
+  joyBase = {
+    x: r.left + r.width / 2,
+    y: r.top + r.height / 2
+  };
+
+  joyId = t.identifier ?? 'mouse';
+  input.joystick.active = true;
+  joyMove(e);
+}
+
+function joyMove(e) {
+  if (!input.joystick.active) return;
+
+  const list = e.changedTouches ? e.changedTouches : [e];
+
+  for (const t of list) {
+    if ((t.identifier ?? 'mouse') !== joyId) continue;
+
+    let dx = t.clientX - joyBase.x;
+    let dy = t.clientY - joyBase.y;
+
+    const max = 52;
+    const len = Math.hypot(dx, dy) || 1;
+    const cl = Math.min(len, max);
+
+    dx = dx / len * cl;
+    dy = dy / len * cl;
+
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    input.joystick.x = dx / max;
+    input.joystick.y = dy / max;
+  }
+}
+
+function joyEnd() {
+  input.joystick.active = false;
+  input.joystick.x = 0;
+  input.joystick.y = 0;
+  knob.style.transform = 'translate(0,0)';
+  joyId = null;
+}
+
+joy.addEventListener('touchstart', e => {
+  joyStart(e);
+  e.preventDefault();
+}, { passive: false });
+
+joy.addEventListener('touchmove', e => {
+  joyMove(e);
+  e.preventDefault();
+}, { passive: false });
+
+joy.addEventListener('touchend', joyEnd);
+joy.addEventListener('mousedown', joyStart);
+
+addEventListener('mousemove', e => {
+  if (joyId === 'mouse') joyMove(e);
+});
+
+addEventListener('mouseup', () => {
+  if (joyId === 'mouse') joyEnd();
+});
+
+updateCameraButton();
+
+$('btn-camera').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  camRig.mode = camRig.mode === 'orbit' ? 'first' : 'orbit';
+  dragging = false;
+  updateCameraButton();
+});
+
+$('btn-jump').addEventListener('touchstart', e => {
+  input.jumpQueued = true;
+  e.preventDefault();
+}, { passive: false });
+
+$('btn-jump').addEventListener('mousedown', () => {
+  input.jumpQueued = true;
+});
+
+$('btn-sprint').addEventListener('touchstart', e => {
+  keys.ShiftLeft = true;
+  e.preventDefault();
+}, { passive: false });
+
+$('btn-sprint').addEventListener('touchend', () => {
+  keys.ShiftLeft = false;
+});
+
+$('btn-sprint').addEventListener('mousedown', () => {
+  keys.ShiftLeft = true;
+});
+
+$('btn-sprint').addEventListener('mouseup', () => {
+  keys.ShiftLeft = false;
+});
+
+// Movement
+const _v = new THREE.Vector3();
+const _camFwd = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+
+function updateInput() {
+  let ix = 0;
+  let iz = 0;
+
+  if (keys.KeyW || keys.ArrowUp) iz -= 1;
+  if (keys.KeyS || keys.ArrowDown) iz += 1;
+  if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+  if (keys.KeyD || keys.ArrowRight) ix += 1;
+
+  if (input.joystick.active) {
+    ix += input.joystick.x;
+    iz += input.joystick.y;
+  }
+
+  const len = Math.hypot(ix, iz);
+  if (len > 0) {
+    ix /= len;
+    iz /= len;
+  }
+
+  input.moveX = ix;
+  input.moveZ = iz;
+  input.sprint = !!(keys.ShiftLeft || keys.ShiftRight);
+
+  _camFwd
+    .set(-Math.sin(camRig.yaw), 0, -Math.cos(camRig.yaw))
+    .normalize();
+
+  _camRight
+    .set(-_camFwd.z, 0, _camFwd.x)
+    .normalize();
+
+  _v.set(0, 0, 0)
+    .addScaledVector(_camRight, ix)
+    .addScaledVector(_camFwd, -iz);
+
+  return _v.lengthSq() > 1e-6
+    ? _v.clone().normalize()
+    : new THREE.Vector3();
+}
+
+function updatePlayer(dt) {
+  const dir = updateInput();
+  const moving = dir.lengthSq() > 1e-6;
