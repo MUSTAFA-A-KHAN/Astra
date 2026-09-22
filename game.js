@@ -162,7 +162,7 @@ async function selectHero(id) {
   }
 }
 
-('character-roster').addEventListener('click',e=>{const b=e.target.closest('[data-hero]');if(b)selectHero(b.dataset.hero);});
+$('character-roster').addEventListener('click',e=>{const b=e.target.closest('[data-hero]');if(b)selectHero(b.dataset.hero);});
 
 // Collectibles share one mesh, material, and GPU buffer.
 const shardPositions = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30],[-65,-10],[66,-48],[-25,60],[25,48]];
