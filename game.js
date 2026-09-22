@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createWorld } from './world.js';
 import { HEROES, createHero } from './characters.js';
+import { createStreamedTerrain } from './terrain.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -13,7 +14,7 @@ const saved = readSave();
 const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v, min, max) : fallback;
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0 && v < 24) : []) };
 const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24) };
-let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
+let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false, streamedTerrain = null;
 let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, jumpVelocity = 0;
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
@@ -47,6 +48,12 @@ sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -55
 sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target);
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
 const world = createWorld(scene, { lowPower: touch });
+try {
+  streamedTerrain = await createStreamedTerrain(scene, camera, renderer, { token: window.ASTRA_CESIUM_ION_TOKEN || '' });
+} catch (error) {
+  console.warn('Streamed terrain unavailable; using Astra fallback terrain.', error);
+  streamedTerrain = null;
+}
 const avatar = new THREE.Group(); scene.add(avatar); avatar.position.set(0, 0, 18);
 const position = new THREE.Vector3(0, 0, 18), velocity = new THREE.Vector3();
 const stage = new THREE.Group(); stage.position.set(0, 0, 18); scene.add(stage);
@@ -77,7 +84,7 @@ function applyQuality(value, adaptive = false) {
   quality = value; const q = QUALITY[value];
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q.ratio) * resolutionScale); renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = q.shadows; sun.castShadow = q.shadows;
-  world.setQuality(value); renderer.shadowMap.needsUpdate = true;
+  world.setQuality(value); streamedTerrain?.setQuality?.(value); renderer.shadowMap.needsUpdate = true;
   $('quality-status').textContent = `${preferences.quality === 'auto' ? 'Adaptive' : 'Graphics'} · ${value === 'low' ? 'Performance' : value === 'high' ? 'High' : 'Balanced'}`;
   if (adaptive) lastAdapt = time;
 }
@@ -88,7 +95,7 @@ function setTime(hour) {
   scene.background.set(day > .2 ? (dusk ? '#a9b6a3' : '#9ebfc0') : '#26394e'); scene.fog.color.copy(scene.background);
   hemi.intensity = .85+day*1.7; sun.intensity=.25+day*3; sun.color.set(dusk ? '#ffcf93' : '#ffe5bd');
   portraitLight.intensity = screen === 'lobby' ? 1.6 : .4;
-  world.setTime(hour);
+  world.setTime(hour); streamedTerrain?.setTime?.(hour);
 }
 setTime(preferences.time);
 
@@ -284,10 +291,11 @@ function animate(now){
   if(!dialog.open){
     if(screen==='game'&&hero){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}
     else if(hero){avatar.position.set(0,.22,18);avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,time:reducedMotion?0:time});}
-    world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
+    world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position); updateShards();
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
   }
+  streamedTerrain?.update?.();
   blob.position.set(avatar.position.x,screen==='lobby'?.225:.045,avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-position.y*.15):.8;
   sun.position.set(avatar.position.x-45,65,avatar.position.z+38);sun.target.position.set(avatar.position.x,0,avatar.position.z);sun.target.updateMatrixWorld();
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};

@@ -88,21 +88,17 @@ export function createWorld(scene, { lowPower = false } = {}) {
     return Math.hypot(x, z + 53) < 22 + margin || Math.hypot(x + 45, z - 25) < 12 + margin || Math.hypot(x - 50, z + 20) < 9 + margin || Math.hypot(x + 54, z + 38) < 22 + margin;
   }
 
-  // A low polygon meadow with subtle color variation keeps the ground legible
-  // even on a small screen. All traversable terrain stays at y=0.
-  const groundGeometry = new THREE.PlaneGeometry(1100, 1100, 78, 78).toNonIndexed();
+  // The base ground is intentionally retained as a compatibility surface while
+  // optional Cesium World Terrain streams above it. Keeping this mesh transparent
+  // avoids a blank world when no Cesium ion token is configured.
+  const groundGeometry = new THREE.PlaneGeometry(1100, 1100, 8, 8).toNonIndexed();
   groundGeometry.rotateX(-Math.PI / 2);
-  const groundColors = new Float32Array(groundGeometry.attributes.position.count * 3);
-  const groundPosition = groundGeometry.attributes.position;
-  for (let i = 0; i < groundPosition.count; i += 3) {
-    const x = groundPosition.getX(i), z = groundPosition.getZ(i);
-    const warmth = .5 + .23 * Math.sin(x * .027 + z * .039) + between(-.035, .035);
-    color.set('#4d7660').lerp(new THREE.Color('#78925b'), warmth);
-    for (let k = 0; k < 3; k++) color.toArray(groundColors, (i + k) * 3);
-  }
-  groundGeometry.setAttribute('color', new THREE.BufferAttribute(groundColors, 3));
-  const ground = new THREE.Mesh(groundGeometry, materials.stone);
-  ground.receiveShadow = true; root.add(ground);
+  const fallbackGround = new THREE.Mesh(
+    groundGeometry,
+    new THREE.MeshStandardMaterial({ color: '#55745c', roughness: 1, transparent: true, opacity: 0.18 })
+  );
+  fallbackGround.receiveShadow = true;
+  root.add(fallbackGround);
 
   curves.forEach((curve, index) => {
     const points = curve.getPoints(140);
