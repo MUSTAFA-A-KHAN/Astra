@@ -5,7 +5,9 @@ export default defineConfig({
   testMatch: '**/*.spec.js',
   fullyParallel: false,
   workers: 1,
-  timeout: 90000,
+  // Hosted CI has no GPU: every frame is rasterised on the CPU by SwiftShader,
+  // so the same flows need far longer there than on a developer machine.
+  timeout: process.env.CI ? 240000 : 90000,
   expect: { timeout: 10000 },
   reporter: 'list',
   use: {
