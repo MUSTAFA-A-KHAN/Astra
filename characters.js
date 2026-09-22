@@ -110,6 +110,12 @@ export const HEROES = [
     size: '21 MB',
     model: './Arthur-rigged-under-25mb.glb',
 
+    // Emotes ride in their own file. The model is 21 MB of mesh
+    // and half a megabyte of clips; baking gestures into it would
+    // mean reshipping all 21 MB to add a wave. Built by
+    // `tools/retarget-emotes.py`.
+    emotes: './arthur-emotes.glb',
+
     orientationYaw: 0,
 
     animationSpeeds: {
@@ -1639,6 +1645,11 @@ function makeBuiltin(meta) {
     height: 3.4,
     animate,
 
+    // The starter heroes are built from primitives and have no
+    // gesture clips. Reporting none keeps callers from having to
+    // ask whether a character is imported.
+    emotes: {},
+
     get diagnostics() {
       return {
         imported: false,
@@ -1881,6 +1892,60 @@ function loadImportedScene(
 }
 
 /**
+ * Clips that ship beside a model rather than inside it.
+ *
+ * A companion GLB carries the character's skeleton and nothing
+ * else — no mesh, no textures — so gestures cost half a megabyte
+ * instead of a reshipped model. Its bone names and rest skeleton
+ * match the model's, so the tracks bind straight onto the loaded
+ * rig and behave like clips that were always there.
+ *
+ * Every character shares one download per URL: the clips are
+ * immutable here, and `inPlaceClip` clones before it edits.
+ */
+const companionClips = new Map();
+
+function loadCompanionClips(url) {
+  if (!url) {
+    return Promise.resolve([]);
+  }
+
+  if (!companionClips.has(url)) {
+    companionClips.set(
+      url,
+      loadImportedScene(url)
+        .then(gltf => {
+          // The skeleton was only ever the carrier; the clips
+          // reference bones by name, not by object.
+          if (gltf.scene) {
+            disposeObject(
+              gltf.scene,
+            );
+          }
+
+          return (
+            gltf.animations || []
+          );
+        })
+        .catch(error => {
+          // A missing gesture file is not worth failing a
+          // character over — they simply have no emotes.
+          console.warn(
+            `[characters] companion clips unavailable: ${url}`,
+            error,
+          );
+
+          return [];
+        }),
+    );
+  }
+
+  return companionClips.get(
+    url,
+  );
+}
+
+/**
  * How fast a locomotion clip's own root motion would carry the
  * character across the ground, in world units per second.
  *
@@ -1991,6 +2056,16 @@ function clipStrideSpeed(
  *
  * This keeps the game responsible for movement while
  * preserving the actual leg/limb animation.
+ *
+ * "Horizontal" has to be measured, not assumed. A root track is
+ * written in its parent node's space, and that space is only
+ * Y-up if the model was authored that way — Arthur's bind pose is
+ * rotated a quarter turn, so pinning his X and Z would flatten
+ * the bob his legs are standing on and let his real horizontal
+ * drift straight through. Projecting onto the character's own up
+ * axis keeps whichever components actually carry height and
+ * removes whichever actually carry travel, and reduces to pinning
+ * X and Z for every model that is Y-up to begin with.
  */
 function inPlaceClip(
   clip,
@@ -2050,30 +2125,84 @@ function inPlaceClip(
             track.name,
           )
         ) {
+          // The character's up axis, expressed in the space this
+          // track is written in.
+          const up =
+            new THREE.Vector3(
+              0,
+              1,
+              0,
+            );
+
+          if (node?.parent) {
+            node.parent.updateWorldMatrix(
+              true,
+              false,
+            );
+
+            up.applyMatrix3(
+              new THREE.Matrix3()
+                .setFromMatrix4(
+                  node.parent
+                    .matrixWorld,
+                )
+                .invert(),
+            ).normalize();
+          }
+
           rootPositions.set(
             track.name,
-            [
-              track.values[0],
-              track.values[2],
-            ],
+            {
+              origin:
+                new THREE.Vector3(
+                  track.values[0],
+                  track.values[1],
+                  track.values[2],
+                ),
+              up,
+            },
           );
         }
 
-        const origin =
+        const { origin, up } =
           rootPositions.get(
             track.name,
           );
+
+        const sample =
+          new THREE.Vector3();
 
         for (
           let i = 0;
           i < track.values.length;
           i += 3
         ) {
+          sample
+            .set(
+              track.values[i],
+              track.values[i + 1],
+              track.values[i + 2],
+            )
+            .sub(origin);
+
+          // Keep only what the up axis carries; the rest was
+          // the character walking away from the game's position.
+          const rise =
+            sample.dot(up);
+
+          sample
+            .copy(up)
+            .multiplyScalar(rise)
+            .add(origin);
+
           track.values[i] =
-            origin[0];
+            sample.x;
+
+          track.values[i + 1] =
+            sample.y;
 
           track.values[i + 2] =
-            origin[1];
+            sample.z;
         }
 
         return track;
@@ -2259,8 +2388,12 @@ async function makeImported(
       });
   });
 
-  const sourceClips =
-    gltf.animations || [];
+  const sourceClips = [
+    ...(gltf.animations || []),
+    ...(await loadCompanionClips(
+      meta.emotes,
+    )),
+  ];
 
   /**
    * IMPORTANT:
@@ -2481,6 +2614,58 @@ async function makeImported(
       /die/i,
     ]);
 
+  /**
+   * EMOTES
+   *
+   * Played on demand rather than driven by movement, so they are
+   * looked up the same way but kept apart from the state machine's
+   * fallbacks: a character without them simply has none, instead
+   * of silently miming an idle.
+   *
+   * The patterns stay loose because the same gesture arrives under
+   * different names depending on who baked it — a Samba is
+   * `Dance` out of `tools/retarget-emotes.py` and
+   * `michelle:SambaDance` out of a web rigger.
+   */
+  const emoteClips = {
+    Dance:
+      find([
+        /^dance$/i,
+        /samba/i,
+        /dance/i,
+      ]),
+
+    Nod:
+      find([
+        /^nod$/i,
+        /agree/i,
+        /^yes$/i,
+      ]),
+
+    Shake:
+      find([
+        /^shake$/i,
+        /head.?shake/i,
+        /disagree/i,
+        /^no$/i,
+      ]),
+
+    Sad:
+      find([
+        /^sad$/i,
+        /sad/i,
+        /defeat/i,
+      ]),
+  };
+
+  for (const key of Object.keys(
+    emoteClips,
+  )) {
+    if (!emoteClips[key]) {
+      delete emoteClips[key];
+    }
+  }
+
   console.group(
     `[${meta.name}] Selected Animations`,
   );
@@ -2533,6 +2718,16 @@ async function makeImported(
   console.log(
     'Death:',
     dead?.name || 'NONE',
+  );
+
+  console.log(
+    'Emotes:',
+    Object.entries(
+      emoteClips,
+    ).map(
+      ([state, clip]) =>
+        `${state} -> ${clip.name}`,
+    ),
   );
 
   console.groupEnd();
@@ -2665,6 +2860,11 @@ async function makeImported(
     Dead:
       dead ||
       idle,
+
+    // No `|| idle` fallback: an emote the character does not have
+    // should not be requestable at all, which `emotes` below is
+    // how the caller finds out.
+    ...emoteClips,
   };
 
   /**
@@ -2750,11 +2950,30 @@ async function makeImported(
   const baseHeight =
     fitted.position.y;
 
+  /**
+   * Emotes this character can actually play, and how long each
+   * one runs. The caller drives them by passing the state name
+   * back into `animate`, and needs the duration to know when to
+   * hand control back to movement.
+   */
+  const emotes =
+    Object.fromEntries(
+      Object.entries(
+        emoteClips,
+      ).map(
+        ([state, clip]) => [
+          state,
+          clip.duration,
+        ],
+      ),
+    );
+
   return {
     group,
     meta,
     height: targetHeight,
     mixer,
+    emotes,
 
     get diagnostics() {
       return {
@@ -2805,6 +3024,21 @@ async function makeImported(
           dead:
             dead?.name ||
             null,
+
+          emotes:
+            Object.fromEntries(
+              Object.entries(
+                emoteClips,
+              ).map(
+                ([
+                  state,
+                  clip,
+                ]) => [
+                  state,
+                  clip.name,
+                ],
+              ),
+            ),
         },
 
         activeAction:

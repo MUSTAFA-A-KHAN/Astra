@@ -22,7 +22,7 @@ const formatTime = hour => {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
-let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, jumpVelocity = 0;
+let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, jumpVelocity = 0, emoting = null, emoteUntil = 0;
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
@@ -193,7 +193,7 @@ const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dr
 let yaw=0,pitch=.48,radius=14;
 const cameraTarget=new THREE.Vector3(),cameraDesired=new THREE.Vector3();
 const dialog=$('menu-dialog');
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;velocity.set(0,0,0);$('joystick-knob').style.transform='';}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;velocity.set(0,0,0);$('joystick-knob').style.transform='';}
 addEventListener('keydown',e=>{
   if(dialog.open){if(e.code==='Escape'){e.preventDefault();closeDialog();}return;}
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
@@ -201,12 +201,24 @@ addEventListener('keydown',e=>{
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
+  if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
 addEventListener('pagehide',save);
 document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
 function jump(){if(screen==='game'&&!dialog.open&&position.y<=groundHeight(position.x,position.z)+.01)jumpVelocity=8;}
+// Emotes are the one animation the player drives directly, so they
+// are held for exactly as long as the clip runs and dropped the
+// moment the character has somewhere else to be. `hero.emotes` only
+// lists gestures this character actually shipped with, so a key
+// pressed by someone playing a starter hero does nothing at all.
+const EMOTE_KEYS={Digit1:'Dance',Digit2:'Nod',Digit3:'Shake',Digit4:'Sad'};
+function emote(state){
+  if(screen!=='game'||dialog.open)return;
+  const duration=hero?.emotes?.[state];if(!duration)return;
+  emoting=state;emoteUntil=time+duration;
+}
 renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==null)return;dragId=e.pointerId;dragX=e.clientX;dragY=e.clientY;dragDistance=0;renderer.domElement.setPointerCapture(e.pointerId);});
 renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
@@ -236,7 +248,7 @@ function openMenu(type){
   }else if(type==='journal'){
     const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Restore the shrine</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Restore the shrine</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   if(!dialog.open)dialog.showModal();
@@ -259,12 +271,17 @@ function updatePlayer(dt){
   jumpVelocity-=23*dt;position.y=Math.max(floor,position.y+jumpVelocity*dt);if(position.y===floor)jumpVelocity=0;
   avatar.position.copy(position);
   if(Math.hypot(velocity.x,velocity.z)>.2&&attackTimer<=0){const target=Math.atan2(velocity.x,velocity.z);avatar.rotation.y+=Math.atan2(Math.sin(target-avatar.rotation.y),Math.cos(target-avatar.rotation.y))*(1-Math.exp(-14*dt));}
+  // Anything the character does on purpose outranks standing
+  // around dancing, so moving, jumping or swinging drops the emote
+  // immediately rather than queueing behind it.
+  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||position.y>floor+.01))emoting=null;
   hero.animate(dt,{
   speed:Math.hypot(velocity.x,velocity.z),
   moving:length>.08,
   sprinting:run,
   jumping:position.y>floor+.01,
   attacking:attackTimer>heroMeta.cooldown*.45,
+  state:emoting||undefined,
   time
 });
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);

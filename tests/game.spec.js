@@ -85,6 +85,73 @@ test('local imported GLB loads, animates, and survives switching back to the ori
   expect(errors).toEqual([]);
 });
 
+test('Arthur plays his retargeted emotes in place with his feet on the ground', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Detailed asset validation runs once on desktop Chromium.');
+  const errors = await boot(page);
+  const result = await page.evaluate(async () => {
+    const { createHero } = await import('/characters.js');
+    const THREE = await import('three');
+    const hero = await createHero('arthur');
+
+    const feet = [];
+    let root = null;
+    hero.group.traverse(object => {
+      if (object.isBone && !object.parent?.isBone) root = object;
+      if (object.isBone && /Foot|Toe/i.test(object.name)) feet.push(object);
+    });
+
+    const point = new THREE.Vector3();
+    // An emote is a gesture, not a journey: the character has to
+    // stay where the game put him, and keep his feet on the floor
+    // while he does it. Both are measured in world space against
+    // the idle he was standing in -- the root bone sits at a fixed
+    // offset from the group, so only movement away from where the
+    // idle held it counts as drift.
+    let anchor = null;
+    const scan = (state, seconds) => {
+      const band = { lowest: Infinity, highest: -Infinity, drift: 0 };
+      for (let frame = 0; frame < Math.round(seconds * 30); frame++) {
+        hero.animate(1 / 30, { state, speed: 0, time: frame / 30 });
+        hero.group.updateMatrixWorld(true);
+        let sole = Infinity;
+        for (const bone of feet) sole = Math.min(sole, bone.getWorldPosition(point).y);
+        band.lowest = Math.min(band.lowest, sole);
+        band.highest = Math.max(band.highest, sole);
+        root.getWorldPosition(point);
+        anchor ??= point.clone();
+        band.drift = Math.max(band.drift, Math.hypot(point.x - anchor.x, point.z - anchor.z));
+      }
+      return band;
+    };
+
+    hero.animate(1 / 30, { state: 'Idle', speed: 0 });
+    const idle = scan('Idle', 2);
+    const emotes = hero.diagnostics.selectedAnimations.emotes;
+    const bands = {};
+    for (const state of Object.keys(emotes)) bands[state] = scan(state, 19);
+
+    const height = hero.height;
+    hero.dispose();
+    return { emotes, idle, bands, height };
+  });
+
+  // Every gesture the roster advertises for Arthur has to resolve
+  // to a real clip, or the key that plays it does nothing.
+  expect(Object.keys(result.emotes).sort()).toEqual(['Dance', 'Nod', 'Sad', 'Shake']);
+  for (const name of Object.values(result.emotes)) expect(name).toBeTruthy();
+
+  for (const [state, band] of Object.entries(result.bands)) {
+    // Retargeting between rigs of different leg length is what
+    // puts a dancer's feet through the floor or a hand's width
+    // above it; the bake plants them, and this is what would
+    // catch it regressing.
+    expect.soft(band.lowest, `${state} sinks below the ground`).toBeGreaterThan(result.idle.lowest - result.height * 0.03);
+    expect.soft(band.highest, `${state} floats off the ground`).toBeLessThan(result.idle.lowest + result.height * 0.03);
+    expect.soft(band.drift, `${state} walks away from the player position`).toBeLessThan(0.001);
+  }
+  expect(errors).toEqual([]);
+});
+
 test('missing terrain credentials and unavailable network never prevent play', async ({ page }) => {
   await page.route('https://**/*', route => route.abort());
   const errors = await boot(page, '/?debug=1&terrain=cesium');
@@ -204,13 +271,21 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
         if (object.isSkinnedMesh) skins.push(object);
       });
       hero.animate(1 / 60, { state: 'Idle', speed: 0 });
-      const origins = roots.map(root => ({ x: root.position.x, z: root.position.z }));
+      hero.group.updateMatrixWorld(true);
+      // Drift has to be read in world space. A root bone's own x/z
+      // are only the horizontal plane when the rig is authored
+      // Y-up, and Arthur's bind pose is a quarter turn off, so
+      // local coordinates would measure his vertical bob as travel
+      // and let his real travel through unmeasured.
+      const origins = roots.map(root => root.getWorldPosition(new THREE.Vector3()));
+      const world = new THREE.Vector3();
       let drift = 0;
       const actions = {};
       for (const state of ['Walk', 'Run', 'Sprint', 'Jump', 'Fall', 'Land', 'Idle']) {
         for (let frame = 0; frame < 90; frame++) hero.animate(1 / 60, { state, speed: state === 'Walk' ? 4.2 : state === 'Sprint' ? 11.5 : 8, time: frame / 60 });
         actions[state] = hero.diagnostics.activeAction;
-        roots.forEach((root, index) => { drift = Math.max(drift, Math.hypot(root.position.x - origins[index].x, root.position.z - origins[index].z)); });
+        hero.group.updateMatrixWorld(true);
+        roots.forEach((root, index) => { drift = Math.max(drift, Math.hypot(root.getWorldPosition(world).x - origins[index].x, world.z - origins[index].z)); });
       }
       const bounds = new THREE.Box3().setFromObject(hero.group);
       results.push({ id, skinCount: skins.length, boundBones: skins.every(skin => skin.skeleton.bones.length > 0), height: bounds.max.y - bounds.min.y,
