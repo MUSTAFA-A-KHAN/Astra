@@ -56,7 +56,10 @@ test('City Set Proto assets load offline and the roster and menus remain usable'
   await expect(page.locator('#dialog-content')).toContainText('glimmer');
   await page.getByRole('button', { name: 'Close menu' }).click();
   await page.getByRole('button', { name: 'Return to character lobby' }).click();
-  await expect(page.locator('#lobby')).toBeVisible();
+  // #lobby is a zero-height landmark — every panel inside it is absolutely
+  // positioned — so the screen itself is what says the lobby is back.
+  await expect(page.locator('body')).toHaveAttribute('data-screen', 'lobby');
+  await expect(page.locator('#play-button')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
