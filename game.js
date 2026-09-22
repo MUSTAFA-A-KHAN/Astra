@@ -47,15 +47,17 @@ const sun = new THREE.DirectionalLight('#ffe0a4', 3.1); sun.position.set(-45, 65
 sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 55, bottom: -55, near: 1, far: 180 });
 sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target);
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
-const world = createWorld(scene, { lowPower: touch });
+const usingRealWorld = window.ASTRA_REAL_WORLD_ENABLED !== false && !!window.ASTRA_CESIUM_ION_TOKEN;
+const world = createWorld(scene, { lowPower: touch, disabled: usingRealWorld });
 try {
-  streamedTerrain = await createStreamedTerrain(scene, camera, renderer, { token: window.ASTRA_CESIUM_ION_TOKEN || '' });
+  streamedTerrain = await createStreamedTerrain(scene, camera, renderer, { token: window.ASTRA_CESIUM_ION_TOKEN || '', enabled: usingRealWorld });
 } catch (error) {
   console.warn('Streamed terrain unavailable; using Astra fallback terrain.', error);
   streamedTerrain = null;
 }
 const avatar = new THREE.Group(); scene.add(avatar); avatar.position.set(0, 0, 18);
 const position = new THREE.Vector3(0, 0, 18), velocity = new THREE.Vector3();
+const terrainMode = usingRealWorld ? 'real-world' : 'handcrafted';
 const stage = new THREE.Group(); stage.position.set(0, 0, 18); scene.add(stage);
 const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 3.05, .3, 48), new THREE.MeshStandardMaterial({ color: '#627365', roughness: .88 })); pedestal.position.y = .06; pedestal.receiveShadow = true; stage.add(pedestal);
 const stageRing = new THREE.Mesh(new THREE.TorusGeometry(2.53, .025, 5, 64), new THREE.MeshBasicMaterial({ color: '#e2d29d' })); stageRing.rotation.x = Math.PI / 2; stageRing.position.y = .22; stage.add(stageRing);
@@ -311,7 +313,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),terrain:terrainMode,streamedTerrain:!!streamedTerrain?.enabled,position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');
