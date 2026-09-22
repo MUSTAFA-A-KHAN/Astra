@@ -67,6 +67,7 @@ try {
   console.warn('Streamed terrain unavailable; using Astra fallback terrain.', error);
   streamedTerrain = null;
 }
+graphicsQualityManager.streamedTerrain = streamedTerrain;
 const avatar = new THREE.Group(); scene.add(avatar); avatar.position.set(0, 0, 18);
 const position = new THREE.Vector3(0, 0, 18), velocity = new THREE.Vector3();
 const stage = new THREE.Group(); stage.position.set(0, 0, 18); scene.add(stage);
@@ -92,7 +93,7 @@ function collide(p, radius = .65) {
 }
 
 const QUALITY = { low:{ratio:1,shadows:false}, balanced:{ratio:1.35,shadows:true}, high:{ratio:1.8,shadows:true} };
-const graphicsQualityManager = new GraphicsQualityManager({ renderer, sun, world, streamedTerrain, touchDevice: touch });
+const graphicsQualityManager = new GraphicsQualityManager({ renderer, sun, world, streamedTerrain: null, touchDevice: touch });
 const lodManager = new LODManager({ camera, high: 20, medium: 48, far: 90 });
 let quality = touch ? 'balanced' : 'high', resolutionScale = 1, frameMS = 16.7, frameSamples = 0, sampleTime = 0, lastAdapt = 0;
 function applyQuality(value, adaptive = false) {
