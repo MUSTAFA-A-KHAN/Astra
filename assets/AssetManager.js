@@ -45,11 +45,11 @@ export class AssetManager {
     scene.traverse(o => { if (o.isMesh) { o.frustumCulled = true; o.castShadow = true; o.receiveShadow = true; } });
     return scene;
   }
-  disposeObject(root, { disposeMaterials = false } = {}) {
+  // Cached GLTF clones share geometry/materials with the cached source. Do not dispose shared GPU resources here.\n  disposeObject(root, { disposeMaterials = false, disposeGeometry = false } = {}) {
     if (!root) return;
     root.traverse(obj => {
       if (!obj.isMesh) return;
-      obj.geometry?.dispose?.();
+      if (disposeGeometry) obj.geometry?.dispose?.();
       if (disposeMaterials) {
         const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
         materials.forEach(material => {
