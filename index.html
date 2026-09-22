@@ -55,6 +55,8 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff}
 #world-controls input{flex:1}
 #world-controls select{flex:1;background:#111a2b;color:#d9ecff;border:1px solid rgba(120,200,255,.25);border-radius:6px;padding:5px}
 #world-time-value{width:42px;text-align:right;color:#fff;font-weight:700}
+#world-cycle{flex:0 0 auto;accent-color:#75bfff}
+.wc-note{margin-left:auto;color:#7fc4ff;font-size:10px;letter-spacing:1px}
 @media (max-width:820px),(pointer:coarse){#world-controls{top:78px;right:10px;width:190px}}
 
 </style>
@@ -84,6 +86,11 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff}
     <label>TIME</label>
     <input id="world-time" type="range" min="0" max="24" step="0.1" value="14">
     <span id="world-time-value">14:00</span>
+  </div>
+  <div class="wc-row">
+    <label>CYCLE</label>
+    <input id="world-cycle" type="checkbox" checked>
+    <span class="wc-note">AUTO</span>
   </div>
   <div class="wc-row">
     <label>CHAR</label>
@@ -163,56 +170,153 @@ const ui = {
 
 const worldTime = $('world-time');
 const worldTimeValue = $('world-time-value');
+const worldCycle = $('world-cycle');
 const worldSeason = $('world-season');
 
 const seasonSettings = {
-  spring: { ground: 0x243326, grid: 0x3b6f57, fog: 0.00075 },
-  summer: { ground: 0x36533a, grid: 0x4f86b0, fog: 0.00045 },
-  autumn: { ground: 0x30291f, grid: 0x755b3d, fog: 0.0009 },
-  winter: { ground: 0x65707a, grid: 0x7d8fa3, fog: 0.00105 }
+  spring: { ground: 0x35553a, accent: 0x53734c, grass: 0x4f7b45, grid: 0x3b6f57, shoulder: 0x293e2c, fog: 0.00075 },
+  summer: { ground: 0x36533a, accent: 0x5e774b, grass: 0x527c3e, grid: 0x4f86b0, shoulder: 0x2a3f2d, fog: 0.00045 },
+  autumn: { ground: 0x403526, accent: 0x705238, grass: 0x6d6336, grid: 0x755b3d, shoulder: 0x392f25, fog: 0.0009 },
+  winter: { ground: 0x65707a, accent: 0x9aa5ae, grass: 0x889393, grid: 0x7d8fa3, shoulder: 0x59636a, fog: 0.00105 }
 };
 
-function updateWorldTime() {
-  const h = Number(worldTime.value);
+const SKY_STOPS = [
+  [0, 0x020617],
+  [4.5, 0x07152e],
+  [5.5, 0x6f496f],
+  [6.4, 0xf28b62],
+  [8, 0xa7d9f4],
+  [12, 0x45a6ea],
+  [15.5, 0x69afe0],
+  [17.4, 0xf2a05e],
+  [18.5, 0xc65355],
+  [19.5, 0x50365f],
+  [21, 0x0b1b38],
+  [24, 0x020617]
+].map(([hour, color]) => ({ hour, color: new THREE.Color(color) }));
+
+const _skyColor = new THREE.Color();
+const _fogColor = new THREE.Color();
+const _sunColor = new THREE.Color();
+const _terrainColor = new THREE.Color();
+const _terrainAccent = new THREE.Color();
+const _vertexColor = new THREE.Color();
+const _warmSunColor = new THREE.Color(0xff8a52);
+const _noonSunColor = new THREE.Color(0xfff4dc);
+const _dayHemiColor = new THREE.Color(0xddeeff);
+const _sunDirection = new THREE.Vector3();
+const _lastLightAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
+let lastLightingHour = -1;
+
+function sampleSkyColor(hour, target) {
+  const h = ((hour % 24) + 24) % 24;
+  let upperIndex = 1;
+  while (upperIndex < SKY_STOPS.length && h > SKY_STOPS[upperIndex].hour) {
+    upperIndex++;
+  }
+
+  const lower = SKY_STOPS[upperIndex - 1];
+  const upper = SKY_STOPS[Math.min(upperIndex, SKY_STOPS.length - 1)];
+  const span = Math.max(0.001, upper.hour - lower.hour);
+  const t = THREE.MathUtils.smoothstep((h - lower.hour) / span, 0, 1);
+  return target.copy(lower.color).lerp(upper.color, t);
+}
+
+function updateTimeLabel(hour) {
+  const h = ((hour % 24) + 24) % 24;
   const whole = Math.floor(h) % 24;
-  const mins = Math.floor((h - whole) * 60);
+  const mins = Math.floor((h - Math.floor(h)) * 60);
   worldTimeValue.textContent =
     String(whole).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+}
 
-  // 06:00 sunrise, 18:00 sunset.
-  const daylight = Math.max(0, Math.sin(((h - 6) / 24) * Math.PI * 2));
+// One in-game day takes ten real minutes. The slider remains the single
+// source of truth; moving it manually disables auto-cycle for precise control.
+function advanceWorldTime(dt) {
+  if (!worldCycle.checked) return;
+  const nextHour = (Number(worldTime.value) + dt * (24 / 600)) % 24;
+  worldTime.value = nextHour;
+  updateSunAndSky();
+}
 
-  // Keep daytime strongly illuminated. Summer noon should look like a clear
-  // sunny day rather than a dim/dusk scene.
-  sun.intensity = 0.35 + daylight * 4.65;
-  hemi.intensity = 1.0 + daylight * 1.8;
-  rim.intensity = 0.35 + daylight * 0.8;
+// Synchronize the entire environment from the existing time slider. The sun
+// travels east -> overhead -> west from 06:00 to 18:00, then below the horizon.
+function updateSunAndSky(force = false) {
+  const h = ((Number(worldTime.value) % 24) + 24) % 24;
+  updateTimeLabel(h);
 
-  const angle = ((h - 12) / 24) * Math.PI * 2;
-  sun.position.set(
-    player.group.position.x + Math.cos(angle) * 420,
-    80 + daylight * 430,
-    player.group.position.z + Math.sin(angle) * 420
-  );
-  sun.target.position.copy(player.group.position);
+  const anchor = player.group.position;
+  const anchorMoved = _lastLightAnchor.distanceToSquared(anchor) > 16;
+  if (!force && Math.abs(h - lastLightingHour) < 0.002 && !anchorMoved) return;
+
+  lastLightingHour = h;
+  _lastLightAnchor.copy(anchor);
+
+  const solarAngle = ((h - 6) / 24) * Math.PI * 2;
+  const elevation = Math.sin(solarAngle);
+  const daylight = THREE.MathUtils.smoothstep(elevation, -0.08, 0.28);
+  const horizonWarmth = 1 - THREE.MathUtils.smoothstep(elevation, 0.02, 0.45);
+
+  _sunDirection.set(Math.cos(solarAngle), elevation, -0.22).normalize();
+  sun.position.copy(anchor).addScaledVector(_sunDirection, 700);
+  sun.target.position.copy(anchor);
   sun.target.updateMatrixWorld();
 
-  const nightSky = new THREE.Color(0x07101f);
-  const daySky = new THREE.Color(0x72b7ed);
-  const sky = nightSky.clone().lerp(daySky, daylight);
-  scene.background.copy(sky);
-  scene.fog.color.copy(sky);
+  _sunColor.copy(_noonSunColor).lerp(_warmSunColor, horizonWarmth);
+  sun.color.copy(_sunColor);
+  sun.intensity = daylight * (1.4 + Math.max(0, elevation) * 2.5);
+  sun.visible = daylight > 0.01;
+  sun.castShadow = daylight > 0.08;
+  if (sun.castShadow) sun.shadow.needsUpdate = true;
+
+  sunDisc.visible = elevation > -0.035;
+  sunDisc.position.copy(anchor).addScaledVector(_sunDirection, 1100);
+  sunDisc.material.color.copy(_sunColor);
+
+  sampleSkyColor(h, _skyColor);
+  scene.background.copy(_skyColor);
+  _fogColor.copy(_skyColor).lerp(_sunColor, horizonWarmth * 0.14);
+  scene.fog.color.copy(_fogColor);
+
+  const season = seasonSettings[worldSeason.value] || seasonSettings.summer;
+  scene.fog.density = season.fog * (1.08 - daylight * 0.14);
+
+  hemi.color.copy(_skyColor).lerp(_dayHemiColor, daylight * 0.42);
+  hemi.groundColor.setHex(0x101724).lerp(_terrainColor, daylight * 0.42);
+  hemi.intensity = 0.55 + daylight * 1.35;
+  ambient.intensity = 0.24 + daylight * 0.22;
+  rim.intensity = 0.42 - daylight * 0.18;
+  renderer.toneMappingExposure = 0.84 + daylight * 0.23;
+}
+
+function updateTerrainColors(cfg) {
+  _terrainColor.setHex(cfg.ground);
+  _terrainAccent.setHex(cfg.accent);
+  const colors = terrainGeometry.getAttribute('color');
+  for (let i = 0; i < colors.count; i++) {
+    const variation = terrainColorVariation[i];
+    _vertexColor.copy(_terrainColor)
+      .lerp(_terrainAccent, variation * 0.46)
+      .multiplyScalar(0.82 + variation * 0.22);
+    colors.setXYZ(i, _vertexColor.r, _vertexColor.g, _vertexColor.b);
+  }
+  colors.needsUpdate = true;
+  grassMaterial.color.setHex(cfg.grass);
+  shoulderMaterial.color.setHex(cfg.shoulder);
 }
 
 function updateWorldSeason() {
   const cfg = seasonSettings[worldSeason.value] || seasonSettings.summer;
-  ground.material.color.setHex(cfg.ground);
+  updateTerrainColors(cfg);
   grid.material.color.setHex(cfg.grid);
-  scene.fog.density = cfg.fog;
-  updateWorldTime();
+  updateSunAndSky(true);
 }
 
-worldTime.addEventListener('input', updateWorldTime);
+worldTime.addEventListener('input', () => {
+  worldCycle.checked = false;
+  updateSunAndSky(true);
+});
+worldCycle.addEventListener('change', () => updateSunAndSky(true));
 worldSeason.addEventListener('change', updateWorldSeason);
 
 
@@ -241,33 +345,77 @@ renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
 // Lighting
-scene.add(new THREE.HemisphereLight(0x9ec8ff, 0x151a25, 1.5));
+const hemi = new THREE.HemisphereLight(0x9ec8ff, 0x151a25, 1.5);
+scene.add(hemi);
+
+const ambient = new THREE.AmbientLight(0x9eb9dd, 0.35);
+scene.add(ambient);
 
 const sun = new THREE.DirectionalLight(0xfff0d6, 2.4);
 sun.position.set(250, 420, 180);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.bias = -0.00025;
+sun.shadow.normalBias = 0.035;
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 1200;
-sun.shadow.camera.left = -500;
-sun.shadow.camera.right = 500;
-sun.shadow.camera.top = 500;
-sun.shadow.camera.bottom = -500;
+sun.shadow.camera.left = -320;
+sun.shadow.camera.right = 320;
+sun.shadow.camera.top = 320;
+sun.shadow.camera.bottom = -320;
 scene.add(sun);
 scene.add(sun.target);
+
+// A low-poly emissive-looking disc makes the directional light visible while
+// adding only one tiny mesh and no texture fetches.
+const sunDisc = new THREE.Mesh(
+  new THREE.SphereGeometry(22, 16, 8),
+  new THREE.MeshBasicMaterial({ color: 0xfff0ce, fog: false, toneMapped: false })
+);
+sunDisc.frustumCulled = false;
+scene.add(sunDisc);
 
 const rim = new THREE.DirectionalLight(0x4f8dff, 0.7);
 rim.position.set(-260, 140, -220);
 scene.add(rim);
 
-// Ground — simple and cheap. The Tokyo model itself replaces the procedural
-// skyscraper generator.
+// Broad, deterministic undulation gives the terrain shape without textures,
+// displacement maps, or per-frame work. It gently settles toward every road.
+function terrainVariationAt(x, z) {
+  const broad = Math.sin(x * 0.012) * 0.38 + Math.cos(z * 0.014) * 0.3;
+  const diagonal = Math.sin((x + z) * 0.0065) * 0.22;
+  const fine = Math.sin(x * 0.047 + Math.cos(z * 0.031)) * 0.1;
+  return THREE.MathUtils.clamp((broad + diagonal + fine + 1) * 0.5, 0, 1);
+}
+
+function terrainHeightAt(x, z) {
+  const nearestRoad = Math.abs(x - Math.round(x / 90) * 90);
+  const awayFromRoad = THREE.MathUtils.smoothstep(nearestRoad, 14, 34);
+  return -0.035 - awayFromRoad * (0.1 + terrainVariationAt(x, z) * 0.42);
+}
+
+const terrainGeometry = new THREE.PlaneGeometry(1800, 1800, 64, 64);
+const terrainPositions = terrainGeometry.getAttribute('position');
+const terrainColorVariation = new Float32Array(terrainPositions.count);
+const terrainColors = new Float32Array(terrainPositions.count * 3);
+
+for (let i = 0; i < terrainPositions.count; i++) {
+  const x = terrainPositions.getX(i);
+  const z = -terrainPositions.getY(i);
+  const variation = terrainVariationAt(x, z);
+  terrainPositions.setZ(i, terrainHeightAt(x, z));
+  terrainColorVariation[i] = variation;
+}
+terrainGeometry.setAttribute('color', new THREE.BufferAttribute(terrainColors, 3));
+terrainGeometry.computeVertexNormals();
+
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(1800, 1800),
+  terrainGeometry,
   new THREE.MeshStandardMaterial({
-    color: 0x1b2130,
+    color: 0xffffff,
+    vertexColors: true,
     roughness: 0.96,
-    metalness: 0.02
+    metalness: 0.01
   })
 );
 ground.rotation.x = -Math.PI / 2;
@@ -280,15 +428,88 @@ grid.material.transparent = true;
 grid.material.opacity = 0.12;
 scene.add(grid);
 
-// Subtle road strips for spatial grounding.
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x11161f, roughness: 1 });
+// Layered shoulders let asphalt blend into the terrain. Instancing keeps all
+// roads and markings to three draw calls even on mobile.
+const shoulderMaterial = new THREE.MeshStandardMaterial({ color: 0x2a3f2d, roughness: 1 });
+const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x15191d, roughness: 0.94 });
+const markingMaterial = new THREE.MeshBasicMaterial({ color: 0xc8b96e, toneMapped: false });
+const roadCount = 17;
+const roadShoulders = new THREE.InstancedMesh(
+  new THREE.PlaneGeometry(36, 1800), shoulderMaterial, roadCount
+);
+const roads = new THREE.InstancedMesh(
+  new THREE.PlaneGeometry(24, 1800), roadMaterial, roadCount
+);
+const roadDummy = new THREE.Object3D();
+
 for (let i = -8; i <= 8; i++) {
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(24, 1800), roadMat);
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(i * 90, 0.035, 0);
-  road.receiveShadow = true;
-  scene.add(road);
+  const instance = i + 8;
+  roadDummy.position.set(i * 90, 0.008, 0);
+  roadDummy.rotation.x = -Math.PI / 2;
+  roadDummy.updateMatrix();
+  roadShoulders.setMatrixAt(instance, roadDummy.matrix);
+
+  roadDummy.position.y = 0.022;
+  roadDummy.updateMatrix();
+  roads.setMatrixAt(instance, roadDummy.matrix);
 }
+roadShoulders.receiveShadow = true;
+roads.receiveShadow = true;
+roadShoulders.instanceMatrix.needsUpdate = true;
+roads.instanceMatrix.needsUpdate = true;
+scene.add(roadShoulders, roads);
+
+const dashSpacing = 32;
+const dashesPerRoad = Math.floor(1700 / dashSpacing);
+const roadMarkings = new THREE.InstancedMesh(
+  new THREE.PlaneGeometry(0.65, 9), markingMaterial, roadCount * dashesPerRoad
+);
+let dashIndex = 0;
+for (let roadIndex = -8; roadIndex <= 8; roadIndex++) {
+  for (let j = 0; j < dashesPerRoad; j++) {
+    roadDummy.position.set(roadIndex * 90, 0.029, -850 + j * dashSpacing);
+    roadDummy.rotation.x = -Math.PI / 2;
+    roadDummy.updateMatrix();
+    roadMarkings.setMatrixAt(dashIndex++, roadDummy.matrix);
+  }
+}
+roadMarkings.instanceMatrix.needsUpdate = true;
+scene.add(roadMarkings);
+
+// Sparse instanced grass adds parallax and surface detail for one draw call.
+// It deliberately avoids the road corridors and never casts mobile shadows.
+const grassMaterial = new THREE.MeshStandardMaterial({
+  color: 0x527c3e,
+  roughness: 1,
+  metalness: 0,
+  side: THREE.DoubleSide
+});
+const grassGeometry = new THREE.ConeGeometry(0.18, 1.25, 3, 1);
+const grass = new THREE.InstancedMesh(grassGeometry, grassMaterial, 420);
+const grassDummy = new THREE.Object3D();
+let grassSeed = 1987;
+const seededRandom = () => {
+  grassSeed = (grassSeed * 1664525 + 1013904223) >>> 0;
+  return grassSeed / 4294967296;
+};
+
+let grassIndex = 0;
+while (grassIndex < grass.count) {
+  const x = (seededRandom() - 0.5) * 1740;
+  const z = (seededRandom() - 0.5) * 1740;
+  const roadDistance = Math.abs(x - Math.round(x / 90) * 90);
+  if (roadDistance < 21) continue;
+
+  const scale = 0.65 + seededRandom() * 1.25;
+  grassDummy.position.set(x, terrainHeightAt(x, z) + scale * 0.62, z);
+  grassDummy.rotation.set(0, seededRandom() * Math.PI, 0);
+  grassDummy.scale.set(scale, scale, scale);
+  grassDummy.updateMatrix();
+  grass.setMatrixAt(grassIndex++, grassDummy.matrix);
+}
+grass.instanceMatrix.needsUpdate = true;
+grass.frustumCulled = true;
+scene.add(grass);
 
 // ---------------------------------------------------------------------------
 // Littlest Tokyo — from the supplied Three.js keyframes animation example.
@@ -1345,16 +1566,15 @@ function animate() {
   if (!paused) {
     elapsed += dt;
 
+    advanceWorldTime(dt);
     updatePlayer(dt);
     updateCamera(dt);
     updateCoins(dt, elapsed);
+    updateSunAndSky();
 
     if (cityMixer) {
       cityMixer.update(dt);
     }
-
-    sun.target.position.copy(player.group.position);
-    sun.target.updateMatrixWorld();
   }
 
   renderer.render(scene, camera);
