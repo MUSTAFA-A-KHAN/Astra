@@ -95,7 +95,7 @@ export function createWorld(scene, { lowPower = false } = {}) {
   groundGeometry.rotateX(-Math.PI / 2);
   const fallbackGround = new THREE.Mesh(
     groundGeometry,
-    new THREE.MeshStandardMaterial({ color: '#55745c', roughness: 1, transparent: true, opacity: 0.78 })
+    new THREE.MeshStandardMaterial({ color: '#55745c', roughness: 1, transparent: true, opacity: 0.18 })
   );
   fallbackGround.receiveShadow = true;
   root.add(fallbackGround);
