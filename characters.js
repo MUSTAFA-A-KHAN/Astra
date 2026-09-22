@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { assetManager } from './assets/asset-manager.js';
 import { animationManager } from './assets/animation-manager.js';
 
@@ -325,86 +327,7 @@ function makeBuiltin(meta) {
   } };
 }
 
-function disposeObject(object, extraMaterials = []) {
-  const geometries = new Set(), materials = new Set(extraMaterials), textures = new Set(), images = new Set(), skeletons = new Set();
-  object.traverse(child => {
-    if (child.geometry) geometries.add(child.geometry);
-    const list = Array.isArray(child.material) ? child.material : child.material ? [child.material] : [];
-    for (const material of list) {
-      materials.add(material);
-      for (const value of Object.values(material)) if (value?.isTexture) textures.add(value);
-    }
-    if (child.isSkinnedMesh && child.skeleton) skeletons.add(child.skeleton);
-  });
-  skeletons.forEach(skeleton => skeleton.dispose());
-  geometries.forEach(geometry => geometry.dispose());
-  materials.forEach(material => material.dispose());
-  textures.forEach(texture => {
-    if (texture.image) images.add(texture.image);
-    texture.dispose();
-  });
-  images.forEach(image => { if (typeof image.close === 'function') image.close(); });
-  object.removeFromParent();
-}
 
-function loadImportedScene(url, timeout = 30000) {
-  // Fetch can be aborted; parsing cannot. A late parse must still release its images.
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    let settled = false;
-    const timer = setTimeout(() => {
-      settled = true;
-      controller.abort();
-      reject(new Error('Character loading took too long. Please select it again to retry.'));
-    }, timeout);
-    const absoluteURL = new URL(url, window.location.href);
-    fetch(absoluteURL, { signal: controller.signal, credentials: 'same-origin' })
-      .then(response => {
-        if (!response.ok) throw new Error(`Character download failed (${response.status}).`);
-        return response.arrayBuffer();
-      })
-      .then(buffer => {
-        if (settled) return null;
-        return new GLTFLoader().parseAsync(buffer, new URL('.', absoluteURL).href);
-      })
-      .then(gltf => {
-        if (!gltf) return;
-        if (settled) {
-          const discarded = new THREE.Group();
-          for (const scene of new Set(gltf.scenes || [gltf.scene])) if (scene) discarded.add(scene);
-          disposeObject(discarded);
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        resolve(gltf);
-      })
-      .catch(error => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
-// Remove horizontal root translation only. Finger, limb and vertical gait tracks stay intact.
-function inPlaceClip(clip, model) {
-  const sanitized = clip.clone();
-  sanitized.tracks = sanitized.tracks.map(track => {
-    if (!track.name.endsWith('.position') || track.getValueSize() !== 3) return track;
-    const nodeName = track.name.slice(0, -'.position'.length);
-    const node = model.getObjectByName(nodeName) || model.getObjectByProperty('uuid', nodeName);
-    const rootBone = node?.isBone && !node.parent?.isBone;
-    if (!rootBone && node !== model && !/(?:^|[|_:])(hips|pelvis|root)$/i.test(nodeName)) return track;
-    for (let i = 0; i < track.values.length; i += 3) {
-      track.values[i] = track.values[0];
-      track.values[i + 2] = track.values[2];
-    }
-    return track;
-  });
-  return sanitized;
-}
 
 async function makeImported(meta) {
   const gltf = await assetManager.loadGLTF(meta.model);
@@ -447,9 +370,4 @@ async function makeImported(meta) {
   };
 }
 
-export function createBuiltinCharacter(meta) { return makeBuiltin(meta); }
 
-export async function createHero(id = 'warden') {
-  const meta = HEROES.find(hero => hero.id === id) || HEROES[0];
-  return meta.imported ? makeImported(meta) : makeBuiltin(meta);
-}
