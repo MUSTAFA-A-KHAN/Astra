@@ -48,6 +48,13 @@ sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -55
 sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target);
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
 const world = createWorld(scene, { lowPower: touch });
+const characterManager = new CharacterManager({
+  assetManager,
+  animationManager,
+  heroes: HEROES,
+  createBuiltin: createHero,
+});
+
 try {
   streamedTerrain = await createStreamedTerrain(scene, camera, renderer, { token: window.ASTRA_CESIUM_ION_TOKEN || '' });
 } catch (error) {
@@ -112,18 +119,40 @@ function updateHeroUI() {
   $('roster-count').textContent=`${String(HEROES.indexOf(heroMeta)+1).padStart(2,'0')} / 05`;
 }
 async function selectHero(id) {
-  if(switching || (hero && heroMeta.id===id)) return;
-  switching=true; $('play-button').disabled=true;
-  const meta=HEROES.find(h=>h.id===id)||HEROES[0];
-  $('character-loading').hidden=false; $('character-loading-text').textContent=meta.imported?`Loading ${meta.name} · ${meta.size}…`:'Preparing adventurer…';
+  if (switching || (hero && heroMeta.id === id)) return;
+  switching = true;
+  $('play-button').disabled = true;
+  const meta = HEROES.find(h => h.id === id) || HEROES[0];
+
+  loadingManager.begin(meta.id, meta.imported
+    ? `Loading ${meta.name} · ${meta.size}…`
+    : 'Preparing adventurer…');
+  $('character-loading').hidden = false;
+
   try {
-    const next=await createHero(meta.id);
-    if(hero){avatar.remove(hero.group);hero.dispose();}
-    hero=next;heroMeta=meta;avatar.add(hero.group);previewYaw=.23;updateHeroUI();save();
-  } catch (error) { console.warn('Character unavailable:',error); toast('That adventurer could not load. Your current hero is ready.'); }
-  finally {switching=false;$('character-loading').hidden=true;$('play-button').disabled=!hero;}
+    const next = await characterManager.load(meta.id);
+    if (hero && hero.group !== next.group) {
+      avatar.remove(hero.group);
+    }
+    hero = next;
+    heroMeta = meta;
+    if (hero.group.parent !== avatar) avatar.add(hero.group);
+    lodManager.register(hero.group, { high: 22, medium: 55, far: 95 });
+    previewYaw = .23;
+    updateHeroUI();
+    save();
+  } catch (error) {
+    console.warn('Character unavailable:', error);
+    toast('That adventurer could not load. Your current hero is ready.');
+  } finally {
+    switching = false;
+    loadingManager.end(meta.id);
+    $('character-loading').hidden = true;
+    $('play-button').disabled = !hero;
+  }
 }
-$('character-roster').addEventListener('click',e=>{const b=e.target.closest('[data-hero]');if(b)selectHero(b.dataset.hero);});
+
+('character-roster').addEventListener('click',e=>{const b=e.target.closest('[data-hero]');if(b)selectHero(b.dataset.hero);});
 
 // Collectibles share one mesh, material, and GPU buffer.
 const shardPositions = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30],[-65,-10],[66,-48],[-25,60],[25,48]];
