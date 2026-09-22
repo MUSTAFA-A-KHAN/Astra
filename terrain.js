@@ -1,5 +1,5 @@
 import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/+esm';
-import { CesiumIonAuthPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/src/three/plugins/CesiumIonAuthPlugin.js';
+import { CesiumIonAuthPlugin, ReorientationPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/+esm';
 
 // Optional Cesium World Terrain integration for Astra.
 // The terrain itself is streamed from Cesium ion; no terrain files are bundled
@@ -31,8 +31,13 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   // cache with byte limits, making it suitable for streamed mobile terrain.
   const tiles = new TilesRenderer();
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId, autoRefreshToken: true }));
-  tiles.group.rotation.x = - Math.PI / 2;
-
+  tiles.registerPlugin(new ReorientationPlugin({
+    lat: Number(window.ASTRA_TERRAIN_LAT_RAD ?? 0.0),
+    lon: Number(window.ASTRA_TERRAIN_LON_RAD ?? 0.0),
+    height: Number(window.ASTRA_TERRAIN_HEIGHT ?? 0),
+    recenter: true,
+    azimuth: Number(window.ASTRA_TERRAIN_AZIMUTH ?? 0),
+  }));
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.errorTarget = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 16 : 10;
@@ -46,11 +51,10 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   }
 
   scene.add(tiles.group);
-  tiles.addEventListener('load-tileset', () => { adapter.ready = true; });
 
   const adapter = {
     enabled: true,
-    ready: false,
+    ready: true,
     tiles,
     update() {
       tiles.setCamera(camera);
