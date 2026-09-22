@@ -50,6 +50,15 @@ export const HEROES = [
     imported: true, size: 'External GLB',
     model: 'https://threejs.org/examples/models/gltf/Soldier.glb',
   },
+  {
+    id: 'female-soldier', name: 'Female-Soldier', title: 'The Soldier', role: 'Guest adventurer',
+    description: 'A battle-tested soldier ready for the journey.',
+    color: '#8fa8b8', stats: { power: 80, agility: 75, magic: 20 },
+    speed: 18, damage: 30, cooldown: 0.55, range: 7,
+    ability: 'Combat strike', weapon: 'Military blade',
+    imported: true, size: '92 MB',
+    model: './realistic_female.glb',
+  },
 ];
 
 const palettes = {
