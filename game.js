@@ -60,6 +60,7 @@ sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
 const usingRealWorld = window.ASTRA_REAL_WORLD_ENABLED !== false && !!window.ASTRA_CESIUM_ION_TOKEN;
 const world = createWorld(scene, { lowPower: touch, disabled: usingRealWorld });
+const graphicsQualityManager = new GraphicsQualityManager({ renderer, sun, world, streamedTerrain: null, touchDevice: touch });
 const characterManager = new CharacterManager({ assetManager, animationManager, heroes: HEROES, createBuiltin: createHero });
 
 try {
@@ -95,7 +96,6 @@ function collide(p, radius = .65) {
 }
 
 const QUALITY = { low:{ratio:1,shadows:false}, balanced:{ratio:1.35,shadows:true}, high:{ratio:1.8,shadows:true} };
-const graphicsQualityManager = new GraphicsQualityManager({ renderer, sun, world, streamedTerrain: null, touchDevice: touch });
 const lodManager = new LODManager({ camera, high: 20, medium: 48, far: 90 });
 let quality = touch ? 'balanced' : 'high', resolutionScale = 1, frameMS = 16.7, frameSamples = 0, sampleTime = 0, lastAdapt = 0;
 function applyQuality(value, adaptive = false) {
