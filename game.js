@@ -297,7 +297,7 @@ function animate(now){
   }
   blob.position.set(avatar.position.x,screen==='lobby'?.225:.045,avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-position.y*.15):.8;
   sun.position.set(avatar.position.x-45,65,avatar.position.z+38);sun.target.position.set(avatar.position.x,0,avatar.position.z);sun.target.updateMatrixWorld();
-  streamedTerrain?.update?.(); renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
+  renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
   uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:"Wanderer's Glade";}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
