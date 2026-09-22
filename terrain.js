@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { TilesRenderer } from '3d-tiles-renderer';
+import { CesiumIonAuthPlugin } from '3d-tiles-renderer/core/plugins';
 
 // Optional Cesium World Terrain integration for Astra.
 // The terrain itself is streamed from Cesium ion; no terrain files are bundled
@@ -6,11 +8,6 @@ import * as THREE from 'three';
 // The adapter is isolated so the rest of Astra remains pure Three.js.
 
 const DEFAULT_ASSET_ID = 1; // Cesium World Terrain
-
-async function loadModule(url) {
-  const module = await import(url);
-  return module;
-}
 
 export async function createStreamedTerrain(scene, camera, renderer, {
   token = window.ASTRA_CESIUM_ION_TOKEN || '',
@@ -33,14 +30,6 @@ export async function createStreamedTerrain(scene, camera, renderer, {
 
   // 3DTilesRendererJS supports Cesium Ion tilesets directly and keeps an LRU
   // cache with byte limits, making it suitable for streamed mobile terrain.
-  const { TilesRenderer } = await loadModule(
-    'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/build/index.js'
-  );
-
-  const { CesiumIonAuthPlugin } = await loadModule(
-    'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/build/index.js'
-  );
-
   const tiles = new TilesRenderer();
   tiles.plugins.add(new CesiumIonAuthPlugin({ apiToken: token, assetId }));
 
