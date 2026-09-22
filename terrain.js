@@ -1,6 +1,6 @@
 import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.2/+esm';
 import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/build/index.js';
-import { CesiumIonAuthPlugin, ReorientationPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/build/index.plugins.js';
+import { CesiumIonAuthPlugin, ReorientationPlugin, GLTFExtensionsPlugin } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/build/index.plugins.js';
 
 // Optional Cesium World Terrain integration for Astra.
 // The terrain itself is streamed from Cesium ion; no terrain files are bundled
@@ -31,6 +31,8 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   // 3DTilesRendererJS supports Cesium Ion tilesets directly and keeps an LRU
   // cache with byte limits, making it suitable for streamed mobile terrain.
   const tiles = new TilesRenderer();
+  tiles.fetchOptions.mode = 'cors';
+  tiles.registerPlugin(new GLTFExtensionsPlugin());
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId, autoRefreshToken: true }));
   tiles.registerPlugin(new ReorientationPlugin({
     lat: Number(window.ASTRA_TERRAIN_LAT_RAD ?? 0.0),
