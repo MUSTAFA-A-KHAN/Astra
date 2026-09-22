@@ -8,6 +8,7 @@ import { CesiumIonAuthPlugin, ReorientationPlugin, GLTFExtensionsPlugin } from '
 // The adapter is isolated so the rest of Astra remains pure Three.js.
 
 const DEFAULT_ASSET_ID = 1; // Cesium World Terrain
+const DEG2RAD = Math.PI / 180;
 
 export async function createStreamedTerrain(scene, camera, renderer, {
   token = window.ASTRA_CESIUM_ION_TOKEN || '',
@@ -35,8 +36,10 @@ export async function createStreamedTerrain(scene, camera, renderer, {
   tiles.registerPlugin(new GLTFExtensionsPlugin());
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId, autoRefreshToken: true }));
   tiles.registerPlugin(new ReorientationPlugin({
-    lat: Number(window.ASTRA_TERRAIN_LAT_RAD ?? 0.0),
-    lon: Number(window.ASTRA_TERRAIN_LON_RAD ?? 0.0),
+    // Configure geographic anchor in degrees through terrain-config.js; the
+    // renderer expects radians. Defaults keep the feature opt-in and inert.
+    lat: Number(window.ASTRA_TERRAIN_LAT ?? 0) * DEG2RAD,
+    lon: Number(window.ASTRA_TERRAIN_LON ?? 0) * DEG2RAD,
     height: Number(window.ASTRA_TERRAIN_HEIGHT ?? 0),
     recenter: true,
     azimuth: Number(window.ASTRA_TERRAIN_AZIMUTH ?? 0),
