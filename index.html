@@ -140,8 +140,13 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#fff}
 
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { AssetManager } from './assets/AssetManager.js';
+import { CharacterManager } from './assets/CharacterManager.js';
+import { GraphicsQualityManager } from './assets/GraphicsQualityManager.js';
+import { LoadingProgressManager } from './assets/LoadingProgressManager.js';
+import { LODManager } from './assets/LODManager.js';
+import { WorldStreamer } from './assets/WorldStreamer.js';
+import { WORLD_ASSETS } from './assets/config.js';
 
 const CONFIG = {
   PLAYER_RADIUS: 2.2,
@@ -528,103 +533,62 @@ function setProgress(v, msg) {
 }
 
 async function loadTokyo() {
-  setProgress(0.18, 'Loading Littlest Tokyo...');
+  loadingProgress.set('city', 0.05, 'Loading environment...');
 
-  const loader = new GLTFLoader();
+  try {
+    const gltf = await assetManager.loadGLTF(WORLD_ASSETS.city, {
+      key: 'city',
+      label: 'Littlest Tokyo',
+      optional: true
+    });
 
-  // Littlest Tokyo is Draco-compressed in the official Three.js example.
-  // Without DRACOLoader the GLB downloads but its geometry cannot be decoded,
-  // which is why the city was completely invisible.
-  const dracoLoader = new DRACOLoader();
-  dracoLoader.setDecoderPath(
-    'https://threejs.org/examples/jsm/libs/draco/gltf/'
-  );
-  loader.setDRACOLoader(dracoLoader);
+    if (!gltf) return false;
 
-  return new Promise(resolve => {
-    loader.load(
-      CITY_URL,
-      gltf => {
-        cityModel = gltf.scene;
+    cityModel = assetManager.cloneScene(gltf);
+    cityModel.scale.setScalar(0.22);
+    cityModel.position.set(0, 0, 0);
+    cityModel.traverse(obj => {
+      if (!obj.isMesh) return;
+      obj.castShadow = graphicsQuality.tier !== 'LOW';
+      obj.receiveShadow = true;
+      obj.frustumCulled = true;
+      if (obj.material) obj.material.needsUpdate = true;
+    });
+    scene.add(cityModel);
 
-        // The official example uses 0.01 because it is framed like a small
-        // desktop model viewer. For this roaming game that scale is far too
-        // small, so deliberately enlarge it for gameplay.
-        cityModel.scale.setScalar(0.22);
-        cityModel.position.set(0, 0, 0);
+    if (gltf.animations?.length) {
+      cityMixer = new THREE.AnimationMixer(cityModel);
+      cityMixer.clipAction(gltf.animations[0]).play();
+    }
 
-        cityModel.traverse(obj => {
-          if (obj.isMesh) {
-            obj.castShadow = true;
-            obj.receiveShadow = true;
-            obj.frustumCulled = true;
+    cityBox = new THREE.Box3().setFromObject(cityModel);
+    const center = cityBox.getCenter(new THREE.Vector3());
+    cityModel.position.x -= center.x;
+    cityModel.position.z -= center.z;
 
-            // Keep the Tokyo asset visually crisp without creating expensive
-            // shadow maps for every tiny mesh.
-            if (obj.material) {
-              obj.material.needsUpdate = true;
-            }
-          }
-        });
+    cityBox.setFromObject(cityModel);
+    cityModel.position.y -= cityBox.min.y;
+    cityBox.setFromObject(cityModel);
 
-        scene.add(cityModel);
+    const cityCenter = cityBox.getCenter(new THREE.Vector3());
+    camRig.target.copy(cityCenter);
+    camRig.target.y = Math.min(cityBox.max.y * 0.25, 25);
+    camRig.radius = 42;
+    camRig.desiredRadius = 42;
+    camera.position.set(0, 26, 42);
+    camera.lookAt(camRig.target);
 
-        // This is the keyframe animation from the official Three.js example.
-        if (gltf.animations && gltf.animations.length) {
-          cityMixer = new THREE.AnimationMixer(cityModel);
-          cityMixer.clipAction(gltf.animations[0]).play();
-        }
-
-        // IMPORTANT: calculate the bounds AFTER applying the gameplay scale.
-        // The previous version could leave the model effectively out of frame.
-        cityBox = new THREE.Box3().setFromObject(cityModel);
-
-        const center = cityBox.getCenter(new THREE.Vector3());
-        const size = cityBox.getSize(new THREE.Vector3());
-
-        // Center the whole Tokyo scene around the player.
-        cityModel.position.x -= center.x;
-        cityModel.position.z -= center.z;
-
-        // Put the lowest point exactly on the game ground.
-        cityBox.setFromObject(cityModel);
-        cityModel.position.y -= cityBox.min.y;
-
-        cityBox.setFromObject(cityModel);
-
-        console.log(
-          'Littlest Tokyo loaded:',
-          'size=', size.toArray(),
-          'bounds=', cityBox.min.toArray(), cityBox.max.toArray()
-        );
-
-        // Start close enough to see the city immediately.
-        const cityCenter = cityBox.getCenter(new THREE.Vector3());
-        camRig.target.copy(cityCenter);
-        camRig.target.y = Math.min(cityBox.max.y * 0.25, 25);
-        camRig.radius = 42;
-        camRig.desiredRadius = 42;
-        camera.position.set(0, 26, 42);
-        camera.lookAt(camRig.target);
-
-        cityReady = true;
-
-        setProgress(0.58, 'Littlest Tokyo loaded. Loading player...');
-        resolve();
-      },
-      xhr => {
-        if (xhr.total) {
-          const p = xhr.loaded / xhr.total;
-          setProgress(0.18 + p * 0.38, `Loading Tokyo ${Math.round(p * 100)}%...`);
-        }
-      },
-      err => {
-        console.error('LittlestTokyo.glb / Draco decode failed:', err);
-        setProgress(0.58, 'Tokyo failed to decode — check Console/network.');
-        resolve();
-      }
-    );
-  });
+    cityReady = true;
+    loadingProgress.complete('city', 'Environment ready');
+    graphicsQuality.apply();
+    return true;
+  } catch (err) {
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      console.error('[AssetManager] Littlest Tokyo failed:', WORLD_ASSETS.city, err);
+    }
+    loadingProgress.fail('city', 'Environment unavailable — continuing');
+    return false;
+  }
 }
 
 // Player
@@ -659,293 +623,58 @@ placeholder.position.y = 5.1;
 placeholder.castShadow = true;
 player.group.add(placeholder);
 
-// ---------------------------------------------------------------------------
-// Actual uploaded rigged Rei Ayanami GLB.
-// Embedded directly so this works from a local HTML file.
-// ---------------------------------------------------------------------------
-const SOLDIER_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
-const ARTHUR_GLB_URL = './Arthur-rigged-under-25mb.glb';
+const loadingProgress = new LoadingProgressManager({
+  bar: ui.bar,
+  message: ui.loadMsg
+});
+const assetManager = new AssetManager({
+  renderer,
+  progress: loadingProgress,
+  development: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+});
+const graphicsQuality = new GraphicsQualityManager({ renderer, sun });
+const lodManager = new LODManager(camera);
+const worldStreamer = new WorldStreamer({ assetManager });
+const characterManager = new CharacterManager({
+  assetManager,
+  player,
+  loading: loadingProgress,
+  prepareModel: (model, entry) => fitCharacterModel(
+    model,
+    entry.id === 'soldier' ? CONFIG.PLAYER_HEIGHT * 1.4 : CONFIG.PLAYER_HEIGHT * 2.0,
+    entry.id === 'soldier' ? Math.PI : 0
+  )
+});
+graphicsQuality.apply();
 
-const characterSelect = document.getElementById('character-select');
+// Character loading is owned by CharacterManager. Existing in-repo GLBs remain
+// development/local fallbacks; production assets are resolved via assets/config.js.
 let activeCharacter = 'rei';
-let soldierModel = null;
-let soldierMixer = null;
-let soldierActions = {};
 let characterLoading = false;
-
-const REI_GLB_URL = './rigged-model-optimized.glb';
-
-
-function loadReiModel() {
-  return new Promise(resolve => {
-    setProgress(0.66, 'Loading character...');
-    const loader = new GLTFLoader();
-    loader.load(REI_GLB_URL, gltf => {
-      const model = gltf.scene;
-      model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
-      model.scale.setScalar(1);
-      model.rotation.y = 0;
-      model.updateMatrixWorld(true);
-      const rawBox = new THREE.Box3().setFromObject(model);
-      const rawSize = rawBox.getSize(new THREE.Vector3());
-      if (rawSize.y > 0.001) model.scale.setScalar((CONFIG.PLAYER_HEIGHT * 2.0) / rawSize.y);
-      model.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
-      model.position.x -= center.x;
-      model.position.z -= center.z;
-      model.position.y -= box.min.y;
-      model.updateMatrixWorld(true);
-      player.group.add(model);
-      player.model = model;
-      player.mixer = new THREE.AnimationMixer(model);
-      const clips = gltf.animations || [];
-      const byName = Object.create(null);
-      for (const clip of clips) byName[clip.name] = clip;
-      const findClip = (...names) => names.map(n => byName[n]).find(Boolean) || clips.find(c => names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))) || null;
-      player.idleAction = player.mixer.clipAction(findClip('Idle', 'Idle Fold Arms'));
-      player.walkAction = player.mixer.clipAction(findClip('Walk Forward', 'Walk'));
-      player.runAction = player.mixer.clipAction(findClip('Sprint', 'Jog Forward', 'Run'));
-      player.jumpAction = player.mixer.clipAction(findClip('Jump', 'Jump Start'));
-      player.jumpLandAction = player.mixer.clipAction(findClip('Jump Land'));
-      [player.idleAction, player.walkAction, player.runAction, player.jumpAction, player.jumpLandAction].forEach(a => { if (a) { a.enabled = true; a.setEffectiveWeight(0); a.play(); } });
-      if (player.idleAction) player.idleAction.setEffectiveWeight(1);
-      placeholder.visible = false;
-      setProgress(0.82, 'Character loaded.');
-      resolve();
-    }, undefined, err => { console.error('Character GLB load failed:', err); setProgress(0.66, 'Character failed — continuing with placeholder.'); resolve(); });
-  });
-}
-
-function clearPlayerCharacter() {
-  if (player.model) {
-    player.group.remove(player.model);
-    player.model = null;
-  }
-
-  if (player.reiRig) {
-    player.group.remove(player.reiRig);
-    player.reiRig = null;
-  }
-
-  if (soldierModel) {
-    player.group.remove(soldierModel);
-    soldierModel = null;
-  }
-
-  if (player.mixer) {
-    player.mixer.stopAllAction();
-    player.mixer = null;
-  }
-
-  soldierMixer = null;
-  soldierActions = {};
-  player.idleAction = null;
-  player.walkAction = null;
-  player.runAction = null;
-  player.jumpAction = null;
-  player.jumpLandAction = null;
-
-  placeholder.visible = true;
-}
-
-function setupRiggedAnimations(model, animations) {
-  if (!animations || !animations.length) return null;
-
-  const mixer = new THREE.AnimationMixer(model);
-  const byName = Object.create(null);
-
-  for (const clip of animations) byName[clip.name] = clip;
-
-  const find = (...names) => {
-    for (const n of names) {
-      if (byName[n]) return byName[n];
-    }
-
-    return animations.find(c =>
-      names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))
-    ) || null;
-  };
-
-  const actions = {
-    idle: mixer.clipAction(find('Idle', 'Idle Fold Arms') || animations[0]),
-    walk: mixer.clipAction(find('Walk Forward', 'Walk')),
-    run: mixer.clipAction(find('Sprint', 'Jog Forward', 'Run')),
-    jump: null,
-    land: null
-  };
-
-  Object.values(actions).forEach(a => {
-    if (a) {
-      a.enabled = true;
-      a.setEffectiveWeight(0);
-      a.play();
-    }
-  });
-
-  if (actions.idle) actions.idle.setEffectiveWeight(1);
-
-  return { mixer, actions };
-}
-
-function fitCharacterModel(
-  model,
-  targetHeight = CONFIG.PLAYER_HEIGHT * 2.0,
-  headingOffset = 0
-) {
-  model.scale.setScalar(1);
-  model.position.set(0, 0, 0);
-  model.rotation.y = headingOffset;
-  model.updateMatrixWorld(true);
-
-  const rawBox = new THREE.Box3().setFromObject(model);
-  const rawSize = rawBox.getSize(new THREE.Vector3());
-
-  if (rawSize.y > 0.001) {
-    model.scale.setScalar(targetHeight / rawSize.y);
-  }
-
-  model.updateMatrixWorld(true);
-
-  const box = new THREE.Box3().setFromObject(model);
-  const center = box.getCenter(new THREE.Vector3());
-
-  model.position.x -= center.x;
-  model.position.z -= center.z;
-  model.position.y -= box.min.y;
-
-  model.updateMatrixWorld(true);
-
-  model.traverse(o => {
-    if (o.isMesh) {
-      o.castShadow = true;
-      o.receiveShadow = true;
-      o.frustumCulled = false;
-    }
-  });
-}
-
-function loadSoldierModel() {
-  return new Promise(resolve => {
-    setProgress(0.66, 'Loading Soldier...');
-
-    const loader = new GLTFLoader();
-
-    loader.load(
-      SOLDIER_URL,
-      gltf => {
-        const model = gltf.scene;
-        fitCharacterModel(
-          model,
-          CONFIG.PLAYER_HEIGHT * 1.4,
-          Math.PI
-        );
-
-        const anim = setupRiggedAnimations(model, gltf.animations);
-
-        player.group.add(model);
-        player.model = model;
-        soldierModel = model;
-
-        if (anim) {
-          player.mixer = anim.mixer;
-          player.idleAction = anim.actions.idle;
-          player.walkAction = anim.actions.walk;
-          player.runAction = anim.actions.run;
-          player.jumpAction = anim.actions.jump;
-          player.jumpLandAction = anim.actions.land;
-        }
-
-        placeholder.visible = false;
-        setProgress(0.82, 'Soldier loaded.');
-        resolve();
-      },
-      undefined,
-      err => {
-        console.error('Soldier.glb failed to load:', err);
-        setProgress(0.82, 'Soldier failed — keeping current character.');
-        resolve();
-      }
-    );
-  });
-}
-
-function loadArthurModel() {
-  return new Promise(resolve => {
-    setProgress(0.66, 'Loading Arthur...');
-    const loader = new GLTFLoader();
-
-    loader.load(
-      ARTHUR_GLB_URL,
-      gltf => {
-        const model = gltf.scene;
-        fitCharacterModel(
-          model,
-          CONFIG.PLAYER_HEIGHT * 2.0,
-          0
-        );
-
-        const anim = setupRiggedAnimations(model, gltf.animations || []);
-
-        player.group.add(model);
-        player.model = model;
-
-        if (anim) {
-          player.mixer = anim.mixer;
-          player.idleAction = anim.actions.idle;
-          player.walkAction = anim.actions.walk;
-          player.runAction = anim.actions.run;
-          player.jumpAction = anim.actions.jump;
-          player.jumpLandAction = anim.actions.land;
-        }
-
-        placeholder.visible = false;
-        setProgress(0.82, 'Arthur loaded.');
-        resolve();
-      },
-      undefined,
-      err => {
-        console.error('Arthur GLB failed to load:', err);
-        setProgress(0.82, 'Arthur failed — keeping current character.');
-        resolve();
-      }
-    );
-  });
-}
 
 async function switchCharacter(character) {
   if (characterLoading || character === activeCharacter) return;
 
   characterLoading = true;
-  activeCharacter = character;
-
-  const oldPosition = player.group.position.clone();
-  const oldVelocity = player.velocity.clone();
-  const oldFacing = player.facing;
-  const oldDisplayYaw = player.displayYaw;
-
-  clearPlayerCharacter();
-
-  if (character === 'soldier') {
-    await loadSoldierModel();
-  } else if (character === 'arthur') {
-    await loadArthurModel();
-  } else {
-    await loadReiModel();
+  const requested = character;
+  try {
+    await characterManager.activate(requested);
+    activeCharacter = requested;
+    placeholder.visible = !player.model;
+    characterManager.preloadLikely().catch(() => {});
+  } catch (err) {
+    console.error('Character switch failed:', requested, err);
+    placeholder.visible = true;
+    activeCharacter = 'rei';
+    characterSelect.value = activeCharacter;
+  } finally {
+    characterLoading = false;
   }
-
-  player.group.position.copy(oldPosition);
-  player.velocity.copy(oldVelocity);
-  player.facing = oldFacing;
-  player.displayYaw = oldDisplayYaw;
-
-  characterLoading = false;
 }
 
 characterSelect.addEventListener('change', () => {
   switchCharacter(characterSelect.value);
 });
-
 
 // Camera / input
 const camRig = {
@@ -1373,7 +1102,7 @@ function updatePlayer(dt) {
       }
     }
 
-    player.mixer.update(dt * (0.85 + w * 0.25));
+    player.mixerManager?.update(dt * (0.85 + w * 0.25));
   } else if (placeholder.visible) {
     placeholder.position.y =
       5.1 + Math.abs(Math.sin(performance.now() * 0.01)) *
@@ -1396,6 +1125,18 @@ function updatePlayer(dt) {
 
 function setWeight(action, w) {
   if (action) action.setEffectiveWeight(THREE.MathUtils.clamp(w, 0, 1));
+}
+
+async function ensureCombatAnimations() {
+  return characterManager.ensureAnimationPack('combat');
+}
+
+async function ensureEmoteAnimations() {
+  return characterManager.ensureAnimationPack('emotes');
+}
+
+async function ensureTraversalAnimations() {
+  return characterManager.ensureAnimationPack('traversal');
 }
 
 // Camera
@@ -1575,6 +1316,7 @@ function animate() {
     if (cityMixer) {
       cityMixer.update(dt);
     }
+    lodManager.update();
   }
 
   renderer.render(scene, camera);
@@ -1587,33 +1329,40 @@ addEventListener('resize', () => {
 });
 
 async function boot() {
-  try {
-    setProgress(0.05, 'Starting Three.js...');
+  loadingProgress.set('startup', 0.05, 'Starting Three.js...');
 
-    await Promise.race([loadTokyo(), new Promise(resolve => setTimeout(() => { setProgress(0.58, 'Tokyo is taking too long — continuing...'); resolve(); }, 20000))]);
-    await loadReiModel();
+  try {
+    // Only critical startup assets block gameplay: the current environment and selected hero.
+    const [, hero] = await Promise.all([
+      loadTokyo(),
+      characterManager.activate(activeCharacter)
+    ]);
 
     player.group.position.set(0, 0, 0);
-
     camRig.target.copy(player.group.position).add(new THREE.Vector3(0, 8, 0));
     camera.position.set(0, 38, 78);
 
-    setProgress(0.88, 'Placing coins...');
+    loadingProgress.complete('startup', 'Preparing game...');
     spawnCoins(50);
     updateWorldSeason();
 
-    setProgress(1, cityReady ? 'Ready — Littlest Tokyo + character loaded.' : 'Ready — offline ground mode.');
-
+    setProgress(1, cityReady ? 'Ready — environment + character loaded.' : 'Ready — offline ground mode.');
     setTimeout(() => ui.loading.classList.add('hidden'), 450);
 
     if (!started) {
       started = true;
       renderer.setAnimationLoop(animate);
     }
-  } catch (err) {
-    console.error(err);
 
-    ui.loadMsg.textContent = 'Load error — starting offline mode...';
+    // Background work is serialized so it does not compete with initial gameplay.
+    void characterManager.preloadLikely()
+      .then(() => characterManager.preloadCharacter('soldier'))
+      .catch(() => {});
+  } catch (err) {
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      console.error('[Astra boot]', err);
+    }
+    ui.loadMsg.textContent = 'Startup asset error — continuing with fallback mode...';
     ui.loading.classList.add('hidden');
 
     if (!started) {
