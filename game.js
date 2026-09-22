@@ -220,7 +220,7 @@ function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
-  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=heroMeta.speed*(run?1.65:1);
+  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=heroMeta.speed*(run?1:0.4);
   const vx=(Math.cos(yaw)*x+Math.sin(yaw)*z)*speed,vz=(-Math.sin(yaw)*x+Math.cos(yaw)*z)*speed;
   velocity.x=damp(velocity.x,vx,12,dt);velocity.z=damp(velocity.z,vz,12,dt);
   position.x+=velocity.x*dt;position.z+=velocity.z*dt;collide(position);
