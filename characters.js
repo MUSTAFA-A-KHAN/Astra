@@ -348,8 +348,7 @@ function disposeObject(object, extraMaterials = []) {
   object.removeFromParent();
 }
 
-function loadImportedScene(url, timeout = 30000) {
-  // Fetch can be aborted; parsing cannot. A late parse must still release its images.
+function legacyLoadEmbedded(url, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     let settled = false;
@@ -371,9 +370,7 @@ function loadImportedScene(url, timeout = 30000) {
       .then(gltf => {
         if (!gltf) return;
         if (settled) {
-          const discarded = new THREE.Group();
-          for (const scene of new Set(gltf.scenes || [gltf.scene])) if (scene) discarded.add(scene);
-          disposeObject(discarded);
+          disposeObject(gltf.scene);
           return;
         }
         settled = true;
