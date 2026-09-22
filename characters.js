@@ -41,6 +41,15 @@ export const HEROES = [
     ability: 'Frontier strike', weapon: 'Outrider prowess', imported: true, size: '21 MB',
     model: './Arthur-rigged-under-25mb.glb',
   },
+    {
+    id: 'soldier', name: 'Soldier', title: 'The Soldier', role: 'Guest adventurer',
+    description: 'A battle-tested soldier ready for the journey.',
+    color: '#8fa8b8', stats: { power: 80, agility: 75, magic: 20 },
+    speed: 9.5, damage: 30, cooldown: 0.55, range: 7,
+    ability: 'Combat strike', weapon: 'Military blade',
+    imported: true, size: 'External GLB',
+    model: 'https://threejs.org/examples/models/gltf/Soldier.glb',
+  },
 ];
 
 const palettes = {
@@ -429,6 +438,9 @@ async function makeImported(meta) {
   const fitted = new THREE.Group();
   group.add(fitted);
   fitted.add(model);
+  if (meta.id === 'soldier') {
+  model.rotation.y = Math.PI;
+}
   fitted.position.set(-center.x, -bounds.min.y, -center.z);
   model.traverse(child => {
     if (!child.isMesh) return;
@@ -439,7 +451,9 @@ async function makeImported(meta) {
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.filter(Boolean).forEach(material => { if ('roughness' in material) material.roughness = Math.max(0.48, material.roughness); });
   });
-  const clips = (gltf.animations || []).map(clip => inPlaceClip(clip, model));
+  const clips = (gltf.animations || []).map(clip =>
+  meta.id === 'soldier' ? clip.clone() : inPlaceClip(clip, model)
+);
   const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
   const find = pattern => clips.find(clip => pattern.test(clip.name));
   const idle = find(/^idle$/i) || clips[0];
