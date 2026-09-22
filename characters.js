@@ -84,7 +84,7 @@ export const HEROES = [
     // These are animation playback multipliers.
     // They are NOT world movement speeds.
     animationSpeeds: {
-      walk: 0.85,
+      walk: 1.0,
       run: 1.0,
       sprint: 1.15,
     },
@@ -113,7 +113,7 @@ export const HEROES = [
     orientationYaw: 0,
 
     animationSpeeds: {
-      walk: 0.75,
+      walk: 1,
       run: 1.0,
       sprint: 1.15,
     },
@@ -174,7 +174,7 @@ export const HEROES = [
     orientationYaw: 0,
 
     animationSpeeds: {
-      walk: 0.85,
+      walk: 1.0,
       run: 1.0,
       sprint: 1.15,
     },
