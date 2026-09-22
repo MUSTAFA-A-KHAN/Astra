@@ -28,8 +28,8 @@ export async function createStreamedTerrain(scene, camera, renderer, {
     };
   }
 
-  // 3DTilesRendererJS supports Cesium Ion tilesets directly and keeps an LRU
-  // cache with byte limits, making it suitable for streamed mobile terrain.
+  // Cesium World Terrain is a quantized-mesh terrain asset exposed by Cesium ion.
+  // The renderer loads only the terrain tiles required by the current camera.
   const tiles = new TilesRenderer();
   tiles.fetchOptions.mode = 'cors';
   tiles.registerPlugin(new GLTFExtensionsPlugin());
