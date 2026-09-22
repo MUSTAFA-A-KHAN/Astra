@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { createWorld } from './world.js';
 import { HEROES, createHero } from './characters.js';
 import { createStreamedTerrain } from './terrain.js';
+import { AssetManager } from './asset-manager.js';
+import { AnimationManager } from './animation-manager.js';
+import { CharacterManager } from './character-manager.js';
+import { GraphicsQualityManager } from './graphics-quality-manager.js';
+import { LODManager } from './lod-manager.js';
+import { LoadingManager } from './loading-manager.js';
+import { CacheManager } from './cache-manager.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -15,6 +22,10 @@ const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0 && v < 24) : []) };
 const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24) };
 let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false, streamedTerrain = null;
+const cacheManager = new CacheManager();
+const loadingManager = new LoadingManager({ element: document.getElementById('character-loading'), textElement: document.getElementById('character-loading-text') });
+const assetManager = new AssetManager({ onProgress: ({ url, progress }) => loadingManager.update(url, progress, `Loading asset · ${Math.round(progress * 100)}%`) });
+const animationManager = new AnimationManager(assetManager);
 let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, jumpVelocity = 0;
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
@@ -48,12 +59,7 @@ sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -55
 sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target);
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
 const world = createWorld(scene, { lowPower: touch });
-const characterManager = new CharacterManager({
-  assetManager,
-  animationManager,
-  heroes: HEROES,
-  createBuiltin: createHero,
-});
+const characterManager = new CharacterManager({ assetManager, animationManager, heroes: HEROES, createBuiltin: createHero });
 
 try {
   streamedTerrain = await createStreamedTerrain(scene, camera, renderer, { token: window.ASTRA_CESIUM_ION_TOKEN || '' });
@@ -86,12 +92,13 @@ function collide(p, radius = .65) {
 }
 
 const QUALITY = { low:{ratio:1,shadows:false}, balanced:{ratio:1.35,shadows:true}, high:{ratio:1.8,shadows:true} };
+const graphicsQualityManager = new GraphicsQualityManager({ renderer, sun, world, streamedTerrain, touchDevice: touch });
+const lodManager = new LODManager({ camera, high: 20, medium: 48, far: 90 });
 let quality = touch ? 'balanced' : 'high', resolutionScale = 1, frameMS = 16.7, frameSamples = 0, sampleTime = 0, lastAdapt = 0;
 function applyQuality(value, adaptive = false) {
-  quality = value; const q = QUALITY[value];
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q.ratio) * resolutionScale); renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = q.shadows; sun.castShadow = q.shadows;
-  world.setQuality(value); streamedTerrain?.setQuality?.(value); renderer.shadowMap.needsUpdate = true;
+  quality = value;
+  graphicsQualityManager.resolutionScale = resolutionScale;
+  graphicsQualityManager.apply(value, adaptive);
   $('quality-status').textContent = `${preferences.quality === 'auto' ? 'Adaptive' : 'Graphics'} · ${value === 'low' ? 'Performance' : value === 'high' ? 'High' : 'Balanced'}`;
   if (adaptive) lastAdapt = time;
 }
@@ -325,6 +332,7 @@ function animate(now){
     updateCamera(dt);
   }
   streamedTerrain?.update?.();
+  lodManager.update();
   blob.position.set(avatar.position.x,screen==='lobby'?.225:.045,avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-position.y*.15):.8;
   sun.position.set(avatar.position.x-45,65,avatar.position.z+38);sun.target.position.set(avatar.position.x,0,avatar.position.z);sun.target.updateMatrixWorld();
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
