@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { createWorld } from './world.js';
-import { HEROES, createHero } from './characters.js';
+import { HEROES } from './characters.js';
+import { characterManager } from './assets/character-manager.js';
+import { graphicsQualityManager } from './assets/graphics-quality-manager.js';
+import { loadingManager } from './assets/loading-manager.js';
 import { createStreamedTerrain } from './terrain.js';
 
 const $ = id => document.getElementById(id);
@@ -117,7 +120,7 @@ async function selectHero(id) {
   const meta=HEROES.find(h=>h.id===id)||HEROES[0];
   $('character-loading').hidden=false; $('character-loading-text').textContent=meta.imported?`Loading ${meta.name} · ${meta.size}…`:'Preparing adventurer…';
   try {
-    const next=await createHero(meta.id);
+    const next=await characterManager.load(meta);
     if(hero){avatar.remove(hero.group);hero.dispose();}
     hero=next;heroMeta=meta;avatar.add(hero.group);previewYaw=.23;updateHeroUI();save();
   } catch (error) { console.warn('Character unavailable:',error); toast('That adventurer could not load. Your current hero is ready.'); }
