@@ -1,6 +1,5 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { assetManager } from './assets/asset-manager.js';
+import { animationManager } from './assets/animation-manager.js';
 
 /** Built-in adventurers are original, lightweight geometry; optional GLBs stay on demand. */
 export const HEROES = [
@@ -408,9 +407,8 @@ function inPlaceClip(clip, model) {
 }
 
 async function makeImported(meta) {
-  const gltf = await loadImportedScene(meta.model);
-  const model = gltf.scene;
-  if (!model) throw new Error(`The ${meta.name} model did not contain a scene.`);
+  const gltf = await assetManager.loadGLTF(meta.model);
+  const model = assetManager.createInstance(gltf, { name: meta.name });
   const group = new THREE.Group();
   group.name = meta.name;
   group.add(model);
@@ -425,49 +423,31 @@ async function makeImported(meta) {
   model.updateMatrixWorld(true);
   bounds.setFromObject(model);
   const center = bounds.getCenter(new THREE.Vector3());
-  // Offset the wrapper so root animation does not overwrite normalization.
   const fitted = new THREE.Group();
-  group.add(fitted);
-  fitted.add(model);
   fitted.position.set(-center.x, -bounds.min.y, -center.z);
-  model.traverse(child => {
-    if (!child.isMesh) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
-    // Imported animation bounds can exclude extended limbs or the upper body.
-    child.frustumCulled = false;
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-    materials.filter(Boolean).forEach(material => { if ('roughness' in material) material.roughness = Math.max(0.48, material.roughness); });
-  });
-  const clips = (gltf.animations || []).map(clip => inPlaceClip(clip, model));
-  const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
-  const find = pattern => clips.find(clip => pattern.test(clip.name));
-  const idle = find(/idle/i) || clips[0];
-  const walk = find(/^walk|jog/i) || idle;
-  const run = find(/sprint|run/i) || walk;
-  const actions = new Map();
-  for (const clip of new Set([idle, walk, run].filter(Boolean))) actions.set(clip, mixer.clipAction(clip));
-  let current = idle ? actions.get(idle) : null;
-  if (current) current.play();
+  fitted.add(model);
+  group.add(fitted);
+  const controller = animationManager.createController(model, { characterId: meta.id });
   let disposed = false;
-  return { group, meta, height: 3.4, mixer, animate(dt, { moving = false, sprinting = false, attacking = false, time = 0 } = {}) {
-    if (disposed) return;
-    const next = actions.get(moving ? sprinting ? run : walk : idle);
-    if (next && next !== current) {
-      next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
-      current?.fadeOut(0.22);
-      current = next;
-    }
-    mixer?.update(Math.min(Math.max(dt, 0), 0.1));
-    fitted.rotation.z = attacking ? Math.sin(time * 22) * 0.025 : 0;
-  }, dispose() {
-    if (disposed) return;
-    disposed = true;
-    mixer?.stopAllAction();
-    mixer?.uncacheRoot(model);
-    disposeObject(group);
-  } };
+  return {
+    group, meta, height: 3.4, mixer: controller.mixer,
+    animate(dt, state = {}) {
+      if (disposed) return;
+      const next = state.moving ? (state.sprinting ? controller.clips.run : controller.clips.walk) : controller.clips.idle;
+      if (next) controller.play(next);
+      controller.update(dt);
+      fitted.rotation.z = state.attacking ? Math.sin((state.time || 0) * 22) * 0.025 : 0;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      controller.dispose();
+      disposeObject(group);
+    },
+  };
 }
+
+export function createBuiltinCharacter(meta) { return makeBuiltin(meta); }
 
 export async function createHero(id = 'warden') {
   const meta = HEROES.find(hero => hero.id === id) || HEROES[0];
