@@ -1,0 +1,15 @@
+{
+  "name": "astra-rpg",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/dev-server.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "agent-browser": "^0.38.1"
+  }
+}
