@@ -2071,6 +2071,7 @@ function inPlaceClip(
   clip,
   model,
   rootPositions,
+  height,
 ) {
   const sanitized =
     clip.clone();
@@ -2147,8 +2148,20 @@ function inPlaceClip(
                     .matrixWorld,
                 )
                 .invert(),
-            ).normalize();
+            );
           }
+
+          /**
+           * One world unit, counted in the units this track is
+           * written in — whatever `up` grew or shrank by on its
+           * way into the node's space. It is what makes the
+           * character's own height comparable with the numbers
+           * the track carries.
+           */
+          const perWorldUnit =
+            up.length() || 1;
+
+          up.normalize();
 
           rootPositions.set(
             track.name,
@@ -2160,17 +2173,51 @@ function inPlaceClip(
                   track.values[2],
                 ),
               up,
+              perWorldUnit,
             },
           );
         }
 
-        const { origin, up } =
+        const {
+          origin,
+          up,
+          perWorldUnit,
+        } =
           rootPositions.get(
             track.name,
           );
 
         const sample =
           new THREE.Vector3();
+
+        /**
+         * A root that starts a whole body away from where this
+         * character stands was never authored against this rig.
+         * A clip baked in another skeleton's world space arrives
+         * in that skeleton's units, measured from that scene's
+         * origin, and the axis its travel ran down is rarely the
+         * one this rig calls up — an imported sprint can sit 780
+         * units out along exactly the axis Arthur's quarter turn
+         * makes vertical, which is how a sprint becomes flight.
+         *
+         * The height in such a track is not height, so there is
+         * nothing in it worth keeping. Pinning it outright holds
+         * the hips where the character stands and leaves the clip
+         * to the legs, which are rotations, and do transfer.
+         */
+        const stray =
+          sample
+            .set(
+              track.values[0],
+              track.values[1],
+              track.values[2],
+            )
+            .sub(origin)
+            .dot(up);
+
+        const foreign =
+          Math.abs(stray) >
+          height * perWorldUnit;
 
         for (
           let i = 0;
@@ -2188,7 +2235,9 @@ function inPlaceClip(
           // Keep only what the up axis carries; the rest was
           // the character walking away from the game's position.
           const rise =
-            sample.dot(up);
+            foreign
+              ? 0
+              : sample.dot(up);
 
           sample
             .copy(up)
@@ -2458,6 +2507,7 @@ async function makeImported(
       sourceIdle,
       model,
       rootPositions,
+      targetHeight,
     );
   }
 
@@ -2470,6 +2520,7 @@ async function makeImported(
         clip,
         model,
         rootPositions,
+        targetHeight,
       ),
     );
 

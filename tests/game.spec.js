@@ -279,17 +279,25 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
       // and let his real travel through unmeasured.
       const origins = roots.map(root => root.getWorldPosition(new THREE.Vector3()));
       const world = new THREE.Vector3();
-      let drift = 0;
+      let drift = 0, rise = 0;
       const actions = {};
       for (const state of ['Walk', 'Run', 'Sprint', 'Jump', 'Fall', 'Land', 'Idle']) {
         for (let frame = 0; frame < 90; frame++) hero.animate(1 / 60, { state, speed: state === 'Walk' ? 4.2 : state === 'Sprint' ? 11.5 : 8, time: frame / 60 });
         actions[state] = hero.diagnostics.activeAction;
         hero.group.updateMatrixWorld(true);
-        roots.forEach((root, index) => { drift = Math.max(drift, Math.hypot(root.getWorldPosition(world).x - origins[index].x, world.z - origins[index].z)); });
+        roots.forEach((root, index) => {
+          drift = Math.max(drift, Math.hypot(root.getWorldPosition(world).x - origins[index].x, world.z - origins[index].z));
+          // Height is the one channel in-place keeps, so a clip that
+          // arrives in another rig's units has nothing between it and
+          // the character taking off. A sprint that climbs instead of
+          // running reads here and nowhere else: the bounding box
+          // below measures how tall he is, not how high he is.
+          rise = Math.max(rise, Math.abs(world.y - origins[index].y));
+        });
       }
       const bounds = new THREE.Box3().setFromObject(hero.group);
       results.push({ id, skinCount: skins.length, boundBones: skins.every(skin => skin.skeleton.bones.length > 0), height: bounds.max.y - bounds.min.y,
-        drift, actions, mixerTime: hero.mixer.time, diagnostics: hero.diagnostics });
+        drift, rise, actions, mixerTime: hero.mixer.time, diagnostics: hero.diagnostics });
       hero.dispose(); hero.dispose();
     }
     return results;
@@ -301,6 +309,7 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
     expect(model.height).toBeLessThan(4.5);
     expect(model.mixerTime).toBeGreaterThan(10);
     expect(model.drift).toBeLessThan(0.001);
+    expect(model.rise, `${model.id} leaves the ground`).toBeLessThan(model.height * 0.25);
     expect(model.actions.Walk).toMatch(/Walk/i);
     expect(model.actions.Sprint).toMatch(/Sprint/i);
     expect(model.actions.Land).toMatch(/Land/i);
