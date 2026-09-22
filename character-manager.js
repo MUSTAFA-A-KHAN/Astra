@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-
 export class CharacterManager {
   constructor({ assetManager, animationManager, heroes, createBuiltin }) {
     this.assets = assetManager;
@@ -18,9 +16,10 @@ export class CharacterManager {
     const meta = this.getMeta(id);
     if (this.instances.has(meta.id)) return this.instances.get(meta.id);
 
-    const character = meta.imported
-      ? await this.#loadImported(meta, { signal })
-      : await this.createBuiltin(meta);
+    // createHero() contains Astra's original, working character runtime for
+    // both built-in and imported characters. Do not clone/retarget the rig here:
+    // that can break SkinnedMesh skeleton bindings and existing animation clips.
+    const character = await this.createBuiltin(meta);
 
     this.instances.set(meta.id, character);
     return character;
@@ -55,91 +54,9 @@ export class CharacterManager {
     if (!keepActive) this.active = null;
   }
 
-  async #loadImported(meta, { signal }) {
-    const asset = await this.assets.load(meta.model, { signal });
-    const source = asset.scene;
-    if (!source) throw new Error(`The ${meta.name} model did not contain a scene.`);
+  // Keep the original Astra character runtime as the source of truth.
+  // The manager owns lifecycle/caching, while createHero preserves the existing
+  // rig, animation clips, retargeting assumptions, and character-specific behavior.
 
-    // Clone the cached scene. The binary GLB, geometry, textures and source
-    // parse result are requested/parsed once; each live character owns its rig.
-    const model = source.clone(true);
-    const group = this.#fitModel(model, meta);
-    const clips = (asset.animations || []).map(clip => clip.clone());
-
-    const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
-    const controller = this.#createController({ meta, model, group, mixer, clips });
-    return controller;
-  }
-
-  #fitModel(model, meta) {
-    model.updateMatrixWorld(true);
-    const bounds = new THREE.Box3().setFromObject(model);
-    const size = bounds.getSize(new THREE.Vector3());
-    if (!Number.isFinite(size.y) || size.y < 0.001) {
-      throw new Error(`The ${meta.name} model has invalid dimensions.`);
-    }
-
-    model.scale.multiplyScalar(3.4 / size.y);
-    model.updateMatrixWorld(true);
-
-    const fitted = new THREE.Group();
-    const resizedBounds = new THREE.Box3().setFromObject(model);
-    const center = resizedBounds.getCenter(new THREE.Vector3());
-    fitted.add(model);
-    fitted.position.set(-center.x, -resizedBounds.min.y, -center.z);
-
-    model.traverse(child => {
-      if (!child.isMesh) return;
-      child.castShadow = true;
-      child.receiveShadow = true;
-      child.frustumCulled = true;
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      materials.filter(Boolean).forEach(material => {
-        if ('roughness' in material) material.roughness = Math.max(0.48, material.roughness);
-      });
-    });
-
-    return fitted;
-  }
-
-  #createController({ meta, model, group, mixer, clips }) {
-    const find = pattern => clips.find(clip => pattern.test(clip.name));
-    const idle = find(/idle/i) || clips[0];
-    const walk = find(/^(walk|jog)/i) || idle;
-    const run = find(/(?:sprint|run)/i) || walk;
-    const actions = new Map();
-    for (const clip of new Set([idle, walk, run].filter(Boolean))) {
-      actions.set(clip, mixer.clipAction(clip));
-    }
-
-    let current = idle ? actions.get(idle) : null;
-    current?.play();
-    let disposed = false;
-
-    return {
-      group,
-      model,
-      meta,
-      mixer,
-      height: 3.4,
-      animationSource: clips.length ? 'character' : 'none',
-      animate(dt, { moving = false, sprinting = false, attacking = false, time = 0 } = {}) {
-        if (disposed) return;
-        const next = actions.get(moving ? sprinting ? run : walk : idle);
-        if (next && next !== current) {
-          next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
-          current?.fadeOut(0.22);
-          current = next;
-        }
-        mixer?.update(Math.min(Math.max(dt, 0), 0.1));
-        group.rotation.z = attacking ? Math.sin(time * 22) * 0.025 : 0;
-      },
-      dispose() {
-        if (disposed) return;
-        disposed = true;
-        mixer?.stopAllAction();
-        mixer?.uncacheRoot(model);
-      },
-    };
   }
 }
