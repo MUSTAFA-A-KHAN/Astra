@@ -3,7 +3,21 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Everything in the Reach is made locally. Static scenery is merged by material,
 // so a grove of trees costs the same number of draw calls as one tree.
-export function createWorld(scene, { lowPower = false } = {}) {
+export function createWorld(scene, { lowPower = false, disabled = false } = {}) {
+  if (disabled) {
+    const root = new THREE.Group();
+    root.name = 'Astra Real-World Overlay';
+    scene.add(root);
+    return {
+      colliders: [],
+      spawn: { x: 0, z: 0 },
+      landmarks: [],
+      update() {},
+      setQuality() {},
+      setTime() {},
+      dispose() { scene.remove(root); },
+    };
+  }
   const root = new THREE.Group();
   root.name = 'The Verdant Reach';
   scene.add(root);
