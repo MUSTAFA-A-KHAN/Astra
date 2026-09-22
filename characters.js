@@ -32,6 +32,7 @@ export const HEROES = [
     speed: 10, damage: 27, cooldown: 0.5, range: 8,
     ability: 'Spirit strike', weapon: 'Spirit energy', imported: true, size: '16 MB',
     model: './rigged-model-optimized.glb',
+    orientationYaw: 0, animationSpeeds: { walk: 4.2, run: 8, sprint: 11.5 },
   },
   {
     id: 'arthur', name: 'Arthur', title: 'The Outrider', role: 'Guest adventurer',
@@ -40,6 +41,7 @@ export const HEROES = [
     speed: 9.2, damage: 32, cooldown: 0.58, range: 7,
     ability: 'Frontier strike', weapon: 'Outrider prowess', imported: true, size: '21 MB',
     model: './Arthur-rigged-under-25mb.glb',
+    orientationYaw: 0, animationSpeeds: { walk: 4.2, run: 8.2, sprint: 11.5 },
   },
     {
     id: 'soldier', name: 'Soldier', title: 'The Soldier', role: 'Guest adventurer',
@@ -49,6 +51,7 @@ export const HEROES = [
     ability: 'Combat strike', weapon: 'Military blade',
     imported: true, size: 'External GLB',
     model: 'https://threejs.org/examples/models/gltf/Soldier.glb',
+    orientationYaw: Math.PI, animationSpeeds: { walk: 4, run: 8.4, sprint: 11.8 },
   },
   {
     id: 'female-soldier', name: 'Female-Soldier', title: 'The Soldier', role: 'Guest adventurer',
@@ -58,6 +61,7 @@ export const HEROES = [
     ability: 'Combat strike', weapon: 'Military blade',
     imported: true, size: '92 MB',
     model: 'https://github.com/MUSTAFA-A-KHAN/Astra/releases/download/female/realistic_female.glb',
+    orientationYaw: 0, animationSpeeds: { walk: 4.2, run: 8, sprint: 11.5 },
   },
 ];
 
@@ -305,16 +309,23 @@ function makeBuiltin(meta) {
     elbows[1].add(crystal);
   }
 
-  let phase = 0, locomotion = 0, attackAmount = 0, disposed = false;
-  const animate = (dt, { speed = 0, moving = false, sprinting = false, attacking = false, time = 0 } = {}) => {
+  let phase = 0, locomotion = 0, attackAmount = 0, landing = 0, death = 0, disposed = false, activeState = 'Idle';
+  const animate = (dt, { speed = 0, moving = false, sprinting = false, jumping = false, attacking = false, state, time = 0 } = {}) => {
     if (disposed) return;
     dt = Math.min(Math.max(dt, 0), 0.1);
-    locomotion = THREE.MathUtils.damp(locomotion, moving ? 1 : 0, 10, dt);
+    activeState = state || (attacking ? 'Attack' : jumping ? 'Jump' : moving ? sprinting ? 'Sprint' : 'Run' : 'Idle');
+    attacking ||= activeState === 'Attack';
+    const airborne = activeState === 'Jump' || activeState === 'Fall';
+    locomotion = THREE.MathUtils.damp(locomotion, moving && !airborne && activeState !== 'Dead' ? 1 : 0, 10, dt);
+    landing = THREE.MathUtils.damp(landing, activeState === 'Land' ? 1 : 0, 18, dt);
+    death = THREE.MathUtils.damp(death, activeState === 'Dead' ? 1 : 0, 6, dt);
     attackAmount = THREE.MathUtils.damp(attackAmount, attacking ? 1 : 0, attacking ? 24 : 10, dt);
-    phase += dt * (sprinting ? 12 : 8) * (speed > 0 ? Math.min(1.4, 0.65 + speed / 20) : 1);
+    // Phase advances by distance travelled, including acceleration and braking.
+    phase += dt * Math.max(0, speed) / (activeState === 'Walk' ? 3.8 : sprinting ? 7.2 : 6.2) * Math.PI * 2;
     const stride = Math.sin(phase) * locomotion * (sprinting ? 0.75 : 0.52);
-    body.position.y = Math.abs(Math.sin(phase)) * locomotion * 0.065 + Math.sin(time * 1.8) * 0.012 * (1 - locomotion);
-    body.rotation.x = locomotion * (sprinting ? 0.075 : 0.025);
+    body.position.y = Math.abs(Math.sin(phase)) * locomotion * 0.065 + Math.sin(time * 1.8) * 0.012 * (1 - locomotion) - landing * .14;
+    body.rotation.x = locomotion * (sprinting ? 0.075 : 0.025) + (airborne ? -.05 : 0) + (activeState === 'Hit' ? -.15 : 0);
+    body.rotation.z = death * 1.35;
     body.rotation.y = Math.sin(phase) * locomotion * 0.045 - attackAmount * 0.30;
     head.rotation.y = Math.sin(time * 0.55) * 0.075 * (1 - locomotion);
     head.rotation.x = Math.sin(time * 1.15) * 0.02;
@@ -322,6 +333,10 @@ function makeBuiltin(meta) {
     hips[1].rotation.x = -stride;
     knees[0].rotation.x = -Math.max(0, -Math.sin(phase)) * locomotion * 0.65;
     knees[1].rotation.x = -Math.max(0, Math.sin(phase)) * locomotion * 0.65;
+    if (airborne) {
+      hips[0].rotation.x = -.3; hips[1].rotation.x = .25;
+      knees[0].rotation.x = -.7; knees[1].rotation.x = -.45;
+    }
     shoulders[0].rotation.x = -stride * 0.65 - attackAmount * (ranger ? 1.35 : 0.40);
     shoulders[1].rotation.x = stride * 0.65 - attackAmount * (ranger ? 1.45 : mage ? 0.55 : 2.20);
     shoulders[0].rotation.z = 0.10 + Math.sin(time * 1.8) * 0.014;
@@ -336,7 +351,9 @@ function makeBuiltin(meta) {
     }
   };
   animate(0, {});
-  return { group, meta, height: 3.4, animate, dispose() {
+  return { group, meta, height: 3.4, animate,
+    get diagnostics() { return { imported: false, animations: ['procedural'], activeAction: activeState, state: activeState, orientationYaw: 0, rootMotion: 'in-place', disposed }; },
+    dispose() {
     if (disposed) return;
     disposed = true;
     // Some variants do not use every prepared material.
@@ -408,17 +425,22 @@ function loadImportedScene(url, timeout = 30000) {
 }
 
 // Remove horizontal root translation only. Finger, limb and vertical gait tracks stay intact.
-function inPlaceClip(clip, model) {
+function inPlaceClip(clip, model, rootPositions) {
   const sanitized = clip.clone();
   sanitized.tracks = sanitized.tracks.map(track => {
     if (!track.name.endsWith('.position') || track.getValueSize() !== 3) return track;
-    const nodeName = track.name.slice(0, -'.position'.length);
-    const node = model.getObjectByName(nodeName) || model.getObjectByProperty('uuid', nodeName);
+    const binding = THREE.PropertyBinding.parseTrackName(track.name);
+    const nodeName = binding.objectName === 'bones' ? binding.objectIndex : binding.nodeName;
+    const node = THREE.PropertyBinding.findNode(model, nodeName);
     const rootBone = node?.isBone && !node.parent?.isBone;
-    if (!rootBone && node !== model && !/(?:^|[|_:])(hips|pelvis|root)$/i.test(nodeName)) return track;
+    if (!rootBone && node !== model && !/(hips|pelvis|root)$/i.test(nodeName || '')) return track;
+    // All clips use the idle clip's horizontal root origin. Locking each clip
+    // to its own first key produces a visible pop every time the gait changes.
+    if (!rootPositions.has(track.name)) rootPositions.set(track.name, [track.values[0], track.values[2]]);
+    const origin = rootPositions.get(track.name);
     for (let i = 0; i < track.values.length; i += 3) {
-      track.values[i] = track.values[0];
-      track.values[i + 2] = track.values[2];
+      track.values[i] = origin[0];
+      track.values[i + 2] = origin[1];
     }
     return track;
   });
@@ -444,12 +466,15 @@ async function makeImported(meta) {
   bounds.setFromObject(model);
   const center = bounds.getCenter(new THREE.Vector3());
   // Offset the wrapper so root animation does not overwrite normalization.
+  // Facing belongs to an unanimated wrapper, never to the imported rig.
+  // Three's sample Soldier faces -Z; Astra's movement convention is +Z.
+  const facing = new THREE.Group();
+  facing.name = 'Asset orientation';
+  facing.rotation.y = meta.orientationYaw || 0;
+  group.add(facing);
   const fitted = new THREE.Group();
-  group.add(fitted);
+  facing.add(fitted);
   fitted.add(model);
-  if (meta.id === 'soldier') {
-  model.rotation.y = Math.PI;
-}
   fitted.position.set(-center.x, -bounds.min.y, -center.z);
   model.traverse(child => {
     if (!child.isMesh) return;
@@ -460,33 +485,66 @@ async function makeImported(meta) {
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.filter(Boolean).forEach(material => { if ('roughness' in material) material.roughness = Math.max(0.48, material.roughness); });
   });
-  const clips = (gltf.animations || []).map(clip =>
-  meta.id === 'soldier' ? clip.clone() : inPlaceClip(clip, model)
-);
+  const sourceClips = gltf.animations || [];
+  const rootPositions = new Map();
+  const sourceIdle = sourceClips.find(clip => /idle/i.test(clip.name));
+  if (sourceIdle) inPlaceClip(sourceIdle, model, rootPositions);
+  const clips = sourceClips.map(clip => inPlaceClip(clip, model, rootPositions));
   const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
   const find = pattern => clips.find(clip => pattern.test(clip.name));
-  const idle = find(/^idle$/i) || clips[0];
-  const walk = find(/^walk$/i) || idle;
-  const run = find(/^(sprint|run)$/i) || walk;
-  const jump = find(/^jump$/i);
-console.log('Available animations:', clips.map(c => c.name));
+  const idle = find(/idle|standing/i) || clips.find(clip => !/t.?pose/i.test(clip.name)) || clips[0];
+  const walk = find(/walk(?!.*back)/i) || find(/jog.*forward|jog$/i);
+  const run = find(/run(?!.*back)|jog.*forward|jog$/i) || find(/sprint/i) || walk;
+  const sprint = find(/sprint/i) || run;
+  const jump = find(/^jump$|jump.*loop/i) || find(/jump.*start/i);
+  const fall = find(/fall|airborne/i) || jump;
+  const land = find(/land/i);
+  const attack = find(/attack|slash|punch|swing/i);
+  const hit = find(/hit|damage|hurt/i);
+  const dead = find(/death|dead|die/i);
+  const stateClips = { Idle: idle, Walk: walk || run || idle, Run: run || idle, Sprint: sprint || idle,
+    Jump: jump || idle, Fall: fall || idle, Land: land || idle, Attack: attack || idle, Hit: hit || idle, Dead: dead || idle };
   const actions = new Map();
-  for (const clip of new Set([idle, walk, run, jump].filter(Boolean))) {
-  actions.set(clip, mixer.clipAction(clip));
-}
+  for (const clip of new Set(Object.values(stateClips).filter(Boolean))) actions.set(clip, mixer.clipAction(clip));
+  for (const clip of [land, attack, hit, dead].filter(Boolean)) {
+    actions.get(clip).setLoop(THREE.LoopOnce, 1);
+    actions.get(clip).clampWhenFinished = true;
+  }
   let current = idle ? actions.get(idle) : null;
   if (current) current.play();
-  let disposed = false;
-  return { group, meta, height: 3.4, mixer, animate(dt, { moving = false, sprinting = false, jumping = false, attacking = false, time = 0 } = {}) {
+  let disposed = false, activeState = 'Idle', playbackRate = 1, lean = 0, landing = 0, death = 0;
+  const baseHeight = fitted.position.y;
+  const speeds = meta.animationSpeeds || { walk: 4.2, run: 8, sprint: 11.5 };
+  return { group, meta, height: 3.4, mixer,
+    get diagnostics() { return { imported: true, animations: clips.map(clip => clip.name), activeAction: current?.getClip().name || null,
+      state: activeState, playbackRate, orientationYaw: facing.rotation.y, rootMotion: 'in-place', disposed }; },
+    animate(dt, { speed, moving = false, sprinting = false, jumping = false, attacking = false, state, time = 0 } = {}) {
     if (disposed) return;
-    const next = actions.get(jumping ? jump : moving ? sprinting ? run : walk : idle);
+    dt = Math.min(Math.max(dt, 0), 0.1);
+    const nextState = state || (attacking ? 'Attack' : jumping ? 'Jump' : moving ? sprinting ? 'Sprint' : 'Run' : 'Idle');
+    attacking ||= nextState === 'Attack';
+    const next = actions.get(stateClips[nextState] || idle);
     if (next && next !== current) {
-      next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
-      current?.fadeOut(0.22);
+      next.reset().setEffectiveWeight(1).fadeIn(.18).play();
+      current?.fadeOut(.18);
       current = next;
     }
-    mixer?.update(Math.min(Math.max(dt, 0), 0.1));
-    fitted.rotation.z = attacking ? Math.sin(time * 22) * 0.025 : 0;
+    const locomotion = nextState === 'Walk' || nextState === 'Run' || nextState === 'Sprint';
+    // Reference the actual clip selected, including assets with only one gait.
+    const clip = current?.getClip();
+    const referenceSpeed = /walk/i.test(clip?.name || '') ? speeds.walk : /sprint/i.test(clip?.name || '') ? speeds.sprint : speeds.run;
+    const targetRate = locomotion && Number.isFinite(speed) ? THREE.MathUtils.clamp(speed / referenceSpeed, .12, 2.5) : 1;
+    playbackRate = THREE.MathUtils.damp(playbackRate, targetRate, 16, dt);
+    current?.setEffectiveTimeScale(playbackRate);
+    if (nextState === 'Land' && land) current?.setEffectiveTimeScale(Math.max(1, land.duration / .28));
+    activeState = nextState;
+    mixer?.update(dt);
+    lean = THREE.MathUtils.damp(lean, nextState === 'Hit' && !hit ? -.12 : attacking && !attack ? .07 : 0, 18, dt);
+    landing = THREE.MathUtils.damp(landing, nextState === 'Land' && !land ? .09 : 0, 20, dt);
+    death = THREE.MathUtils.damp(death, nextState === 'Dead' && !dead ? 1.25 : 0, 6, dt);
+    facing.rotation.x = lean;
+    facing.rotation.z = death + (attacking && !attack ? Math.sin(time * 22) * .025 : 0);
+    fitted.position.y = baseHeight - landing;
   }, dispose() {
     if (disposed) return;
     disposed = true;
