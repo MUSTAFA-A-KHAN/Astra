@@ -291,10 +291,11 @@ function animate(now){
   if(!dialog.open){
     if(screen==='game'&&hero){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}
     else if(hero){avatar.position.set(0,.22,18);avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,time:reducedMotion?0:time});}
-    world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position); streamedTerrain?.update?.(); updateShards();
+    world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position); updateShards();
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
   }
+  streamedTerrain?.update?.();
   blob.position.set(avatar.position.x,screen==='lobby'?.225:.045,avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-position.y*.15):.8;
   sun.position.set(avatar.position.x-45,65,avatar.position.z+38);sun.target.position.set(avatar.position.x,0,avatar.position.z);sun.target.updateMatrixWorld();
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
