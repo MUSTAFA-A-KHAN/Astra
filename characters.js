@@ -72,7 +72,7 @@ export const HEROES = [
     model: 'https://threejs.org/examples/models/gltf/Soldier.glb',
     orientationYaw: Math.PI,
     animationSpeeds: {
-      walk: 4,
+      walk: 2,
       run: 8.4,
       sprint: 11.8,
     },
