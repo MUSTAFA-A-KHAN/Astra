@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createWorld } from './world.js';
-import { HEROES, createHero } from './characters.js';
+import { HEROES, createHero, createEnemySquad } from './characters.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -125,10 +125,15 @@ const dummy=new THREE.Object3D();
 const enemyGeo=new THREE.IcosahedronGeometry(.85,1),enemyMat=new THREE.MeshStandardMaterial({color:'#9380b0',emissive:'#3c235c',emissiveIntensity:.65,roughness:.5});
 const eyeGeo=new THREE.SphereGeometry(.12,6,4),eyeMat=new THREE.MeshBasicMaterial({color:'#ffdbaf'});
 const enemies=[[-9,-17],[12,-30],[-17,-38],[28,-24],[-33,-12],[45,-42]].map(([x,z],i)=>{
-  const group=new THREE.Group(),core=new THREE.Mesh(enemyGeo,enemyMat); group.add(core);
-  for(const side of [-1,1]){const eye=new THREE.Mesh(eyeGeo,eyeMat);eye.position.set(side*.27,.18,.72);group.add(eye);}
-  group.position.set(x,1.4,z);scene.add(group);return{group,core,x,z,hp:80,index:i,hit:0,alive:true};
+  const group=new THREE.Group(),wisp=new THREE.Group(),core=new THREE.Mesh(enemyGeo,enemyMat); wisp.add(core);
+  for(const side of [-1,1]){const eye=new THREE.Mesh(eyeGeo,eyeMat);eye.position.set(side*.27,.18,.72);wisp.add(eye);}
+  group.add(wisp);group.position.set(x,1.4,z);scene.add(group);return{group,wisp,core,x,z,hp:80,index:i,hit:0,alive:true,rig:null,swing:0,dying:0};
 });
+// Walking automatons replace the placeholder wisps once the shared model lands.
+// A failed download leaves the wisps in play rather than emptying the field.
+createEnemySquad(enemies.length).then(squad=>{
+  squad.members.forEach((rig,i)=>{const e=enemies[i];e.rig=rig;e.wisp.visible=false;e.group.add(rig.group);e.group.position.y=0;});
+}).catch(error=>console.warn('Enemy model unavailable:',error));
 const effectGroup=new THREE.Group();scene.add(effectGroup);
 const pulse=new THREE.Mesh(new THREE.TorusGeometry(1,.045,5,40),new THREE.MeshBasicMaterial({color:'#c3f0d5',transparent:true,opacity:0,depthWrite:false}));pulse.rotation.x=-Math.PI/2;effectGroup.add(pulse);
 let pulseAge=2,pulseSize=5;
@@ -154,7 +159,7 @@ function attack(special=false){
   for(const e of enemies){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
   if(nearest){avatar.rotation.y=Math.atan2(nearest.group.position.x-position.x,nearest.group.position.z-position.z);}
   const targets=special?enemies.filter(e=>e.alive&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range):nearest?[nearest]:[];
-  for(const e of targets){e.hp-=damage;e.hit=.3;if(e.hp<=0){e.alive=false;e.group.visible=false;progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);}}
+  for(const e of targets){e.hp-=damage;e.hit=.3;if(e.hp<=0){e.alive=false;if(e.rig)e.dying=1.8;else e.group.visible=false;progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);}}
   if(special){showPulse(position.x,position.z,range,heroMeta.color);if(heroMeta.id==='warden'){health=Math.min(100,health+20);updateHUD();}}
   else if(nearest){targetPoint.copy(nearest.group.position);direction.copy(targetPoint).sub(position).add(new THREE.Vector3(0,-1.6,0));bolt.position.copy(position).add(new THREE.Vector3(0,1.6,0)).addScaledVector(direction,.5);bolt.scale.set(1,direction.length(),1);bolt.quaternion.setFromUnitVectors(up,direction.normalize());bolt.material.color.set(heroMeta.color);boltAge=0;}
   else showPulse(position.x,position.z,2.5,heroMeta.color);
@@ -240,10 +245,15 @@ function updatePlayer(dt){
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
   $('ability-cooldown').style.height=`${abilityTimer/7*100}%`;
   for(const e of enemies){
-    if(!e.alive)continue;e.hit=Math.max(0,e.hit-dt);const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
-    if(d<18&&d>1.9){e.group.position.x+=dx/d*2.9*dt;e.group.position.z+=dz/d*2.9*dt;collide(e.group.position,.8);}
-    e.group.position.y=1.5+Math.sin(time*2+e.index)*.25;e.group.rotation.y=Math.atan2(dx,dz);e.core.rotation.z=Math.sin(time+e.index)*.14;e.core.scale.setScalar(e.hit>0?.8:1);
-    if(d<2.5&&hurtTimer<=0&&position.y<1.5){health=Math.max(0,health-12);hurtTimer=1.2;sound(110,.14,'triangle');if(health<=0){health=100;position.set(0,0,18);velocity.set(0,0,0);enemies.forEach(enemy=>{if(enemy.alive)enemy.group.position.set(enemy.x,1.4,enemy.z);});toast('The glade shelters you. Your journey continues.');}}
+    // A felled automaton plays its death clip out before it leaves the scene.
+    if(!e.alive){if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig.animate(dt,{state:'Dead',time});if(e.dying===0)e.group.visible=false;}continue;}
+    e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
+    const chasing=d<18&&d>1.9;
+    if(chasing){e.group.position.x+=dx/d*2.9*dt;e.group.position.z+=dz/d*2.9*dt;collide(e.group.position,.8);}
+    e.group.rotation.y=Math.atan2(dx,dz);
+    if(e.rig){e.group.position.y=0;e.group.scale.setScalar(e.hit>0?.92:1);e.rig.animate(dt,{speed:chasing?2.9:0,moving:chasing,attacking:e.swing>0,time});}
+    else{e.group.position.y=1.5+Math.sin(time*2+e.index)*.25;e.core.rotation.z=Math.sin(time+e.index)*.14;e.core.scale.setScalar(e.hit>0?.8:1);}
+    if(d<2.5&&hurtTimer<=0&&position.y<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;sound(110,.14,'triangle');if(health<=0){health=100;position.set(0,0,18);velocity.set(0,0,0);enemies.forEach(enemy=>{if(enemy.alive)enemy.group.position.set(enemy.x,enemy.rig?0:1.4,enemy.z);});toast('The glade shelters you. Your journey continues.');}}
   }
 }
 function updateShards(){
@@ -310,7 +320,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');
