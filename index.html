@@ -293,7 +293,7 @@ for (let i = -8; i <= 8; i++) {
 // Littlest Tokyo — from the supplied Three.js keyframes animation example.
 // https://threejs.org/examples/#webgl_animation_keyframes
 // ---------------------------------------------------------------------------
-const CITY_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/LittlestTokyo.glb';
+const CITY_URL = 'https://threejs.org/examples/models/gltf/LittlestTokyo.glb';
 
 let cityModel = null;
 let cityMixer = null;
@@ -315,7 +315,7 @@ async function loadTokyo() {
   // which is why the city was completely invisible.
   const dracoLoader = new DRACOLoader();
   dracoLoader.setDecoderPath(
-    'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/jsm/libs/draco/gltf/'
+    'https://threejs.org/examples/jsm/libs/draco/gltf/'
   );
   loader.setDRACOLoader(dracoLoader);
 
@@ -450,109 +450,50 @@ let soldierMixer = null;
 let soldierActions = {};
 let characterLoading = false;
 
-const REI_GLB_BASE64 = null;
-function decodeEmbeddedGLB(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  const chunk = 0x8000;
+const REI_GLB_URL = 'https://threejs.org/examples/models/gltf/RobotExpressive.glb';
 
-  for (let i = 0; i < binary.length; i += chunk) {
-    const end = Math.min(i + chunk, binary.length);
-    for (let j = i; j < end; j++) {
-      bytes[j] = binary.charCodeAt(j);
-    }
-  }
-  return bytes.buffer;
-}
 
 function loadReiModel() {
   return new Promise(resolve => {
     setProgress(0.66, 'Loading character...');
     const loader = new GLTFLoader();
-
-    loader.load(
-      'https://threejs.org/examples/models/gltf/RobotExpressive.glb',
-      gltf => {
-        const model = gltf.scene;
-
-        model.traverse(o => {
-          if (o.isMesh) {
-            o.castShadow = true;
-            o.receiveShadow = true;
-            o.frustumCulled = false;
-          }
-        });
-
-        model.scale.setScalar(1);
-        model.updateMatrixWorld(true);
-
-        const rawBox = new THREE.Box3().setFromObject(model);
-        const rawSize = rawBox.getSize(new THREE.Vector3());
-
-        if (rawSize.y > 0.001) {
-          const targetHeight = CONFIG.PLAYER_HEIGHT * 2.0;
-          model.scale.setScalar(targetHeight / rawSize.y);
-        }
-
-        model.updateMatrixWorld(true);
-
-        const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
-
-        model.position.x -= center.x;
-        model.position.z -= center.z;
-        model.position.y -= box.min.y;
-
-        player.group.add(model);
-        player.model = model;
-        player.mixer = new THREE.AnimationMixer(model);
-
-        const clips = gltf.animations || [];
-        const byName = Object.create(null);
-        for (const clip of clips) byName[clip.name] = clip;
-
-        const findClip = (...names) => {
-          for (const name of names) if (byName[name]) return byName[name];
-          return clips.find(c =>
-            names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))
-          ) || null;
-        };
-
-        player.idleAction = player.mixer.clipAction(findClip('Idle', 'Idle Fold Arms') || clips[0]);
-        player.walkAction = player.mixer.clipAction(findClip('Walk Forward', 'Walk'));
-        player.runAction = player.mixer.clipAction(findClip('Sprint', 'Jog Forward', 'Run'));
-        player.jumpAction = player.mixer.clipAction(findClip('Jump', 'Jump Start'));
-        player.jumpLandAction = player.mixer.clipAction(findClip('Jump Land'));
-
-        [
-          player.idleAction,
-          player.walkAction,
-          player.runAction,
-          player.jumpAction,
-          player.jumpLandAction
-        ].forEach(action => {
-          if (action) {
-            action.enabled = true;
-            action.setEffectiveWeight(0);
-            action.play();
-          }
-        });
-
-        if (player.idleAction) player.idleAction.setEffectiveWeight(1);
-
-        placeholder.visible = false;
-        setProgress(0.82, 'Character loaded.');
-        resolve();
-      },
-      undefined,
-      err => {
-        console.error('Character GLB load failed:', err);
-        setProgress(0.82, 'Character failed — continuing with placeholder.');
-        resolve();
-      }
-    );
+    loader.load(REI_GLB_URL, gltf => {
+      const model = gltf.scene;
+      model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+      model.scale.setScalar(1);
+      model.rotation.y = 0;
+      model.updateMatrixWorld(true);
+      const rawBox = new THREE.Box3().setFromObject(model);
+      const rawSize = rawBox.getSize(new THREE.Vector3());
+      if (rawSize.y > 0.001) model.scale.setScalar((CONFIG.PLAYER_HEIGHT * 2.0) / rawSize.y);
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box.min.y;
+      model.updateMatrixWorld(true);
+      player.group.add(model);
+      player.model = model;
+      player.mixer = new THREE.AnimationMixer(model);
+      const clips = gltf.animations || [];
+      const byName = Object.create(null);
+      for (const clip of clips) byName[clip.name] = clip;
+      const findClip = (...names) => names.map(n => byName[n]).find(Boolean) || clips.find(c => names.some(n => c.name.toLowerCase().includes(n.toLowerCase()))) || null;
+      player.idleAction = player.mixer.clipAction(findClip('Idle', 'Idle Fold Arms'));
+      player.walkAction = player.mixer.clipAction(findClip('Walk Forward', 'Walk'));
+      player.runAction = player.mixer.clipAction(findClip('Sprint', 'Jog Forward', 'Run'));
+      player.jumpAction = player.mixer.clipAction(findClip('Jump', 'Jump Start'));
+      player.jumpLandAction = player.mixer.clipAction(findClip('Jump Land'));
+      [player.idleAction, player.walkAction, player.runAction, player.jumpAction, player.jumpLandAction].forEach(a => { if (a) { a.enabled = true; a.setEffectiveWeight(0); a.play(); } });
+      if (player.idleAction) player.idleAction.setEffectiveWeight(1);
+      placeholder.visible = false;
+      setProgress(0.82, 'Character loaded.');
+      resolve();
+    }, undefined, err => { console.error('Character GLB load failed:', err); setProgress(0.66, 'Character failed — continuing with placeholder.'); resolve(); });
   });
 }
+
 function clearPlayerCharacter() {
   if (player.model) {
     player.group.remove(player.model);
@@ -1056,8 +997,7 @@ function updatePlayer(dt) {
       accel,
       dt
     );
-  } else if (player.onGround) {
-    player.velocity.x = THREE.MathUtils.damp(player.velocity.x, 0, CONFIG.FRICTION, dt);
+  } else if (player.onGround) {    player.velocity.x = THREE.MathUtils.damp(player.velocity.x, 0, CONFIG.FRICTION, dt);
     player.velocity.z = THREE.MathUtils.damp(player.velocity.z, 0, CONFIG.FRICTION, dt);
   }
 
@@ -1383,23 +1323,8 @@ async function boot() {
   try {
     setProgress(0.05, 'Starting Three.js...');
 
-    await Promise.race([
-      loadTokyo(),
-      new Promise(resolve => setTimeout(() => {
-        console.warn('Tokyo load timed out; continuing startup.');
-        setProgress(0.62, 'Tokyo is taking too long — starting game...');
-        resolve();
-      }, 15000))
-    ]);
-
-    await Promise.race([
-      loadReiModel(),
-      new Promise(resolve => setTimeout(() => {
-        console.warn('Character load timed out; continuing startup.');
-        setProgress(0.82, 'Character is taking too long — starting game...');
-        resolve();
-      }, 12000))
-    ]);
+    await Promise.race([loadTokyo(), new Promise(resolve => setTimeout(() => { setProgress(0.58, 'Tokyo is taking too long — continuing...'); resolve(); }, 20000))]);
+    await loadReiModel();
 
     player.group.position.set(0, 0, 0);
 
