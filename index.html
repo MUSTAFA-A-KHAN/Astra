@@ -623,6 +623,35 @@ placeholder.position.y = 5.1;
 placeholder.castShadow = true;
 player.group.add(placeholder);
 
+function fitCharacterModel(model, targetHeight, headingOffset = 0) {
+  model.scale.setScalar(1);
+  model.position.set(0, 0, 0);
+  model.rotation.y = headingOffset;
+  model.updateMatrixWorld(true);
+
+  const rawBox = new THREE.Box3().setFromObject(model);
+  const rawSize = rawBox.getSize(new THREE.Vector3());
+  if (rawSize.y > 0.001) {
+    model.scale.setScalar(targetHeight / rawSize.y);
+  }
+
+  model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+  model.position.y -= box.min.y;
+  model.updateMatrixWorld(true);
+
+  model.traverse(obj => {
+    if (!obj.isMesh) return;
+    obj.castShadow = true;
+    obj.receiveShadow = true;
+    obj.frustumCulled = true;
+  });
+}
+
 const loadingProgress = new LoadingProgressManager({
   bar: ui.bar,
   message: ui.loadMsg
