@@ -17,10 +17,33 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('offline local boot, existing roster selection and menus remain usable', async ({ page }) => {
+test('City Set Proto assets load offline and the roster and menus remain usable', async ({ page }) => {
+  const cityResponses = [];
+  const cityFailures = [];
+  page.on('response', response => {
+    if (response.url().includes('/City_Set_-_Proto_Series/')) {
+      cityResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
+    }
+  });
+  page.on('requestfailed', request => {
+    if (request.url().includes('/City_Set_-_Proto_Series/')) cityFailures.push(request.url());
+  });
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   const errors = await boot(page);
-  await expect(page.locator('.character-card')).toHaveCount(7);
+  expect(cityFailures).toEqual([]);
+  expect(cityResponses.some(response => response.path.endsWith('.gltf'))).toBe(true);
+  expect(cityResponses.some(response => response.path.endsWith('.bin'))).toBe(true);
+  expect(cityResponses.some(response => response.path.endsWith('.png'))).toBe(true);
+  expect(cityResponses.every(response => response.status === 200)).toBe(true);
+  const { terrain } = await snapshot(page);
+  expect(terrain.ready).toBe(true);
+  expect(terrain.provider).toBe('city-set-proto-series');
+  expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
+  expect(terrain.triangleCount).toBeGreaterThan(500_000);
+  expect(terrain.meshCount).toBeGreaterThan(0);
+  expect(terrain.colliderCount).toBeGreaterThan(0);
+  const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);
+  await expect(page.locator('.character-card')).toHaveCount(rosterCount);
   for (const [name, id] of [['Lyra', 'ranger'], ['Elowen', 'mage'], ['Cael', 'warden']]) {
     await page.getByRole('button', { name: new RegExp(`Select ${name},`) }).click();
     await expect.poll(async () => (await snapshot(page)).hero).toBe(id);
@@ -42,8 +65,9 @@ test('local imported GLB loads, animates, and survives switching back to the ori
   await page.getByRole('button', { name: /Select Rei,/ }).click();
   await page.waitForFunction(() => window.__ASTRA_DEBUG__.hero === 'rei' && !window.__ASTRA_DEBUG__.switching);
   await start(page);
+  const initial = await snapshot(page);
   await page.keyboard.down('KeyW');
-  await expect.poll(async () => (await snapshot(page)).position.z).toBeLessThan(17.5);
+  await expect.poll(async () => (await snapshot(page)).position.z).toBeLessThan(initial.position.z - 0.5);
   await page.keyboard.up('KeyW');
   const state = await snapshot(page);
   expect(state.ready).toBe(true);
@@ -72,6 +96,54 @@ test('missing terrain credentials and unavailable network never prevent play', a
   expect(errors).toEqual([]);
 });
 
+test('sun and moon follow the time slider and the world clock pauses with menus', async ({ page }) => {
+  const errors = await boot(page);
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const setHour = async hour => {
+    await page.getByRole('slider', { name: 'Time of day' }).evaluate((input, value) => {
+      input.value = String(value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, hour);
+    await expect.poll(async () => (await snapshot(page)).atmosphere.hour).toBe(hour);
+    return (await snapshot(page)).atmosphere;
+  };
+  const morning = await setHour(8);
+  const noon = await setHour(12);
+  const night = await setHour(0);
+  expect(morning.sunDirection[0]).toBeGreaterThan(0.5);
+  expect(noon.sunElevation).toBeGreaterThan(morning.sunElevation);
+  expect(noon.sunIntensity).toBeGreaterThan(morning.sunIntensity);
+  expect(noon.daylight).toBe(1);
+  expect(noon.sunIntensity).toBeGreaterThan(noon.moonIntensity);
+  expect(night.sunElevation).toBeLessThan(0);
+  expect(night.moonElevation).toBeGreaterThan(0);
+  expect(night.daylight).toBe(0);
+  expect(night.sunIntensity).toBe(0);
+  expect(night.moonIntensity).toBeGreaterThan(0);
+  for (const state of [morning, noon, night]) {
+    for (let axis = 0; axis < 3; axis++) {
+      expect(state.sunDirection[axis] + state.moonDirection[axis]).toBeCloseTo(0, 6);
+    }
+  }
+  // Start away from midnight so wraparound cannot masquerade as a stopped clock.
+  await setHour(8);
+  await page.getByRole('button', { name: 'Close menu' }).click();
+  await start(page);
+  const runningHour = (await snapshot(page)).atmosphere.hour;
+  await expect.poll(async () => (await snapshot(page)).atmosphere.hour).toBeGreaterThan(runningHour);
+  await page.getByRole('button', { name: 'Open quest journal' }).click();
+  const pausedHour = (await snapshot(page)).atmosphere.hour;
+  await page.evaluate(() => new Promise(resolve => {
+    let frames = 0;
+    const step = () => ++frames >= 4 ? resolve() : requestAnimationFrame(step);
+    requestAnimationFrame(step);
+  }));
+  expect((await snapshot(page)).atmosphere.hour).toBe(pausedHour);
+  await page.getByRole('button', { name: 'Close menu' }).click();
+  await expect.poll(async () => (await snapshot(page)).atmosphere.hour).toBeGreaterThan(pausedHour);
+  expect(errors).toEqual([]);
+});
+
 test('keyboard locomotion accelerates, jumps, lands and turns toward travel', async ({ page }) => {
   const errors = await boot(page);
   await start(page);
@@ -86,6 +158,7 @@ test('keyboard locomotion accelerates, jumps, lands and turns toward travel', as
   await expect.poll(async () => (await snapshot(page)).locomotion?.grounded).toBe(true);
   const landed = await snapshot(page);
   expect(Math.abs(landed.position.y - landed.terrain.height)).toBeLessThan(0.25);
+  expect(landed.locomotion.groundHeight).toBeCloseTo(landed.terrain.height, 3);
   expect(errors).toEqual([]);
 });
 

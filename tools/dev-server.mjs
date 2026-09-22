@@ -18,8 +18,11 @@ const mime = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream',
   '.wasm': 'application/wasm',
 };
 

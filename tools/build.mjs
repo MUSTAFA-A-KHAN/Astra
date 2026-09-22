@@ -14,7 +14,7 @@ const runtimeExtensions = new Set(['.html', '.js', '.css', '.glb', '.svg', '.png
 for (const entry of await readdir(root, { withFileTypes: true })) {
   if (['runtime-config.js', 'config.js'].includes(entry.name)) continue;
   if ((entry.isFile() && runtimeExtensions.has(extname(entry.name))) ||
-      (entry.isDirectory() && ['assets', 'vendor'].includes(entry.name))) {
+      (entry.isDirectory() && ['assets', 'vendor', 'City_Set_-_Proto_Series'].includes(entry.name))) {
     await cp(resolve(root, entry.name), resolve(destination, entry.name), { recursive: true });
   }
 }
