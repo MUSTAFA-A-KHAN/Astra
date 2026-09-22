@@ -348,8 +348,7 @@ function disposeObject(object, extraMaterials = []) {
   object.removeFromParent();
 }
 
-function loadImportedScene(url, timeout = 30000) {
-  // Fetch can be aborted; parsing cannot. A late parse must still release its images.
+function legacyLoadEmbedded(url, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     let settled = false;
@@ -371,9 +370,7 @@ function loadImportedScene(url, timeout = 30000) {
       .then(gltf => {
         if (!gltf) return;
         if (settled) {
-          const discarded = new THREE.Group();
-          for (const scene of new Set(gltf.scenes || [gltf.scene])) if (scene) discarded.add(scene);
-          disposeObject(discarded);
+          disposeObject(gltf.scene);
           return;
         }
         settled = true;
@@ -389,7 +386,8 @@ function loadImportedScene(url, timeout = 30000) {
   });
 }
 
-// Remove horizontal root translation only. Finger, limb and vertical gait tracks stay intact.
+// Remove horizontal root translation only. Shared clips are still validated by
+// AnimationManager; incompatible rigs remain character-specific.
 function inPlaceClip(clip, model) {
   const sanitized = clip.clone();
   sanitized.tracks = sanitized.tracks.map(track => {
@@ -408,7 +406,7 @@ function inPlaceClip(clip, model) {
 }
 
 async function makeImported(meta) {
-  const gltf = await loadImportedScene(meta.model);
+  const gltf = await legacyLoadEmbedded(meta.model);
   const model = gltf.scene;
   if (!model) throw new Error(`The ${meta.name} model did not contain a scene.`);
   const group = new THREE.Group();
@@ -425,48 +423,56 @@ async function makeImported(meta) {
   model.updateMatrixWorld(true);
   bounds.setFromObject(model);
   const center = bounds.getCenter(new THREE.Vector3());
-  // Offset the wrapper so root animation does not overwrite normalization.
+
   const fitted = new THREE.Group();
   group.add(fitted);
   fitted.add(model);
   fitted.position.set(-center.x, -bounds.min.y, -center.z);
+
   model.traverse(child => {
     if (!child.isMesh) return;
     child.castShadow = true;
     child.receiveShadow = true;
-    // Imported animation bounds can exclude extended limbs or the upper body.
-    child.frustumCulled = false;
+    child.frustumCulled = true;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.filter(Boolean).forEach(material => { if ('roughness' in material) material.roughness = Math.max(0.48, material.roughness); });
   });
+
   const clips = (gltf.animations || []).map(clip => inPlaceClip(clip, model));
   const mixer = clips.length ? new THREE.AnimationMixer(model) : null;
   const find = pattern => clips.find(clip => pattern.test(clip.name));
   const idle = find(/idle/i) || clips[0];
-  const walk = find(/^walk|jog/i) || idle;
+  const walk = find(/^(walk|jog)/i) || idle;
   const run = find(/sprint|run/i) || walk;
   const actions = new Map();
   for (const clip of new Set([idle, walk, run].filter(Boolean))) actions.set(clip, mixer.clipAction(clip));
   let current = idle ? actions.get(idle) : null;
   if (current) current.play();
   let disposed = false;
-  return { group, meta, height: 3.4, mixer, animate(dt, { moving = false, sprinting = false, attacking = false, time = 0 } = {}) {
-    if (disposed) return;
-    const next = actions.get(moving ? sprinting ? run : walk : idle);
-    if (next && next !== current) {
-      next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
-      current?.fadeOut(0.22);
-      current = next;
-    }
-    mixer?.update(Math.min(Math.max(dt, 0), 0.1));
-    fitted.rotation.z = attacking ? Math.sin(time * 22) * 0.025 : 0;
-  }, dispose() {
-    if (disposed) return;
-    disposed = true;
-    mixer?.stopAllAction();
-    mixer?.uncacheRoot(model);
-    disposeObject(group);
-  } };
+
+  return {
+    group, model, meta, height: 3.4, mixer,
+    animationSource: clips.length ? 'character' : 'none',
+    animationCompatibility: 'character-specific',
+    animate(dt, { moving = false, sprinting = false, attacking = false, time = 0 } = {}) {
+      if (disposed) return;
+      const next = actions.get(moving ? sprinting ? run : walk : idle);
+      if (next && next !== current) {
+        next.reset().setEffectiveWeight(1).fadeIn(0.22).play();
+        current?.fadeOut(0.22);
+        current = next;
+      }
+      mixer?.update(Math.min(Math.max(dt, 0), 0.1));
+      fitted.rotation.z = attacking ? Math.sin(time * 22) * 0.025 : 0;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      mixer?.stopAllAction();
+      mixer?.uncacheRoot(model);
+      disposeObject(group);
+    },
+  };
 }
 
 export async function createHero(id = 'warden') {
