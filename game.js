@@ -111,7 +111,7 @@ $('character-roster').innerHTML = HEROES.map((h,i)=>`<button class="character-ca
 function updateHeroUI() {
   $('hero-name').replaceChildren(document.createTextNode(heroMeta.name), Object.assign(document.createElement('span'),{textContent:heroMeta.title}));
   $('hero-role').textContent=heroMeta.weapon.toUpperCase(); $('hero-description').textContent=heroMeta.description;
-  $('hero-ability').textContent=heroMeta.ability; $('hud-name').textContent=heroMeta.name; $('player-emblem').textContent=heroMeta.name[0];
+  $('hero-ability').textContent=heroMeta.ability; $('hud-name').textContent=heroMeta.name; $('lobby-button').textContent=heroMeta.name[0];
   $('preview-label').textContent=`${heroMeta.name.toUpperCase()} · LEVEL ${String(level()).padStart(2,'0')}`;
   $('hero-stats').innerHTML=Object.entries(heroMeta.stats).map(([name,value])=>`<div class="hero-stat"><div><small>${name.toUpperCase()}</small><strong>${value}</strong></div><div class="stat-track"><i style="width:${value}%"></i></div></div>`).join('');
   $('ability-label').textContent=heroMeta.id==='ranger'?'Gale':heroMeta.id==='warden'?'Sunsteel':'Pulse';
