@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 export class LODManager {
   constructor({ camera, high = 18, medium = 45, far = 85 } = {}) {
     this.camera = camera;
@@ -5,6 +7,8 @@ export class LODManager {
     this.medium = medium;
     this.far = far;
     this.entries = new Set();
+    this.cameraPosition = new THREE.Vector3();
+    this.objectPosition = new THREE.Vector3();
   }
 
   register(object, { high = null, medium = null, far = null } = {}) {
@@ -19,13 +23,17 @@ export class LODManager {
   }
 
   update() {
-    const cameraPosition = this.camera.getWorldPosition(this._cameraPosition ||= new THREE.Vector3());
+    this.camera.getWorldPosition(this.cameraPosition);
     for (const entry of this.entries) {
       if (!entry.object.visible) continue;
-      const distance = cameraPosition.distanceTo(entry.object.getWorldPosition(this._objectPosition ||= new THREE.Vector3()));
+      entry.object.getWorldPosition(this.objectPosition);
+      const distance = this.cameraPosition.distanceTo(this.objectPosition);
       const level = distance < entry.high ? 0 : distance < entry.medium ? 1 : distance < entry.far ? 2 : 3;
       entry.object.userData.astraLOD = level;
-      entry.object.dispatchEvent({ type: 'lodchange', level });
+      if (entry.object.userData.astraPreviousLOD !== level) {
+        entry.object.userData.astraPreviousLOD = level;
+        entry.object.dispatchEvent({ type: 'lodchange', level });
+      }
     }
   }
 }
