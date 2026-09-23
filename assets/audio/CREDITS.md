@@ -2,7 +2,7 @@
 
 Every sound in this folder comes from OpenGameArt.org. Recordings under CC0 need no attribution, but they are listed here anyway. CC-BY 3.0 recordings are used under the terms of that licence.
 
-All files were converted to Ogg Vorbis at 44.1 kHz. One-shot effects were mixed down to mono, had leading silence trimmed and were peak-normalised. Loops were given an equal-power crossfade from tail to head so that they repeat seamlessly. Other edits are listed per file.
+Every sound ships as Ogg Vorbis plus an AAC copy (.m4a) for Safari versions that cannot decode Vorbis, both at 44.1 kHz. One-shot effects were mixed down to mono, had leading silence trimmed and were peak-normalised. Loops were given an equal-power crossfade from tail to head so that they repeat seamlessly. Other edits are listed per file.
 
 | File | Source | Author | Licence | Edits |
 | --- | --- | --- | --- | --- |

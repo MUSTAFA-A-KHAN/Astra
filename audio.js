@@ -19,7 +19,7 @@ export class GameAudio {
     this.volumes = { master: .75, effects: .8, ambience: .5, music: .3 };
     this.buffers = new Map(); this.pending = new Map(); this.failed = new Set();
     this.voices = new Set(); this.loops = new Map(); this.lastVariant = new Map(); this.lastEvent = new Map();
-    this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0;
+    this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0; this.format = 'ogg';
     this.musicState = 'exploration'; this.victoryRemaining = 0; this.combatRemaining = 0;
     this.stepDistance = 0; this.wasGrounded = true; this.initializedMotion = false;
     this.climbTimer = 0; this.breathLevel = 0; this.smithTimer = .4; this.animalTimer = 9;
@@ -77,9 +77,13 @@ export class GameAudio {
     while (this.downloads < 3 && this.queue.length) {
       const task = this.queue.shift(); this.downloads++;
       Promise.resolve().then(async () => {
-        const response = await this.fetcher(new URL(`./assets/audio/${task.file}`, import.meta.url), { signal: task.signal });
-        if (!response.ok) throw new Error(`Audio HTTP ${response.status}`);
-        const buffer = await task.context.decodeAudioData(await response.arrayBuffer());
+        let buffer;
+        try { buffer = await this.decode(task, this.format); }
+        catch (error) {
+          // Safari builds without Vorbis reject the Ogg data; the AAC twin serves this and every later file.
+          if (this.format !== 'ogg' || task.signal.aborted) throw error;
+          buffer = await this.decode(task, 'm4a'); this.format = 'm4a';
+        }
         if (this.generation !== task.generation || this.disposed) return null;
         this.buffers.set(task.file, buffer); return buffer;
       }).catch(() => {
@@ -90,6 +94,12 @@ export class GameAudio {
         if (this.generation === task.generation) { this.pending.delete(task.file); this.downloads--; this.pump(); }
       });
     }
+  }
+  async decode(task, format) {
+    const file = task.file.replace(/\.ogg$/, `.${format}`);
+    const response = await this.fetcher(new URL(`./assets/audio/${file}`, import.meta.url), { signal: task.signal });
+    if (!response.ok) throw new Error(`Audio HTTP ${response.status}`);
+    return task.context.decodeAudioData(await response.arrayBuffer());
   }
   variant(name) {
     const files = AUDIO_ASSETS[name]?.files;
@@ -227,7 +237,7 @@ export class GameAudio {
   footstep(surface, volume = .7) { return this.play(footstepSurface(surface), { volume }); }
   bird() { return this.play('birds', { volume: .25 }); }
   getStats() {
-    return { enabled: this.enabled, paused: this.paused, state: this.context?.state || 'locked', loaded: this.buffers.size,
+    return { enabled: this.enabled, paused: this.paused, state: this.context?.state || 'locked', format: this.format, loaded: this.buffers.size,
       loading: this.pending.size, failed: [...this.failed], voices: this.voices.size, loops: this.loops.size,
       musicState: this.musicState, played: this.played, volumes: { ...this.volumes } };
   }

@@ -65,6 +65,8 @@ function sound() {
   audio.play('interaction', { volume: .35 });
 }
 function enableAudio() { if (!preferences.sound) return; try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audio.setContext(audioContext); audioContext.resume().catch(() => {}); } catch {} }
+// iPadOS suspends ("interrupted") the context after app switches, calls or locking; only a gesture may restart it.
+for (const type of ['touchend', 'click', 'keydown']) addEventListener(type, () => { if (preferences.sound && audioContext && audioContext.state !== 'running') audioContext.resume().catch(() => {}); }, { capture: true, passive: true });
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#9fbcb0');

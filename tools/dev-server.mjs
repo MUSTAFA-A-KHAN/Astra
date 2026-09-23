@@ -24,6 +24,7 @@ const mime = {
   '.gltf': 'model/gltf+json',
   '.bin': 'application/octet-stream',
   '.wasm': 'application/wasm',
+  '.m4a': 'audio/mp4',
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
   '.wav': 'audio/wav',
