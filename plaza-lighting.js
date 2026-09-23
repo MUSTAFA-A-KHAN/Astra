@@ -30,7 +30,7 @@ export function createPlazaLights({ transform = {}, sources = PLAZA_LIGHT_SOURCE
     // Lights hand over where their weight reaches zero, avoiding a visible
     // pop as the nearest lamps change. Distances include height, so downstairs
     // lights cannot displace nearby lights when the hero climbs upstairs.
-    const far = Math.min(REACH, distances[order[slots]] ?? REACH), near = far * .6;
+    const far = Math.min(REACH, distances[order[slots]] ?? REACH), near = far * .5;
     for (let k = 0; k < lights.length; k++) {
       const index = order[k], light = lights[k];
       if (index !== undefined) light.position.copy(lanterns[index]);
