@@ -339,21 +339,24 @@ test('the view button cycles camera perspectives and remembers the one you left 
   const shape = view => `${view.pitch.toFixed(2)}/${view.radius.toFixed(1)}/${view.fov.toFixed(0)}`;
 
   const seen = [await settled()];
-  for (let press = 0; press < 3; press++) {
+  for (let press = 0; press < 4; press++) {
     await page.locator('#view-button').click();
     seen.push(await settled());
   }
-  expect(seen.map(view => view.view)).toEqual(['follow', 'shoulder', 'wide', 'overhead']);
-  // Four names are worth nothing if they are the same camera: each one
+  expect(seen.map(view => view.view)).toEqual(['follow', 'close', 'shoulder', 'wide', 'overhead']);
+  // Five names are worth nothing if they are the same camera: each one
   // has to be a different pitch, distance and field of view.
-  expect(new Set(seen.map(shape)).size).toBe(4);
+  expect(new Set(seen.map(shape)).size).toBe(5);
+  // And the close one has to be the closest, or it is not what it says.
+  const distances = seen.map(view => view.radius);
+  expect(Math.min(...distances)).toBe(seen[1].radius);
   expect(await page.locator('#view-label').textContent()).toBe('Overhead');
   await page.locator('#view-button').click();
   expect((await settled()).view).toBe('follow');
 
   // The key does what the button does.
   await page.keyboard.press('v');
-  expect((await settled()).view).toBe('shoulder');
+  expect((await settled()).view).toBe('close');
 
   // Dragging moves the camera off the perspective without choosing a
   // different one — a preset is a posture, not a mode to be locked in.
@@ -365,15 +368,15 @@ test('the view button cycles camera perspectives and remembers the one you left 
   await page.mouse.up();
   const dragged = (await snapshot(page)).camera;
   expect(dragged.pitch).toBeLessThan(posture.pitch - 0.05);
-  expect(dragged.view).toBe('shoulder');
+  expect(dragged.view).toBe('close');
 
   // And the choice outlives the session.
   await boot(page);
   await start(page);
   const remembered = await settled();
-  expect(remembered.view).toBe('shoulder');
+  expect(remembered.view).toBe('close');
   expect(shape(remembered)).toBe(shape(seen[1]));
-  expect(await page.locator('#view-label').textContent()).toBe('Shoulder');
+  expect(await page.locator('#view-label').textContent()).toBe('Close');
   expect(errors).toEqual([]);
 });
 

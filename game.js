@@ -26,6 +26,10 @@ const CONTROLS = ['joystick','sprint','attack','ability','jump','view'];
 // posture rather than a mode the camera is locked into.
 const VIEWS = [
   { id: 'follow', name: 'Follow', pitch: .48, radius: 14, fov: 55 },
+  // The close one phone games run: nearly level with the hero, a
+  // step behind them, and pushed off to one side so the body is
+  // not standing in front of everything worth seeing.
+  { id: 'close', name: 'Close', pitch: .2, radius: 5, fov: 70, shoulder: .8, height: 2.25 },
   { id: 'shoulder', name: 'Shoulder', pitch: .3, radius: 8.5, fov: 62 },
   { id: 'wide', name: 'Wide', pitch: .4, radius: 23, fov: 52 },
   { id: 'overhead', name: 'Overhead', pitch: .88, radius: 21, fov: 55 },
@@ -271,7 +275,7 @@ renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==
 renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
-renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,7,25);settling=0;e.preventDefault();}},{passive:false});
+renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,4,25);settling=0;e.preventDefault();}},{passive:false});
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 const joystick=$('joystick');let joyCenterX=0,joyCenterY=0;
 function moveJoy(e){const max=joystick.clientWidth*.34,dx=e.clientX-joyCenterX,dy=e.clientY-joyCenterY,length=Math.hypot(dx,dy),scale=length>max?max/length:1;joyX=dx*scale/max;joyY=dy*scale/max;if(length<5)joyX=joyY=0;$('joystick-knob').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;}
@@ -518,7 +522,12 @@ function updateCamera(dt){
     // player's dragging, so it follows the preset whether or not the
     // move is still settling.
     if(Math.abs(camera.fov-view.fov)>.01){camera.fov=damp(camera.fov,view.fov,7,dt);camera.updateProjectionMatrix();}
-    targetPoint.copy(position);targetPoint.y+=1.9;cameraTarget.lerp(targetPoint,1-Math.exp(-9*dt));
+    targetPoint.copy(position);targetPoint.y+=view.height||1.9;
+    // Slide the aim sideways rather than the camera: the hero ends
+    // up off to the left of frame with the road ahead in the clear,
+    // and the orbit still turns around them.
+    if(view.shoulder){targetPoint.x+=Math.cos(yaw)*view.shoulder;targetPoint.z-=Math.sin(yaw)*view.shoulder;}
+    cameraTarget.lerp(targetPoint,1-Math.exp(-9*dt));
     const orbitPitch=Math.max(.08,pitch);
     cameraDesired.set(cameraTarget.x+Math.sin(yaw)*Math.cos(orbitPitch)*radius,cameraTarget.y+Math.sin(orbitPitch)*radius,cameraTarget.z+Math.cos(yaw)*Math.cos(orbitPitch)*radius);
     const fraction=collision.cameraFraction(cameraTarget,cameraDesired,.4);
