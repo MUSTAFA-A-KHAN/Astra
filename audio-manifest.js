@@ -1,7 +1,7 @@
 /** Local files; source authors, license URLs and edits are in assets/audio/CREDITS.md. */
 export const AUDIO_ASSETS = Object.freeze({
   stepGrass: { files: ['step-grass-1.ogg', 'step-grass-2.ogg'], volume: .7 },
-  stepStone: { files: ['step-stone-1.ogg', 'step-stone-2.ogg'], volume: .65 },
+  stepStone: { files: ['step-grass-2.ogg'], volume: .1 },
   stepWood: { files: ['step-wood-1.ogg', 'step-wood-2.ogg'], volume: .65 },
   stepWater: { files: ['step-water.ogg'], volume: .7 },
   sword: { files: ['sword-1.ogg', 'sword-2.ogg'], volume: .85 },
