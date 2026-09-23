@@ -17,31 +17,36 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('City Set Proto assets load offline and the roster and menus remain usable', async ({ page }) => {
-  const cityResponses = [];
-  const cityFailures = [];
+test('both districts load offline and the roster and menus remain usable', async ({ page }) => {
+  const districtResponses = [];
+  const districtFailures = [];
+  const district = url => url.includes('/City_Set_-_Proto_Series/') || url.includes('/forest-loner-diorama/');
   page.on('response', response => {
-    if (response.url().includes('/City_Set_-_Proto_Series/')) {
-      cityResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
-    }
+    if (district(response.url())) districtResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
   });
   page.on('requestfailed', request => {
-    if (request.url().includes('/City_Set_-_Proto_Series/')) cityFailures.push(request.url());
+    if (district(request.url())) districtFailures.push(request.url());
   });
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
   const errors = await boot(page);
-  expect(cityFailures).toEqual([]);
-  expect(cityResponses.some(response => response.path.endsWith('.gltf'))).toBe(true);
-  expect(cityResponses.some(response => response.path.endsWith('.bin'))).toBe(true);
-  expect(cityResponses.some(response => response.path.endsWith('.png'))).toBe(true);
-  expect(cityResponses.every(response => response.status === 200)).toBe(true);
+  expect(districtFailures).toEqual([]);
+  expect(districtResponses.some(response => response.path.endsWith('.gltf'))).toBe(true);
+  expect(districtResponses.some(response => response.path.endsWith('.bin'))).toBe(true);
+  expect(districtResponses.some(response => response.path.endsWith('.png'))).toBe(true);
+  // The diorama ships as one file: its textures travel inside the binary.
+  expect(districtResponses.some(response => response.path.endsWith('.glb'))).toBe(true);
+  expect(districtResponses.some(response => response.path.endsWith('.fbx'))).toBe(false);
+  expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
-  expect(terrain.provider).toBe('city-set-proto-series');
+  expect(terrain.provider).toBe('astra-world-map');
   expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
+  expect(terrain.assets).toHaveLength(2);
   expect(terrain.triangleCount).toBeGreaterThan(500_000);
   expect(terrain.meshCount).toBeGreaterThan(0);
   expect(terrain.colliderCount).toBeGreaterThan(0);
+  // The island is only a place if the jetty reaches it from the city's spawn.
+  expect(terrain.forestReachable).toBe(true);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);
   await expect(page.locator('.character-card')).toHaveCount(rosterCount);
   for (const [name, id] of [['Lyra', 'ranger'], ['Elowen', 'mage'], ['Cael', 'warden']]) {

@@ -11,12 +11,19 @@ await mkdir(destination, { recursive: true });
 await prepareVendor();
 
 const runtimeExtensions = new Set(['.html', '.js', '.css', '.glb', '.svg', '.png', '.jpg', '.webp', '.ico']);
+// The diorama folder also holds the supplied FBX and its loose texture pages,
+// sixty megabytes the game never fetches: ship the converted model alone.
+const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb'];
 for (const entry of await readdir(root, { withFileTypes: true })) {
   if (['runtime-config.js', 'config.js'].includes(entry.name)) continue;
   if ((entry.isFile() && runtimeExtensions.has(extname(entry.name))) ||
       (entry.isDirectory() && ['assets', 'vendor', 'City_Set_-_Proto_Series'].includes(entry.name))) {
     await cp(resolve(root, entry.name), resolve(destination, entry.name), { recursive: true });
   }
+}
+for (const file of runtimeFiles) {
+  await mkdir(dirname(resolve(destination, file)), { recursive: true });
+  await cp(resolve(root, file), resolve(destination, file));
 }
 // A production artifact must never capture the developer's environment or tokens.
 await writeFile(resolve(destination, 'config.js'), 'window.ASTRA_CONFIG = window.ASTRA_CONFIG || {};\n');

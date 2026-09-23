@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createCityWorld } from './city-world.js';
+import { createWorld } from './world-map.js';
 import { createAtmosphere } from './atmosphere.js';
 import { SpatialHash, LocomotionController, PropPhysics, RagdollController } from './physics.js';
 import { FollowCamera } from './camera.js';
@@ -84,14 +84,16 @@ const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.
 const atmosphere = createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lowPower: touch });
 let world;
 try {
-  $('load-message').textContent = 'Preparing the city streets…';
-  world = await createCityWorld(scene, { lowPower: touch });
+  $('load-message').textContent = 'Preparing the Verdant Reach…';
+  world = await createWorld(scene, { lowPower: touch });
 } catch (error) {
-  $('load-message').textContent = 'The city could not load. Check your connection and try again.';
+  $('load-message').textContent = 'The Reach could not load. Check your connection and try again.';
   $('retry-button').hidden = false;
   throw error;
 }
 const groundHeight = (x, z) => world.getHeight(x, z);
+// The Reach is two districts: the ambience, the sky and the HUD all ask which.
+const region = () => world.biomeAt(position.x, position.z);
 const spawn = new THREE.Vector3(world.spawn.x, groundHeight(world.spawn.x, world.spawn.z), world.spawn.z);
 const shrine = world.landmarks.find(landmark => landmark.id === 'shrine') || world.landmarks[0];
 const camp = world.landmarks.find(landmark => landmark.id === 'camp') || world.landmarks[1];
@@ -564,7 +566,7 @@ function updatePlayer(dt){
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
   const threat=nearestThreat<10||combatMemory>0?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
   audio.setPaused(false);
-  audio.update(dt,position,'city',{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
+  audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
   syncCameraControls();
 }
 function updateShards(){
@@ -638,9 +640,9 @@ function animate(now){
   audio.setPaused(dialog.open||screen!=='game'||contextLost||document.hidden);
   const avatarFloor=groundHeight(avatar.position.x,avatar.position.z);
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
-  atmosphere.update(dt,reducedMotion?0:time,camera.position);
+  atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
-  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:"City Quarter";$('world-clock').textContent=`CITY · ${formatTime(preferences.time)}`;}}
+  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:region()==='forest'?'Pine Islet':'City Quarter';$('world-clock').textContent=`${region()==='forest'?'ISLET':'CITY'} · ${formatTime(preferences.time)}`;}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
   if(preferences.quality==='auto'&&frameSamples>150&&time-lastAdapt>8&&frameMS>25){if(quality==='high')applyQuality('balanced',true);else if(quality==='balanced')applyQuality('low',true);else if(resolutionScale>.7){resolutionScale=Math.max(.7,resolutionScale-.1);applyQuality('low',true);}frameSamples=0;}

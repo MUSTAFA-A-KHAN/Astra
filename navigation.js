@@ -1,8 +1,22 @@
 import * as THREE from 'three';
 
-// The supplied model batches whole streets and several houses into each mesh.
-// Derive footprints from its triangles: a mesh-wide box would seal the roads.
-export function createCityNavigation(layout, bounds, { cellSize = .75 } = {}) {
+// The imported models batch whole streets, houses and whole hillsides into a
+// handful of meshes. Derive footprints from their triangles: a mesh-wide box
+// would seal the roads, and a single rule would not suit two different models.
+//
+// A district says how one model's meshes read as terrain:
+//   ground    meshes whose upward faces are walked on
+//   solid     meshes that are only ever obstacles
+//   walkable  the height below which a ground face is floor rather than the
+//             scenery standing on it (the city batches cars with its asphalt)
+//   clutter   [floor, rise] for obstacles modelled inside those ground batches
+//   standing  a solid face reaching above this blocks the way
+//   reach     and only if it also comes down this low: branches overhead are
+//             part of the same mesh as the trunk that holds them up
+//   relative  measures those two from the ground beneath each face instead of
+//             from sea level, for a district whose ground is not one level
+// A mesh matching neither pattern is scenery: no footprint, no floor.
+export function createNavigation(districts, bounds, { cellSize = .75, openings = [], arrival }) {
   const minX = Math.floor(bounds.minX / cellSize) * cellSize;
   const minZ = Math.floor(bounds.minZ / cellSize) * cellSize;
   const width = Math.ceil((bounds.maxX - minX) / cellSize);
@@ -56,11 +70,7 @@ export function createCityNavigation(layout, bounds, { cellSize = .75 } = {}) {
     }
     surfaceCount++;
   }
-  layout.updateMatrixWorld(true);
-  layout.traverse(mesh => {
-    if (!mesh.isMesh) return;
-    const building = mesh.name.includes('houses');
-    const terrain = /streets|floor|earth|canals/.test(mesh.name);
+  function eachTriangle(mesh, visit) {
     const positions=mesh.geometry.attributes.position, indices=mesh.geometry.index;
     const count=indices ? indices.count : positions.count;
     triangleCount+=count/3;
@@ -68,17 +78,32 @@ export function createCityNavigation(layout, bounds, { cellSize = .75 } = {}) {
       a.fromBufferAttribute(positions,indices ? indices.getX(i) : i).applyMatrix4(mesh.matrixWorld);
       b.fromBufferAttribute(positions,indices ? indices.getX(i+1) : i+1).applyMatrix4(mesh.matrixWorld);
       c.fromBufferAttribute(positions,indices ? indices.getX(i+2) : i+2).applyMatrix4(mesh.matrixWorld);
-      const low=Math.min(a.y,b.y,c.y), high=Math.max(a.y,b.y,c.y);
-      if(building && high>.75) footprint(Math.ceil(high/4)*4);
-      // Street batches include cars, bins, posts and lamps as well as asphalt.
-      // Keep their lower solid parts; overhead lamp arms remain passable.
-      else if(terrain && low<5 && high>.95) footprint(Math.ceil(Math.min(high,8)/2)*2);
-      if(terrain && high<1.15) {
-        normal.crossVectors(ab.subVectors(b,a),ac.subVectors(c,a)).normalize();
-        if(normal.y>.45) addSurface();
-      }
+      visit(Math.min(a.y,b.y,c.y), Math.max(a.y,b.y,c.y));
     }
-  });
+  }
+  for (const district of districts) {
+    const { layout, ground = null, solid = null, standing = .75, reach = Infinity, clutter = null, walkable = Infinity, relative = false } = district;
+    layout.updateMatrixWorld(true);
+    layout.traverse(mesh => {
+      if (!mesh.isMesh) return;
+      const floor = !!ground?.test(mesh.name);
+      const obstacle = !floor && !!solid?.test(mesh.name);
+      if (!floor && !obstacle) return;
+      // A district measured against its own ground has to wait for the second
+      // pass: its floor is not known until every ground face has been read.
+      if (obstacle && relative) return;
+      eachTriangle(mesh, (low, high) => {
+        if(obstacle && high>standing && low<reach) footprint(Math.ceil(high/4)*4);
+        // Street batches include cars, bins, posts and lamps as well as asphalt.
+        // Keep their lower solid parts; overhead lamp arms remain passable.
+        else if(floor && clutter && low<clutter[0] && high>clutter[1]) footprint(Math.ceil(Math.min(high,8)/2)*2);
+        if(floor && high<walkable) {
+          normal.crossVectors(ab.subVectors(b,a),ac.subVectors(c,a)).normalize();
+          if(normal.y>.45) addSurface();
+        }
+      });
+    });
+  }
 
   function sampleHeight(x,z) {
     const triangles=surfaceTiles.get(`${Math.floor(x/tileSize)},${Math.floor(z/tileSize)}`);
@@ -90,11 +115,34 @@ export function createCityNavigation(layout, bounds, { cellSize = .75 } = {}) {
     }
     return y;
   }
-  // Seal open water and the irregular edge of the model. These cells never
-  // obstruct the camera, and prevent walking off the supplied pavement.
+  // Hillsides, banks and raised paths: on ground like that a height above sea
+  // level says nothing about whether a thing is in the way. A fallen log lying
+  // on a bank is not a wall, and a roof three storeys up is not a fence.
+  for (const district of districts.filter(d => d.relative && d.solid)) {
+    const { layout, ground = null, solid, standing = .75, reach = Infinity } = district;
+    layout.traverse(mesh => {
+      if (!mesh.isMesh || ground?.test(mesh.name) || !solid.test(mesh.name)) return;
+      eachTriangle(mesh, (low, high) => {
+        const turf = sampleHeight((a.x+b.x+c.x)/3, (a.z+b.z+c.z)/3);
+        if(Number.isFinite(turf) && high>turf+standing && low<turf+reach) footprint(Math.ceil(high/4)*4);
+      });
+    });
+  }
+  // Seal open water and the irregular edge of the models. These cells never
+  // obstruct the camera, and prevent walking off the supplied ground.
   for(let iz=0;iz<depth;iz++) for(let ix=0;ix<width;ix++) {
     const i=iz*width+ix;
     if(!tops[i] && sampleHeight(minX+(ix+.5)*cellSize,minZ+(iz+.5)*cellSize)<-1.1) tops[i]=-1;
+  }
+  // A crossing built between districts decides its own way through: the deck
+  // of the jetty is the floor here, not the harbour wall it steps over. Each
+  // opening must stay covered by that deck, or it would clear a hole instead.
+  for(const opening of openings) {
+    const ix0=Math.max(0,Math.floor((opening.x-opening.w/2-minX)/cellSize));
+    const ix1=Math.min(width-1,Math.floor((opening.x+opening.w/2-minX)/cellSize));
+    const iz0=Math.max(0,Math.floor((opening.z-opening.d/2-minZ)/cellSize));
+    const iz1=Math.min(depth-1,Math.floor((opening.z+opening.d/2-minZ)/cellSize));
+    for(let iz=iz0;iz<=iz1;iz++) for(let ix=ix0;ix<=ix1;ix++) tops[iz*width+ix]=0;
   }
   function clear(x,z,radius=.8) {
     if(x-radius<bounds.minX || x+radius>bounds.maxX || z-radius<bounds.minZ || z+radius>bounds.maxZ) return false;
@@ -116,10 +164,11 @@ export function createCityNavigation(layout, bounds, { cellSize = .75 } = {}) {
       const px=minX+(ix+.5)*cellSize,pz=minZ+(iz+.5)*cellSize,d=(px-x)**2+(pz-z)**2;
       if(d<bestDistance && clear(px,pz,radius)) { best={x:px,z:pz}; bestDistance=d; }
     }
-    if(!best) throw new Error('The city model has no reachable street at the requested clearance.');
+    if(!best) throw new Error('The world models have no reachable ground at the requested clearance.');
     return {...best,y:sampleHeight(best.x,best.z)};
   }
-  const spawn=findClear(0,18,3.5,false);
+  // Everywhere the player can stand is somewhere they can walk to from here.
+  const spawn=findClear(arrival.x,arrival.z,arrival.radius,false);
   const start=Math.floor((spawn.z-minZ)/cellSize)*width+Math.floor((spawn.x-minX)/cellSize);
   const queue=new Int32Array(width*depth); queue[0]=start; reachable[start]=1;
   let count=1;
