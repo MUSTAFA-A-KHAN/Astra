@@ -45,6 +45,16 @@ test('a browser that cannot decode Ogg Vorbis falls back to the AAC files', asyn
   assert.ok(requested.filter(url => url.endsWith('.ogg')).length <= 3, 'only the first concurrent batch should try Ogg');
 });
 
+test('a wrong AAC guess falls back to the Ogg files', async () => {
+  const context = fakeContext();
+  context.decodeAudioData = async data => { if (data.url.endsWith('.m4a')) throw new Error('EncodingError'); return { duration: 1 }; };
+  const audio = new GameAudio({ format: 'm4a', fetcher: async url => ({ ok: true, arrayBuffer: async () => ({ url: String(url) }) }) });
+  audio.setContext(context);
+  await Promise.all([...audio.pending.values()]);
+  assert.equal(audio.getStats().format, 'ogg');
+  assert.deepEqual(audio.getStats().failed, []);
+});
+
 test('footsteps keep their stride while the game re-asserts the unpaused state every frame', async () => {
   const audio = new GameAudio({ random: () => 0, fetcher: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }) });
   audio.setContext(fakeContext());

@@ -11,15 +11,20 @@ export function footstepSurface(surface = '') {
   return 'stepGrass';
 }
 
+/** Safari decodes AAC natively but Vorbis late or not at all, so anything short of a confident "probably" gets the .m4a twins. */
+function preferredFormat() {
+  try { return new Audio().canPlayType('audio/ogg; codecs="vorbis"') === 'probably' ? 'ogg' : 'm4a'; } catch { return 'ogg'; }
+}
+
 /** Local licensed recordings only. The game owns and unlocks the AudioContext. */
 export class GameAudio {
-  constructor({ context = null, enabled = true, fetcher = globalThis.fetch?.bind(globalThis), random = Math.random } = {}) {
+  constructor({ context = null, enabled = true, fetcher = globalThis.fetch?.bind(globalThis), random = Math.random, format = preferredFormat() } = {}) {
     this.context = null; this.enabled = enabled; this.paused = false; this.disposed = false;
     this.fetcher = fetcher; this.random = random; this.master = null; this.buses = {};
     this.volumes = { master: .75, effects: .8, ambience: .5, music: .3 };
     this.buffers = new Map(); this.pending = new Map(); this.failed = new Set();
     this.voices = new Set(); this.loops = new Map(); this.lastVariant = new Map(); this.lastEvent = new Map();
-    this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0; this.format = 'ogg';
+    this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0; this.format = format;
     this.musicState = 'exploration'; this.victoryRemaining = 0; this.combatRemaining = 0;
     this.stepDistance = 0; this.wasGrounded = true; this.initializedMotion = false;
     this.climbTimer = 0; this.breathLevel = 0; this.smithTimer = .4; this.animalTimer = 9;
@@ -80,9 +85,10 @@ export class GameAudio {
         let buffer;
         try { buffer = await this.decode(task, this.format); }
         catch (error) {
-          // Safari builds without Vorbis reject the Ogg data; the AAC twin serves this and every later file.
-          if (this.format !== 'ogg' || task.signal.aborted) throw error;
-          buffer = await this.decode(task, 'm4a'); this.format = 'm4a';
+          // The format guess was wrong for this browser: the twin serves this file and, once it decodes, every later one.
+          if (task.signal.aborted) throw error;
+          const other = this.format === 'ogg' ? 'm4a' : 'ogg';
+          buffer = await this.decode(task, other); this.format = other;
         }
         if (this.generation !== task.generation || this.disposed) return null;
         this.buffers.set(task.file, buffer); return buffer;
