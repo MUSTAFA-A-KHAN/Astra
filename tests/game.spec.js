@@ -47,6 +47,8 @@ test('both districts load offline and the roster and menus remain usable', async
   expect(terrain.colliderCount).toBeGreaterThan(0);
   // The island is only a place if the jetty reaches it from the city's spawn.
   expect(terrain.forestReachable).toBe(true);
+  // Every street lantern in the city model is found and given light.
+  expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);
   await expect(page.locator('.character-card')).toHaveCount(rosterCount);
   for (const [name, id] of [['Lyra', 'ranger'], ['Elowen', 'mage'], ['Cael', 'warden']]) {
@@ -184,7 +186,9 @@ test('sun and moon follow the time slider and the world clock pauses with menus'
   };
   const morning = await setHour(8);
   const noon = await setHour(12);
+  expect((await snapshot(page)).terrain.streetLights.power).toBe(0);
   const night = await setHour(0);
+  expect((await snapshot(page)).terrain.streetLights.power).toBe(1);
   expect(morning.sunDirection[0]).toBeGreaterThan(0.5);
   expect(noon.sunElevation).toBeGreaterThan(morning.sunElevation);
   expect(noon.sunIntensity).toBeGreaterThan(morning.sunIntensity);

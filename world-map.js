@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createNavigation } from './navigation.js';
 import { CITY_ARRIVAL, loadCityDistrict } from './city-world.js';
 import { loadForestDistrict } from './forest-world.js';
+import { createStreetLights } from './street-lights.js';
 
 // The Verdant Reach is two supplied models standing in one harbour: the city
 // on its quay, and the Forest Loner diorama moored off its western seawall.
@@ -33,6 +34,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   // it; findWalkable would otherwise quietly drop them back in the city.
   const forestReachable = navigation.isWalkable(jetty.landing.x, jetty.landing.z, 1);
   if (!forestReachable) console.warn('The jetty does not reach the island: its shore is unreachable from the city.');
+  const streetLights = createStreetLights({ lanterns: city.lanterns, materials: city.materials, heightAt: navigation.getHeight, lights: lowPower ? 2 : 4 });
+  root.add(streetLights.group);
 
   const landmarks = [
     { id:'shrine', name:'Moonwell Sanctuary', ...navigation.findWalkable(0,-50,4), color:'#83e6ee' },
@@ -63,15 +66,16 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   let daylight=1;
   function setTime(hour) {
     daylight=THREE.MathUtils.clamp(Math.sin((hour-6)/12*Math.PI)*1.4,0,1);
-    city.setTime(daylight);
+    city.setTime(daylight);streetLights.setTime(daylight);
     for(const marker of markers) {marker.crystal.material.emissiveIntensity=.75+(1-daylight)*.65;marker.light.intensity=2+(1-daylight)*7;}
   }
   function setQuality(level) {
     const low=level==='low'||level==='performance'||level===0;
-    city.setQuality(low);forest.setQuality(low);
+    city.setQuality(low);forest.setQuality(low);streetLights.setQuality(low);
     for(const marker of markers) marker.light.visible=!low;
   }
-  function update(dt,time) {
+  function update(dt,time,position) {
+    streetLights.update(position);
     for(let i=0;i<markers.length;i++) {
       const marker=markers[i];marker.crystal.rotation.y=time*.35+i;
       marker.crystal.position.y=marker.baseHeight+Math.sin(time*1.2+i)*.16;
@@ -80,7 +84,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   }
   setQuality(lowPower?'low':'high');setTime(15.5);scene.add(root);
   const diagnostics={ready:true,provider:'astra-world-map',asset:city.asset,assets:[city.asset,forest.asset],
-    meshCount:city.meshes.length+forest.meshes.length,forestReachable,shore:jetty.landing,...navigation.diagnostics};
+    meshCount:city.meshes.length+forest.meshes.length,forestReachable,shore:jetty.landing,...navigation.diagnostics,
+    get streetLights(){return streetLights.diagnostics;}};
   return {
     ...navigation,bounds,landmarks,shardPositions,enemyPositions,update,setTime,setQuality,diagnostics,
     // The ambience and the sky both read the ground the player is standing on.
@@ -97,7 +102,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
       for(const geometry of geometries) geometry.dispose();
       for(const material of usedMaterials) material.dispose();
       for(const texture of textures) texture.dispose();
-      scene.remove(root);
+      streetLights.dispose();scene.remove(root);
     },
   };
 }
