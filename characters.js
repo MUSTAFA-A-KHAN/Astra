@@ -2647,6 +2647,12 @@ async function makeImported(
    */
   const run =
     find([
+      // A mount gallops rather than runs, and the clip ships
+      // namespaced — `Skeleton|Gallop` — so it has to be
+      // matched by gait name ahead of the generic run
+      // patterns, which would otherwise claim `Jump_Run`.
+      /^gallop$/i,
+      /gallop/i,
       /^run$/i,
       /^running$/i,
       /^run[_ -]?forward$/i,
