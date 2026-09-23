@@ -25,15 +25,7 @@ export function createPlazaLights({ transform = {}, sources = PLAZA_LIGHT_SOURCE
   const distances = new Float32Array(lanterns.length), order = [...lanterns.keys()];
   const chest = new THREE.Vector3(), patchedMaterials = new Map();
   let power = 0, slots = SLOTS, positioned = false;
-const SMOOTHING = 0.12;
 
-function smoothIntensity(light, target) {
-  light.intensity += (target - light.intensity) * SMOOTHING;
-
-  if (Math.abs(light.intensity - target) < 0.01) {
-    light.intensity = target;
-  }
-}
   function apply() {
     // Lights hand over where their weight reaches zero, avoiding a visible
     // pop as the nearest lamps change. Distances include height, so downstairs
@@ -44,7 +36,7 @@ function smoothIntensity(light, target) {
       if (index !== undefined) light.position.copy(lanterns[index]);
       const weight = index === undefined || k >= slots || !positioned ? 0 :
         1 - THREE.MathUtils.smoothstep(distances[index], near, far);
-      smoothIntensity(light, INTENSITY * power * weight);
+      light.intensity = INTENSITY * power * weight;
     }
   }
 
