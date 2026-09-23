@@ -46,7 +46,9 @@ export class GameAudio {
     if (!this.enabled) this.stopAll();
     else if (this.context) this.preload();
   }
+  /** The game re-asserts this every frame, so only a real change may reset stride and landing tracking. */
   setPaused(paused) {
+    if (!!paused === this.paused) return;
     this.paused = !!paused; this.stepDistance = 0; this.initializedMotion = false; this.refreshVolume();
     if (this.paused) this.stopAll();
   }
