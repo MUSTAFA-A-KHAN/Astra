@@ -32,7 +32,7 @@ const VIEWS = [
   // The close one phone games run: nearly level with the hero, a
   // step behind them, and pushed off to one side so the body is
   // not standing in front of everything worth seeing.
-  { id: 'close', name: 'Close', pitch: .2, radius: 5, fov: 70, shoulder: .8, height: 2.25 },
+  { id: 'close', name: 'Close', pitch: .1, radius: 2, fov: 70, shoulder: .8, height: 3 },
   { id: 'shoulder', name: 'Shoulder', pitch: .3, radius: 8.5, fov: 62 },
   { id: 'wide', name: 'Wide', pitch: .4, radius: 23, fov: 52 },
   { id: 'overhead', name: 'Overhead', pitch: .88, radius: 21, fov: 55 },
