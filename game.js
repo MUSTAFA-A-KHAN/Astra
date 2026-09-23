@@ -358,12 +358,22 @@ const sprint=$('sprint-button');sprint.addEventListener('pointerdown',e=>{sprint
 // mouse and keyboard, guarded so a tap that does produce one does
 // not fire the action twice.
 function actionButton(id,run){
-  const button=$(id);let pressed=false;
-  button.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;pressed=true;run();});
-  // A click still follows a single-finger tap, and that one has
+  const button=$(id);let touched=0;
+  button.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='mouse')return;
+    // Spending the tap here leaves the browser no default action to
+    // grow a double-tap zoom out of when the button is pressed again
+    // a moment later, which on iPad left the player zoomed in mid-fight.
+    if(e.cancelable)e.preventDefault();
+    touched=performance.now();run();
+  });
+  // A click may still follow a single-finger tap, and that one has
   // already been acted on. `detail` is 0 only for a keyboard
-  // activation, which has no press of its own behind it.
-  button.addEventListener('click',e=>{if(pressed&&e.detail){pressed=false;return;}run();});
+  // activation, which has no press of its own behind it. The press is
+  // remembered by when it happened rather than by a flag: preventing
+  // the default above suppresses the click on some browsers and not
+  // others, and a flag left standing would swallow the next real one.
+  button.addEventListener('click',e=>{if(e.detail&&performance.now()-touched<700)return;run();});
 }
 actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
 actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);

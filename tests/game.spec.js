@@ -282,6 +282,17 @@ test('responsive touch controls fit and joystick drives the same player', async 
   // The thumb never left the stick through any of that.
   expect((await snapshot(page)).input.joyY).toBeLessThan(-0.5);
 
+  // Safari grows a double-tap zoom out of repeated taps unless the tap
+  // target says `manipulation`; the stick and the sprint button still
+  // refuse every default, because a drag there must never pan the page.
+  const touchAction = selector => page.locator(selector).evaluate(element => getComputedStyle(element).touchAction);
+  for (const selector of ['#attack-button', '#ability-button', '#jump-button', '#view-button', '#interact-button']) {
+    expect(await touchAction(selector), `${selector} may not offer a double-tap zoom`).toBe('manipulation');
+  }
+  for (const selector of ['#joystick', '#sprint-button']) {
+    expect(await touchAction(selector), `${selector} is dragged, not tapped`).toBe('none');
+  }
+
   await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [thumb] });
   await touch.detach();
   expect(errors).toEqual([]);
