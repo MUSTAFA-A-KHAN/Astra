@@ -14,7 +14,17 @@ function readSave() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) ||
 const saved = readSave();
 const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v, min, max) : fallback;
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0 && v < 24) : []) };
-const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24) };
+// Where the player has put each on-screen control, as a fraction of
+// the viewport: a phone that rotates, or a window that resizes, keeps
+// the thumb rest in the same corner instead of the same pixel. An
+// absent control has never been moved and stays where the stylesheet
+// puts it.
+const CONTROLS = ['joystick','sprint','attack','ability','jump'];
+const readLayout = stored => Object.fromEntries(CONTROLS
+  .map(control => [control, stored?.[control]])
+  .filter(([, spot]) => Number.isFinite(spot?.x) && Number.isFinite(spot?.y))
+  .map(([control, spot]) => [control, { x: clamp(spot.x, 0, 1), y: clamp(spot.y, 0, 1) }]));
+const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), layout: readLayout(saved.layout) };
 // One city day lasts twenty minutes of active play. Menus pause the clock.
 const DAY_LENGTH_SECONDS = 20 * 60;
 const formatTime = hour => {
@@ -195,6 +205,9 @@ const cameraTarget=new THREE.Vector3(),cameraDesired=new THREE.Vector3();
 const dialog=$('menu-dialog');
 function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;velocity.set(0,0,0);$('joystick-knob').style.transform='';}
 addEventListener('keydown',e=>{
+  // While the controls are being arranged the hero stays put: no key
+  // reaches the game, and Escape finishes the same as Done.
+  if(editingLayout){if(e.code==='Escape')editLayout(false);return;}
   if(dialog.open){if(e.code==='Escape'){e.preventDefault();closeDialog();}return;}
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
   if(screen!=='game')return;
@@ -232,7 +245,132 @@ joystick.addEventListener('pointermove',e=>{if(e.pointerId===joyId)moveJoy(e);})
 function endJoy(e){if(e.pointerId===joyId){joyId=null;joyX=joyY=0;$('joystick-knob').style.transform='';}}
 for(const event of ['pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(event,endJoy);
 const sprint=$('sprint-button');sprint.addEventListener('pointerdown',e=>{sprinting=true;sprint.setPointerCapture(e.pointerId);e.preventDefault();});for(const event of ['pointerup','pointercancel','lostpointercapture'])sprint.addEventListener(event,()=>sprinting=false);
-$('attack-button').addEventListener('click',()=>attack());$('ability-button').addEventListener('click',()=>attack(true));$('jump-button').addEventListener('click',jump);$('interact-button').addEventListener('click',interact);
+// A press that begins while another finger is already down never
+// becomes a click: the browser only promotes a single-pointer
+// gesture to a tap. A thumb on the joystick is exactly that, so
+// every action button was dead for as long as the player was
+// moving — the one moment they are all worth having. The press
+// itself is what the buttons act on now, and `click` stays for
+// mouse and keyboard, guarded so a tap that does produce one does
+// not fire the action twice.
+function actionButton(id,run){
+  const button=$(id);let pressed=false;
+  button.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;pressed=true;run();});
+  // A click still follows a single-finger tap, and that one has
+  // already been acted on. `detail` is 0 only for a keyboard
+  // activation, which has no press of its own behind it.
+  button.addEventListener('click',e=>{if(pressed&&e.detail){pressed=false;return;}run();});
+}
+actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
+
+/**
+ * CONTROL LAYOUT
+ *
+ * Thumbs are not all the same length and phones are not all the same
+ * size, so where a control sits is the player's call. A moved control
+ * leaves the stylesheet's flow and is pinned by its centre instead —
+ * once one moves, every control is pinned at the spot it already
+ * occupied, so the ability bar does not re-centre itself around the
+ * gap and shuffle the buttons nobody touched.
+ */
+const controlEl = control => $(control === 'joystick' ? 'joystick' : `${control}-button`);
+/**
+ * A moved control is positioned against the screen, which is why no
+ * ancestor of one may carry a `transform`: a transform would become
+ * the containing block for anything fixed inside it and the fractions
+ * below would quietly come to mean a share of that box instead. The
+ * ability bar is centred without one for exactly this reason.
+ */
+function placeControl(control, spot) {
+  const element = controlEl(control);
+  if (!element) return;
+  // Centred with the standalone `translate` property rather than a
+  // `transform`: buttons animate their transform on press, so a
+  // centring transform would set every move sliding and would measure
+  // a control still easing into place as somewhere it is not. It also
+  // needs no size from JavaScript, which matters because the layout is
+  // applied while the HUD is still hidden and measures zero.
+  Object.assign(element.style, spot
+    ? { position: 'fixed', left: `${spot.x * 100}%`, top: `${spot.y * 100}%`, right: 'auto', bottom: 'auto', translate: '-50% -50%', margin: '0' }
+    : { position: '', left: '', top: '', right: '', bottom: '', translate: '', margin: '' });
+}
+const applyLayout = () => { for (const control of CONTROLS) placeControl(control, preferences.layout[control]); };
+// A control is held far enough inside the edge to stay tappable, and
+// clamping runs again on resize so a rotation cannot strand one of
+// them off the side of a narrower screen.
+function clampSpot(element, x, y) {
+  const margin = 6;
+  const halfX = Math.min(element.offsetWidth / 2 + margin, innerWidth / 2), halfY = Math.min(element.offsetHeight / 2 + margin, innerHeight / 2);
+  return { x: clamp(x, halfX / innerWidth, 1 - halfX / innerWidth), y: clamp(y, halfY / innerHeight, 1 - halfY / innerHeight) };
+}
+function pinCurrentLayout() {
+  for (const control of CONTROLS) {
+    const element = controlEl(control);
+    // A control the stylesheet is hiding on this device has no place
+    // of its own to remember.
+    if (preferences.layout[control] || !element || !element.offsetParent) continue;
+    const box = element.getBoundingClientRect();
+    preferences.layout[control] = clampSpot(element, (box.left + box.width / 2) / innerWidth, (box.top + box.height / 2) / innerHeight);
+  }
+  applyLayout();
+}
+let editingLayout = false, dragging = null;
+function editLayout(on) {
+  editingLayout = on; dragging = null;
+  $('game-hud').classList.toggle('layout-editing', on);
+  $('layout-editor').hidden = !on;
+  if (on) resetInput();
+  else { save(); toast('Controls saved where you left them.'); }
+}
+// Capture phase, so a control being moved never also fires: the
+// press is spent on the drag before the button or the stick sees it.
+$('game-hud').addEventListener('pointerdown', e => {
+  if (!editingLayout) return;
+  const element = e.target.closest('[data-control]');
+  if (!element) return;
+  e.preventDefault(); e.stopPropagation();
+  // Pinning happens on the first drag rather than on entering the
+  // editor, so a player who opens it and changes their mind — or
+  // presses Reset — is left with no stored layout at all.
+  pinCurrentLayout();
+  // Where the finger landed within the control, measured against the
+  // spot just pinned rather than the element: a control keeps its
+  // grip point instead of jumping its centre under the finger.
+  const spot = preferences.layout[element.dataset.control];
+  dragging = { element, pointerId: e.pointerId, control: element.dataset.control, offsetX: e.clientX - spot.x * innerWidth, offsetY: e.clientY - spot.y * innerHeight };
+  element.setPointerCapture(e.pointerId);
+  element.classList.add('dragging');
+  $('layout-message').textContent = `Moving the ${element.dataset.controlName.toLowerCase()}.`;
+}, true);
+// A mouse drag still ends in a click, and a click on a control is an
+// attack, a jump or a pulse. While the editor is open, a control is
+// furniture: it gets moved, not used.
+$('game-hud').addEventListener('click', e => {
+  if (!editingLayout || !e.target.closest('[data-control]')) return;
+  e.preventDefault(); e.stopPropagation();
+}, true);
+addEventListener('pointermove', e => {
+  if (!dragging || e.pointerId !== dragging.pointerId) return;
+  const spot = clampSpot(dragging.element, (e.clientX - dragging.offsetX) / innerWidth, (e.clientY - dragging.offsetY) / innerHeight);
+  preferences.layout[dragging.control] = spot;
+  placeControl(dragging.control, spot);
+});
+for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) addEventListener(event, e => {
+  if (!dragging || e.pointerId !== dragging.pointerId) return;
+  dragging.element.classList.remove('dragging');
+  dragging = null;
+  $('layout-message').textContent = 'Drag any control where you want it.';
+});
+$('layout-done').addEventListener('click', () => editLayout(false));
+$('layout-reset').addEventListener('click', () => { preferences.layout = {}; applyLayout(); $('layout-message').textContent = 'Back where they started. Drag any control to move it.'; });
+addEventListener('resize', () => {
+  for (const [control, spot] of Object.entries(preferences.layout)) {
+    const element = controlEl(control);
+    if (element) preferences.layout[control] = clampSpot(element, spot.x, spot.y);
+  }
+  applyLayout();
+});
+applyLayout();
 
 function enterGame(){if(!hero||switching)return;enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
 function enterLobby(){closeDialog();screen='lobby';document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
@@ -242,9 +380,10 @@ $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener(
 function openMenu(type){
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?'THE FIRST LIGHT':'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Sound effects</span><input id="sound-setting" type="checkbox"></label><label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><p class="credits-note">City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Sound effects</span><input id="sound-setting" type="checkbox"></label><label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>${screen==='game'?'Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.':'Available once you are in the city — the controls have to be on screen to be moved.'}</small></span><button id="layout-edit" class="layout-edit"${screen==='game'?'':' disabled'}>Rearrange</button></div><p class="credits-note">City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
+    $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
     const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
   }else{

@@ -248,11 +248,107 @@ test('responsive touch controls fit and joystick drives the same player', async 
   const initial = await snapshot(page);
   const box = await page.locator('#joystick').boundingBox();
   const touch = await page.context().newCDPSession(page);
-  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
-  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + box.width / 2, y: box.y + 2 }] });
+  // A touchEnd names the points being lifted, so the thumb below
+  // stays on the stick until the very last dispatch.
+  const thumb = { x: box.x + box.width / 2, y: box.y + 2, id: 1 };
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [thumb] });
   await expect.poll(async () => (await snapshot(page)).position.z).toBeLessThan(initial.position.z - 0.4);
-  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+  // A press that begins while another finger is already down never
+  // becomes a click: the browser only promotes a single-pointer
+  // gesture to a tap. Every action button hung off `click`, which
+  // left them all dead for as long as the player was moving — the
+  // one moment they are worth having. A second finger has to reach
+  // the game while the first is still driving.
+  const tap = async (selector, id) => {
+    const target = await page.locator(selector).boundingBox();
+    const finger = { x: target.x + target.width / 2, y: target.y + target.height / 2, id };
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [thumb, finger] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [finger] });
+  };
+  await tap('#jump-button', 2);
+  await expect.poll(async () => (await snapshot(page)).locomotion.grounded, { message: 'jump is ignored while the joystick is held' }).toBe(false);
+  await tap('#ability-button', 3);
+  await expect.poll(
+    async () => parseFloat(await page.locator('#ability-cooldown').evaluate(mask => mask.style.height)),
+    { message: 'the signature ability is ignored while the joystick is held' },
+  ).toBeGreaterThan(50);
+  // The thumb never left the stick through any of that.
+  expect((await snapshot(page)).input.joyY).toBeLessThan(-0.5);
+
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [thumb] });
   await touch.detach();
+  expect(errors).toEqual([]);
+});
+
+const centre = async (page, selector) => {
+  const box = await page.locator(selector).boundingBox();
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+};
+const openLayoutEditor = async page => {
+  await page.getByRole('button', { name: 'Pause game' }).click();
+  await page.locator('#menu-settings').click();
+  await page.locator('#layout-edit').click();
+  await expect(page.locator('#layout-editor')).toBeVisible();
+};
+
+test('a dragged control keeps its new place, and driving from it still works', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'The joystick and its neighbours only exist on touch devices.');
+  const errors = await boot(page);
+  await start(page);
+  const home = await centre(page, '#joystick');
+  await openLayoutEditor(page);
+
+  const touch = await page.context().newCDPSession(page);
+  const target = { x: Math.round(page.viewportSize().width * 0.68), y: Math.round(page.viewportSize().height * 0.62), id: 1 };
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...home, id: 1 }] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [target] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [target] });
+  const moved = await centre(page, '#joystick');
+  expect(Math.hypot(moved.x - target.x, moved.y - target.y)).toBeLessThan(8);
+  // Arranging a control is not using it: that drag went nowhere near
+  // the player, or the stick would be steering while it is picked up.
+  expect((await snapshot(page)).input.joyY).toBe(0);
+  await page.locator('#layout-done').click();
+
+  // The stick drives from wherever it now lives.
+  const resting = await centre(page, '#joystick');
+  const initial = await snapshot(page);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...resting, id: 2 }] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: resting.x, y: resting.y - 40, id: 2 }] });
+  await expect.poll(async () => (await snapshot(page)).position.z).toBeLessThan(initial.position.z - 0.4);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ x: resting.x, y: resting.y - 40, id: 2 }] });
+  await touch.detach();
+
+  // And a layout is a setting, not a session: it comes back.
+  await boot(page);
+  await start(page);
+  const remembered = await centre(page, '#joystick');
+  expect(Math.hypot(remembered.x - moved.x, remembered.y - moved.y)).toBeLessThan(8);
+  expect(errors).toEqual([]);
+});
+
+test('the layout editor moves buttons with a mouse and puts them all back', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The mouse path runs once on desktop Chromium.');
+  const errors = await boot(page);
+  await start(page);
+  const home = await centre(page, '#ability-button');
+  await openLayoutEditor(page);
+  await page.mouse.move(home.x, home.y);
+  await page.mouse.down();
+  await page.mouse.move(240, 360, { steps: 8 });
+  await page.mouse.up();
+  const moved = await centre(page, '#ability-button');
+  expect(Math.hypot(moved.x - 240, moved.y - 360)).toBeLessThan(8);
+  // Dragging a button is not pressing it: the ability never fired.
+  expect(await page.locator('#ability-cooldown').evaluate(mask => parseFloat(mask.style.height) || 0)).toBe(0);
+
+  await page.locator('#layout-reset').click();
+  const restored = await centre(page, '#ability-button');
+  expect(Math.hypot(restored.x - home.x, restored.y - home.y)).toBeLessThan(2);
+  await page.locator('#layout-done').click();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('astra-journey-v1')).layout)).toEqual({});
   expect(errors).toEqual([]);
 });
 
