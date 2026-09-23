@@ -329,6 +329,38 @@ test('a dragged control keeps its new place, and driving from it still works', a
   expect(errors).toEqual([]);
 });
 
+test('controls can be arranged from the lobby, before play has begun', async ({ page }) => {
+  const errors = await boot(page);
+  // A tablet shows the lobby its own settings button, and that is the
+  // way in for a player who has not pressed play yet — it used to lead
+  // to a greyed-out button and nothing else.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#layout-edit')).toBeEnabled();
+  await page.locator('#layout-edit').click();
+  await expect(page.locator('#layout-editor')).toBeVisible();
+  await expect(page.locator('#ability-button')).toBeVisible();
+
+  const home = await centre(page, '#ability-button');
+  const target = { x: Math.round(page.viewportSize().width * 0.3), y: Math.round(page.viewportSize().height * 0.42) };
+  await page.mouse.move(home.x, home.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 6 });
+  await page.mouse.up();
+  const moved = await centre(page, '#ability-button');
+  expect(Math.hypot(moved.x - target.x, moved.y - target.y)).toBeLessThan(8);
+
+  await page.locator('#layout-done').click();
+  // The HUD was borrowed for the arranging, not entered: the lobby is
+  // still the lobby afterwards.
+  await expect(page.locator('#game-hud')).toBeHidden();
+  await expect(page.locator('body')).toHaveAttribute('data-screen', 'lobby');
+
+  await start(page);
+  const inGame = await centre(page, '#ability-button');
+  expect(Math.hypot(inGame.x - moved.x, inGame.y - moved.y)).toBeLessThan(2);
+  expect(errors).toEqual([]);
+});
+
 test('the layout editor moves buttons with a mouse and puts them all back', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The mouse path runs once on desktop Chromium.');
   const errors = await boot(page);

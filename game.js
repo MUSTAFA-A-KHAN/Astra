@@ -314,13 +314,21 @@ function pinCurrentLayout() {
   }
   applyLayout();
 }
-let editingLayout = false, dragging = null;
+let editingLayout = false, dragging = null, borrowedHud = false;
 function editLayout(on) {
   editingLayout = on; dragging = null;
-  $('game-hud').classList.toggle('layout-editing', on);
+  // The controls can be arranged from the lobby as well as mid-game —
+  // on a tablet the lobby's own settings button is the obvious way in
+  // — so the HUD is borrowed for as long as it takes and put back
+  // afterwards. Nothing in it can be pressed meanwhile; see below.
+  if (on && $('game-hud').hidden) { borrowedHud = true; $('game-hud').hidden = false; }
+  document.body.classList.toggle('arranging', on);
   $('layout-editor').hidden = !on;
   if (on) resetInput();
-  else { save(); toast('Controls saved where you left them.'); }
+  else {
+    if (borrowedHud) { $('game-hud').hidden = true; borrowedHud = false; }
+    save(); toast('Controls saved where you left them.');
+  }
 }
 // Capture phase, so a control being moved never also fires: the
 // press is spent on the drag before the button or the stick sees it.
@@ -343,10 +351,12 @@ $('game-hud').addEventListener('pointerdown', e => {
   $('layout-message').textContent = `Moving the ${element.dataset.controlName.toLowerCase()}.`;
 }, true);
 // A mouse drag still ends in a click, and a click on a control is an
-// attack, a jump or a pulse. While the editor is open, a control is
-// furniture: it gets moved, not used.
+// attack, a jump or a pulse. While the editor is open the whole HUD
+// is furniture — its controls get moved rather than used, and the
+// pause and journal buttons behind the dimming stay out of reach —
+// so only the editor's own bar answers a press.
 $('game-hud').addEventListener('click', e => {
-  if (!editingLayout || !e.target.closest('[data-control]')) return;
+  if (!editingLayout) return;
   e.preventDefault(); e.stopPropagation();
 }, true);
 addEventListener('pointermove', e => {
@@ -372,15 +382,15 @@ addEventListener('resize', () => {
 });
 applyLayout();
 
-function enterGame(){if(!hero||switching)return;enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
-function enterLobby(){closeDialog();screen='lobby';document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
+function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
 function openMenu(type){
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?'THE FIRST LIGHT':'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Sound effects</span><input id="sound-setting" type="checkbox"></label><label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>${screen==='game'?'Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.':'Available once you are in the city — the controls have to be on screen to be moved.'}</small></span><button id="layout-edit" class="layout-edit"${screen==='game'?'':' disabled'}>Rearrange</button></div><p class="credits-note">City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Sound effects</span><input id="sound-setting" type="checkbox"></label><label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note">City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
