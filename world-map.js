@@ -25,6 +25,10 @@ const EAST_JETTY = { z: 18, width: 5, quay: 184.5, deck: .55 };
 // corner, which has no wall either, to the yard's pier, laid at the same height.
 const SOUTH_JETTY = { width: 5, quay: 105, deck: .55 };
 
+// How much daylight reaches the streets at an hour: what the lamps, and the
+// heroes' flashlights, come on by.
+export const daylightAt = hour => THREE.MathUtils.clamp(Math.sin((hour-6)/12*Math.PI)*1.4,0,1);
+
 export async function createWorld(scene, { lowPower = false } = {}) {
   const [city, forest, plaza, yard] = await Promise.all([
     loadCityDistrict({ lowPower }), loadForestDistrict({ lowPower, waterline: HARBOUR_LEVEL }), loadPlazaDistrict({ lowPower }), loadYardDistrict({ lowPower }),
@@ -96,7 +100,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
 
   let daylight=1;
   function setTime(hour) {
-    daylight=THREE.MathUtils.clamp(Math.sin((hour-6)/12*Math.PI)*1.4,0,1);
+    daylight=daylightAt(hour);
     city.setTime(daylight);plaza.setTime(daylight);streetLights.setTime(daylight);plazaLights.setTime(daylight);
     for(const marker of markers) {marker.crystal.material.emissiveIntensity=.75+(1-daylight)*.65;marker.light.intensity=2+(1-daylight)*7;}
   }

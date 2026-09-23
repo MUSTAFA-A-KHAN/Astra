@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { createWorld } from './world-map.js';
+import { createWorld, daylightAt } from './world-map.js';
 import { createAtmosphere } from './atmosphere.js';
+import { createFlashlight } from './flashlight.js';
 import { SpatialHash, LocomotionController, PropPhysics, RagdollController } from './physics.js';
 import { FollowCamera } from './camera.js';
 import { GameAudio } from './audio.js';
@@ -41,7 +42,7 @@ const readLayout = stored => Object.fromEntries(CONTROLS
   .map(control => [control, stored?.[control]])
   .filter(([, spot]) => Number.isFinite(spot?.x) && Number.isFinite(spot?.y))
   .map(([control, spot]) => [control, { x: clamp(spot.x, 0, 1), y: clamp(spot.y, 0, 1) }]));
-const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : VIEWS[0].id };
+const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), flashlight: saved.flashlight !== false, layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : VIEWS[0].id };
 // One city day lasts twenty minutes of active play. Menus pause the clock.
 const DAY_LENGTH_SECONDS = 20 * 60;
 const formatTime = hour => {
@@ -87,6 +88,10 @@ sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -55
 sun.shadow.bias = -.0003; sun.shadow.normalBias = .08; scene.add(sun, sun.target);
 const portraitLight = new THREE.DirectionalLight('#d1ecea', 1.6); portraitLight.position.set(3, 6, 27); scene.add(portraitLight);
 const atmosphere = createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lowPower: touch });
+// The hero takes a flashlight out after dark. Its model downloads alongside the
+// world's; without it the light still shines, from an empty hand.
+const flashlight = createFlashlight(); flashlight.enabled = preferences.flashlight; scene.add(flashlight.group);
+const flashlightModel = flashlight.load().catch(error => console.warn('The flashlight model did not load; its light still shines.', error));
 let world;
 try {
   $('load-message').textContent = 'Preparing the Verdant Reach…';
@@ -131,7 +136,7 @@ function applyQuality(value, adaptive = false) {
   quality = value; const q = QUALITY[value];
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q.ratio) * resolutionScale); renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = q.shadows; sun.castShadow = q.shadows;
-  world.setQuality(value); atmosphere.setQuality(value); renderer.shadowMap.needsUpdate = true;
+  world.setQuality(value); atmosphere.setQuality(value); flashlight.setQuality(value); renderer.shadowMap.needsUpdate = true;
   $('quality-status').textContent = `${preferences.quality === 'auto' ? 'Adaptive' : 'Graphics'} · ${value === 'low' ? 'Performance' : value === 'high' ? 'High' : 'Balanced'}`;
   if (adaptive) lastAdapt = time;
 }
@@ -140,6 +145,7 @@ function setTime(hour) {
   preferences.time = ((hour % 24) + 24) % 24;
   atmosphere.setTime(preferences.time);
   world.setTime(preferences.time);
+  flashlight.setTime(daylightAt(preferences.time));
   const label = $('time-value');
   if (label) label.textContent = formatTime(preferences.time);
 }
@@ -164,6 +170,8 @@ async function selectHero(id) {
   $('character-loading').hidden=false; $('character-loading-text').textContent=meta.imported?`Loading ${meta.name} · ${meta.size}…`:'Preparing adventurer…';
   try {
     const next=await createHero(meta.id);
+    // Moved across first: the old hero's disposal takes everything still in its rig.
+    flashlight.attach(next);
     if(hero){avatar.remove(hero.group);hero.dispose();}
     hero=next;heroMeta=meta;avatar.add(hero.group);previewYaw=.23;updateHeroUI();save();
   } catch (error) { console.warn('Character unavailable:',error); toast('That adventurer could not load. Your current hero is ready.'); }
@@ -302,6 +310,15 @@ function syncCameraControls(){
   $('aim-button').setAttribute('aria-pressed',String(aiming));$('lock-button').setAttribute('aria-pressed',String(!!lockTarget));$('cinematic-button').setAttribute('aria-pressed',String(cinematic));
   $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
 }
+// The flashlight comes out at dusk and goes away at dawn by itself; this is
+// the player's say over whether it comes out at all.
+function syncFlashlight(){$('flashlight-button').setAttribute('aria-pressed',String(preferences.flashlight));}
+function toggleFlashlight(){
+  if(screen!=='game'||dialog.open)return;
+  preferences.flashlight=flashlight.toggle();syncFlashlight();save();sound();
+  toast(flashlight.dark?`Flashlight ${preferences.flashlight?'on':'off'}`:preferences.flashlight?'Flashlight ready · it comes out at dusk':'Flashlight packed away for tonight');
+}
+syncFlashlight();
 function toggleAim(){if(screen!=='game'||dialog.open)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
 function toggleCinematic(){if(screen!=='game'||dialog.open)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
 function toggleLock(){
@@ -324,7 +341,7 @@ addEventListener('keydown',e=>{
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
-  if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();
+  if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();if(e.code==='KeyT')toggleFlashlight();
   if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);
 });
 addEventListener('keyup',e=>keys.delete(e.code));
@@ -398,7 +415,7 @@ function actionButton(id,run){
   button.addEventListener('click',e=>{if(e.detail&&performance.now()-touched<700)return;run();});
 }
 actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
-actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);
+actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);actionButton('flashlight-button',toggleFlashlight);
 
 /**
  * CONTROL LAYOUT
@@ -527,7 +544,7 @@ $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener(
 function openMenu(type){
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?'THE FIRST LIGHT':'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('audio-status').textContent=audioStatus();$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
     for(const channel of ['master','effects','ambience','music'])$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
@@ -535,7 +552,7 @@ function openMenu(type){
   }else if(type==='journal'){
     const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact ? climb, push, ride / dismount, restore shrine</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact ? climb, push, ride / dismount, restore shrine</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   audio.setPaused(true);if(!dialog.open)dialog.showModal();
@@ -570,7 +587,7 @@ function updatePlayer(dt){
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
   if(locomotion.climbing)avatar.rotation.y=Math.PI;
   if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||!locomotion.grounded))emoting=null;
-  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:run,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,state:emoting||(mounted?'Ride':locomotion.state),time});
+  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:run,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,state:emoting||(mounted?'Ride':locomotion.state),time});
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);
   const interaction=nearbyInteraction();$('interaction-hint').hidden=!interaction;if(interaction)$('interaction-text').textContent=interaction.label;
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
@@ -666,7 +683,7 @@ function drawMap(){
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
 }
 
-let lastFrame=performance.now(),nextFrame=0,uiTime=0,renderInfo={calls:0,triangles:0};
+let lastFrame=performance.now(),nextFrame=0,uiTime=0,renderInfo={calls:0,triangles:0,programs:0};
 function animate(now){
   if(contextLost||document.hidden)return;
   // Avoid driving a phone's 120/144 Hz panel at full GPU load. Menus need fewer frames.
@@ -677,17 +694,18 @@ function animate(now){
   if(!dialog.open){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
     if(screen==='game'&&hero){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}
-    else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,time:reducedMotion?0:time});}
+    else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,time:reducedMotion?0:time});}
     activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
+    flashlight.update(dt,{facing:avatar.rotation.y,camera});
   }
   audio.setPaused(dialog.open||screen!=='game'||contextLost||document.hidden);
   const avatarFloor=screen==='game'?locomotion.groundHeight:groundHeight(avatar.position.x,avatar.position.z);
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
-  renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
+  renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length??0};
   uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
@@ -700,11 +718,14 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');
   updateHUD();updateCamera(1);updateShards();$('performance-readout').hidden=!preferences.showFPS;
+  // In the hero's hand by now nearly always, so its shader is ready before dusk
+  // rather than built on the frame it first comes out.
+  await Promise.race([flashlightModel,new Promise(resolve=>setTimeout(resolve,4000))]);
   if(renderer.compileAsync)await Promise.race([renderer.compileAsync(scene,camera),new Promise(resolve=>setTimeout(resolve,8000))]);
   window.astraReady=true;$('loading').classList.add('finished');setTimeout(()=>$('loading').hidden=true,600);
   lastFrame=performance.now();renderer.setAnimationLoop(animate);

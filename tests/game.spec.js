@@ -95,9 +95,12 @@ test('local imported GLB loads, animates, and survives switching back to the ori
     expect(state.heroRuntime.rootMotion).toBe('in-place');
     expect(state.heroRuntime.animations).toContain('Walk');
   }
+  // The flashlight found the rig's left hand, and followed the switch back.
+  expect(state.flashlight.mount).toBe('hand');
   await page.getByRole('button', { name: 'Return to character lobby' }).click();
   await page.getByRole('button', { name: /Select Cael,/ }).click();
   await expect.poll(async () => (await snapshot(page)).hero).toBe('warden');
+  expect((await snapshot(page)).flashlight.mount).toBe('shield');
   expect(errors).toEqual([]);
 });
 

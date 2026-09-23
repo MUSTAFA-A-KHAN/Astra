@@ -21,3 +21,5 @@ body[data-screen="game"] .scene-shade{opacity:0}#game-hud{position:fixed;inset:0
 @media(pointer:coarse){.camera-tools{top:227px;right:20px;max-width:185px}.camera-tools kbd{display:none}.camera-tools button{min-height:40px;min-width:48px}.performance-readout{top:79px}}
 @media(max-width:600px){.camera-tools{top:218px;right:15px;max-width:180px}.camera-tools button{font-size:9px;padding:8px}.camera-tools small{font-size:7px}}
 @media(max-height:500px){.camera-tools{top:167px;right:18px}.camera-tools button{min-height:34px;padding:6px}}
+/* The flashlight button: gold while the hero carries it out after dark, faded while it stays packed. */
+#flashlight-button[aria-pressed="true"]{color:var(--gold)}#flashlight-button[aria-pressed="false"]{opacity:.55}

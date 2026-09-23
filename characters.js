@@ -108,7 +108,7 @@ export const HEROES = [
 
     imported: true,
     size: '16 MB',
-    model: './Spiderman.glb',
+    model: './gwen_stacy.glb',
 
     orientationYaw: 0,
 
@@ -139,6 +139,13 @@ export const HEROES = [
     ability: 'Gale arrow',
     weapon: 'Forest bow',
 
+    // Its "hands" are its forelegs: it wears a headlamp instead.
+    flashlight: {
+      bone: /^BN_Head_00/,
+      kind: 'head',
+      offset: [0, 0.2, 0.15],
+      size: 0.8,
+    },
   },
 
   {
@@ -578,6 +585,60 @@ function capeGeometry(
   geometry.computeVertexNormals();
 
   return geometry;
+}
+
+/**
+ * Where a hero carries the flashlight: the part of the rig that
+ * holds it, and the prop's place in that part's frame.
+ *
+ * `point` is in the hero's own space. The prop is laid there
+ * pointing the way the hero faces, a little below level, for the
+ * pose the rig is in when this is measured — at rest, so that it
+ * swings with the hand from there rather than from a T-pose.
+ */
+function flashlightGrip(
+  root,
+  holder,
+  point,
+  { kind = 'hand', size = 1, pitch = 0.12 } = {},
+) {
+  root.updateMatrixWorld(true);
+
+  const place =
+    new THREE.Matrix4().compose(
+      point,
+      new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0),
+        pitch,
+      ),
+      new THREE.Vector3(1, 1, 1),
+    );
+
+  const local =
+    holder.matrixWorld
+      .clone()
+      .invert()
+      .multiply(root.matrixWorld)
+      .multiply(place);
+
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+
+  local.decompose(
+    position,
+    quaternion,
+    scale,
+  );
+
+  return {
+    kind,
+    parent: holder,
+    position,
+    quaternion,
+    // What one unit of the hero's space measures in the holder's.
+    scale: scale.x * size,
+  };
 }
 
 function makeBuiltin(meta) {
@@ -1433,11 +1494,23 @@ function makeBuiltin(meta) {
     elbows[1].add(crystal);
   }
 
+  /**
+   * The hand left free by the weapons, which raises the flashlight
+   * ahead of the hero after dark. The warden has neither hand free
+   * and carries it on the shield instead.
+   */
+  const freeHand =
+    mage ? 0 : ranger ? 1 : null;
+
+  const HOLD_SHOULDER = -0.3;
+  const HOLD_ELBOW = -0.95;
+
   let phase = 0;
   let locomotion = 0;
   let attackAmount = 0;
   let landing = 0;
   let death = 0;
+  let hold = 0;
   let disposed = false;
   let activeState = 'Idle';
 
@@ -1449,6 +1522,7 @@ function makeBuiltin(meta) {
       sprinting = false,
       jumping = false,
       attacking = false,
+      holding = false,
       state,
       time = 0,
     } = {},
@@ -1665,6 +1739,32 @@ function makeBuiltin(meta) {
             : 0.15
         );
 
+    // The flashlight is held out ahead, with a little of the
+    // stride left in it. A strike still takes the arm with it.
+    hold =
+      THREE.MathUtils.damp(
+        hold,
+        holding && freeHand !== null ? 1 : 0,
+        8,
+        dt,
+      );
+
+    if (hold > 0.001) {
+      const k = hold * (1 - attackAmount);
+
+      shoulders[freeHand].rotation.x = THREE.MathUtils.lerp(
+        shoulders[freeHand].rotation.x,
+        HOLD_SHOULDER + (freeHand ? stride : -stride) * 0.12,
+        k,
+      );
+
+      elbows[freeHand].rotation.x = THREE.MathUtils.lerp(
+        elbows[freeHand].rotation.x,
+        HOLD_ELBOW,
+        k,
+      );
+    }
+
     cape.rotation.x =
       -0.06 -
       locomotion * 0.24 +
@@ -1708,11 +1808,50 @@ function makeBuiltin(meta) {
 
   animate(0, {});
 
+  /**
+   * Measured with the free arm in its holding pose, so the prop
+   * points ahead once the arm is raised. The warden's lamp is
+   * bolted to the face of the shield, near its upper rim.
+   */
+  let flashlightMount;
+
+  if (freeHand === null) {
+    group.updateMatrixWorld(true);
+
+    flashlightMount =
+      flashlightGrip(
+        group,
+        elbows[0],
+        elbows[0].localToWorld(
+          new THREE.Vector3(0, -0.02, 0.44),
+        ),
+        { kind: 'shield', size: 0.8, pitch: 0.08 },
+      );
+  } else {
+    shoulders[freeHand].rotation.x = HOLD_SHOULDER;
+    elbows[freeHand].rotation.x = HOLD_ELBOW;
+    group.updateMatrixWorld(true);
+
+    flashlightMount =
+      flashlightGrip(
+        group,
+        elbows[freeHand],
+        elbows[freeHand].localToWorld(
+          new THREE.Vector3(0, -0.47, 0.02),
+        ),
+        // Sized to show past a fist this broad.
+        { size: 1.3 },
+      );
+
+    animate(0, {});
+  }
+
   return {
     group,
     meta,
     height: 3.4,
     animate,
+    flashlightMount,
 
     // The starter heroes are built from primitives and have no
     // gesture clips. Reporting none keeps callers from having to
@@ -3054,6 +3193,90 @@ async function makeImported(
       .play();
   }
 
+  /**
+   * FLASHLIGHT
+   *
+   * Carried in the left hand, measured in the idle pose so the
+   * prop points ahead with the arm at rest. The grip is inside
+   * the fist: most of the way from the wrist to the knuckles, or,
+   * for a rig without fingers, a little past the wrist. A meta
+   * `flashlight` names a different bone and where on it the
+   * light sits — a mount has no hands to hold one.
+   */
+  const flashlightMount = (() => {
+    const spec =
+      meta.flashlight || {};
+
+    const matches =
+      spec.bone instanceof RegExp
+        ? name => spec.bone.test(name)
+        : spec.bone
+          ? name => name === spec.bone
+          : name => /left_?hand$/i.test(name);
+
+    let holder = null;
+
+    model.traverse(node => {
+      if (!holder && node.isBone && matches(node.name)) {
+        holder = node;
+      }
+    });
+
+    if (!holder) {
+      return null;
+    }
+
+    mixer?.update(0);
+    group.updateMatrixWorld(true);
+
+    const inHero = object =>
+      group.worldToLocal(
+        object.getWorldPosition(
+          new THREE.Vector3(),
+        ),
+      );
+
+    const wrist =
+      inHero(holder);
+
+    const fingers =
+      holder.children.filter(
+        child => child.isBone,
+      );
+
+    const point =
+      spec.offset
+        ? wrist.clone().add(
+            new THREE.Vector3(...spec.offset),
+          )
+        : fingers.length
+          ? wrist.clone().lerp(
+              fingers
+                .reduce(
+                  (sum, finger) => sum.add(inHero(finger)),
+                  new THREE.Vector3(),
+                )
+                .divideScalar(fingers.length),
+              0.6,
+            )
+          : wrist.clone().add(
+              wrist.clone()
+                .sub(inHero(holder.parent))
+                .multiplyScalar(0.3),
+            );
+
+    return flashlightGrip(
+      group,
+      holder,
+      point,
+      {
+        kind: spec.kind || 'hand',
+        size: spec.size || 1,
+        pitch: spec.pitch ?? 0.12,
+      },
+    );
+  })();
+
   let disposed = false;
   let activeState = 'Idle';
 
@@ -3105,6 +3328,7 @@ async function makeImported(
     height: targetHeight,
     mixer,
     emotes,
+    flashlightMount,
 
     get diagnostics() {
       return {

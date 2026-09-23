@@ -14,8 +14,11 @@ const runtimeExtensions = new Set(['.html', '.js', '.css', '.glb', '.svg', '.png
 // The diorama, plaza and yard folders also hold the supplied model and its
 // loose texture pages, which the game never fetches: ship the converted models alone.
 const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb', 'plaza-night-time/plaza-night.glb', 'plaza-night-time/plaza-night-footprint.glb', 'plaza-night-time/plaza-navigation.json', 'map-79-void/skibidi-toilet-79.glb'];
+// Supplied models the game never fetches: tools/pack-flashlight.py packs the
+// flashlight the heroes carry into assets/props from this one.
+const sourceFiles = ['flashlight.glb'];
 for (const entry of await readdir(root, { withFileTypes: true })) {
-  if (['runtime-config.js', 'config.js'].includes(entry.name)) continue;
+  if (['runtime-config.js', 'config.js', ...sourceFiles].includes(entry.name)) continue;
   if ((entry.isFile() && runtimeExtensions.has(extname(entry.name))) ||
       (entry.isDirectory() && ['assets', 'vendor', 'City_Set_-_Proto_Series'].includes(entry.name))) {
     await cp(resolve(root, entry.name), resolve(destination, entry.name), { recursive: true });
