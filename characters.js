@@ -41,6 +41,7 @@ export const HEROES = [
     ability: 'Gale arrow',
     weapon: 'Forest bow',
   },
+  
 
   {
     id: 'mage',
@@ -118,6 +119,26 @@ export const HEROES = [
       run: 1,
       sprint: 1,
     },
+  },
+  {
+    id: 'Horse',
+    name: 'Horse',
+    title: 'The Horse',
+    role: 'Mount',
+    description:
+      'A loyal steed to carry you across the land. Fast and reliable, perfect for long journeys.',
+    color: '#98caa2',
+    stats: { power: 65, agility: 95, magic: 42 },
+    imported: true,
+    size: '16 MB',
+    model: './horse.glb',
+    speed: 10.5,
+    damage: 24,
+    cooldown: 0.4,
+    range: 10,
+    ability: 'Gale arrow',
+    weapon: 'Forest bow',
+
   },
 
   {
