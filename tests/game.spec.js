@@ -282,17 +282,43 @@ test('responsive touch controls fit and joystick drives the same player', async 
   // The thumb never left the stick through any of that.
   expect((await snapshot(page)).input.joyY).toBeLessThan(-0.5);
 
-  // Safari grows a double-tap zoom out of repeated taps unless the tap
-  // target says `manipulation`; the stick and the sprint button still
-  // refuse every default, because a drag there must never pan the page.
+  // No control may begin a gesture of its own: they are pressed and dragged.
   const touchAction = selector => page.locator(selector).evaluate(element => getComputedStyle(element).touchAction);
-  for (const selector of ['#attack-button', '#ability-button', '#jump-button', '#view-button', '#interact-button']) {
-    expect(await touchAction(selector), `${selector} may not offer a double-tap zoom`).toBe('manipulation');
-  }
-  for (const selector of ['#joystick', '#sprint-button']) {
-    expect(await touchAction(selector), `${selector} is dragged, not tapped`).toBe('none');
+  for (const selector of ['#attack-button', '#ability-button', '#jump-button', '#view-button', '#joystick', '#sprint-button']) {
+    expect(await touchAction(selector), `${selector} may not begin a gesture`).toBe('none');
   }
 
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [thumb] });
+  await touch.detach();
+  expect(errors).toEqual([]);
+});
+
+// Driving with one thumb and pressing the buttons with another is two fingers
+// on the glass, and Safari reads the second one arriving and leaving as a
+// pinch — it zoomed the page mid-fight, leaving half the HUD out of reach on a
+// screen that cannot scroll. iOS does not honour `touch-action` for the
+// viewport's own zoom, so play has to refuse the gesture itself.
+test('two fingers on the controls never zoom the page away from the player', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'Only a touch screen has a pinch to refuse.');
+  const errors = await boot(page);
+  await start(page);
+  await page.evaluate(() => {
+    window.gestures = [];
+    for (const type of ['touchmove', 'gesturestart'])
+      addEventListener(type, event => window.gestures.push({ type, refused: event.defaultPrevented }), { passive: true });
+  });
+  const touch = await page.context().newCDPSession(page);
+  const stick = await centre(page, '#joystick'), button = await centre(page, '#attack-button');
+  const thumb = { ...stick, id: 1 }, finger = { ...button, id: 2 };
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [thumb] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [thumb, finger] });
+  // The tapping finger never lands twice in quite the same place; the drift
+  // between the two touches is the spread Safari zooms on.
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [thumb, { ...finger, x: finger.x + 40 }] });
+  const moves = await page.evaluate(() => window.gestures);
+  expect(moves.length, 'the two-fingered move reached the page').toBeGreaterThan(0);
+  expect(moves.every(gesture => gesture.refused), JSON.stringify(moves)).toBe(true);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ ...finger, x: finger.x + 40 }] });
   await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [thumb] });
   await touch.detach();
   expect(errors).toEqual([]);

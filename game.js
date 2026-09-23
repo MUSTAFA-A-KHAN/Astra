@@ -342,6 +342,20 @@ renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)ret
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
 renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,4,25);settling=0;e.preventDefault();}},{passive:false});
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
+// Playing is a two-fingered thing: a thumb holding the stick and another
+// tapping the buttons. Safari reads that second finger arriving and leaving
+// as a pinch and zooms the page — and iOS does not honour `touch-action` for
+// the viewport's own zoom, so no amount of CSS on the controls prevents it.
+// A zoomed page is unplayable here: the HUD is fixed to a screen that cannot
+// scroll, so half the controls end up out of reach mid-fight. The menus and
+// the lobby keep their zoom, where the print is small and worth magnifying.
+const playing=()=>screen==='game'&&!dialog.open;
+for(const event of ['gesturestart','gesturechange','gestureend'])
+  addEventListener(event,e=>{if(playing())e.preventDefault();},{passive:false});
+// Safari's gesture events are its own; this is the same refusal for anything
+// that follows the standard, and it leaves one-fingered scrolling alone.
+addEventListener('touchmove',e=>{if(e.touches.length>1&&playing()&&e.cancelable)e.preventDefault();},{passive:false});
+addEventListener('dblclick',e=>{if(playing())e.preventDefault();},{passive:false});
 const joystick=$('joystick');let joyCenterX=0,joyCenterY=0;
 function moveJoy(e){const max=joystick.clientWidth*.34,dx=e.clientX-joyCenterX,dy=e.clientY-joyCenterY,length=Math.hypot(dx,dy),scale=length>max?max/length:1;joyX=dx*scale/max;joyY=dy*scale/max;if(length<5)joyX=joyY=0;$('joystick-knob').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;}
 joystick.addEventListener('pointerdown',e=>{if(joyId!==null||dialog.open)return;joyId=e.pointerId;const b=joystick.getBoundingClientRect();joyCenterX=b.left+b.width/2;joyCenterY=b.top+b.height/2;joystick.setPointerCapture(e.pointerId);moveJoy(e);e.preventDefault();});
@@ -361,9 +375,10 @@ function actionButton(id,run){
   const button=$(id);let touched=0;
   button.addEventListener('pointerdown',e=>{
     if(e.pointerType==='mouse')return;
-    // Spending the tap here leaves the browser no default action to
-    // grow a double-tap zoom out of when the button is pressed again
-    // a moment later, which on iPad left the player zoomed in mid-fight.
+    // The press has been spent here, so the browser is left no default
+    // action to grow a gesture out of when the same finger comes back a
+    // moment later. The zoom this guards against is refused outright
+    // below; this only keeps a tap from feeding it in the first place.
     if(e.cancelable)e.preventDefault();
     touched=performance.now();run();
   });
