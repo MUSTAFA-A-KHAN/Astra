@@ -19,12 +19,22 @@ const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), resto
 // the thumb rest in the same corner instead of the same pixel. An
 // absent control has never been moved and stays where the stylesheet
 // puts it.
-const CONTROLS = ['joystick','sprint','attack','ability','jump'];
+const CONTROLS = ['joystick','sprint','attack','ability','jump','view'];
+// Camera perspectives, cycled by the view button. Each one is a pitch,
+// a distance and a field of view; the player is free to drag and zoom
+// away from any of them afterwards, which is why these are a starting
+// posture rather than a mode the camera is locked into.
+const VIEWS = [
+  { id: 'follow', name: 'Follow', pitch: .48, radius: 14, fov: 55 },
+  { id: 'shoulder', name: 'Shoulder', pitch: .3, radius: 8.5, fov: 62 },
+  { id: 'wide', name: 'Wide', pitch: .4, radius: 23, fov: 52 },
+  { id: 'overhead', name: 'Overhead', pitch: .88, radius: 21, fov: 55 },
+];
 const readLayout = stored => Object.fromEntries(CONTROLS
   .map(control => [control, stored?.[control]])
   .filter(([, spot]) => Number.isFinite(spot?.x) && Number.isFinite(spot?.y))
   .map(([control, spot]) => [control, { x: clamp(spot.x, 0, 1), y: clamp(spot.y, 0, 1) }]));
-const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), layout: readLayout(saved.layout) };
+const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : VIEWS[0].id };
 // One city day lasts twenty minutes of active play. Menus pause the clock.
 const DAY_LENGTH_SECONDS = 20 * 60;
 const formatTime = hour => {
@@ -203,6 +213,31 @@ const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dr
 let yaw=0,pitch=.48,radius=14;
 const cameraTarget=new THREE.Vector3(),cameraDesired=new THREE.Vector3();
 const dialog=$('menu-dialog');
+/**
+ * CAMERA VIEW
+ *
+ * `settling` is how much of the move into a new perspective is still
+ * to run. While it lasts the camera eases toward the preset; the
+ * moment the player drags or zooms it drops to zero, because a hand
+ * on the camera outranks a posture it was on its way to.
+ */
+let viewIndex=Math.max(0,VIEWS.findIndex(view=>view.id===preferences.view)),settling=0;
+const currentView=()=>VIEWS[viewIndex];
+function showView(){
+  const view=currentView();
+  $('view-label').textContent=view.name;
+  $('view-button').setAttribute('aria-label',`Camera view: ${view.name}. Press to change.`);
+}
+function cycleView(step=1){
+  if(screen!=='game'||dialog.open)return;
+  viewIndex=(viewIndex+step+VIEWS.length)%VIEWS.length;
+  preferences.view=currentView().id;
+  // Long enough to read as a move rather than a cut, short enough
+  // that a player pressing twice is not fighting the first press.
+  settling=.9;
+  showView();save();toast(`Camera · ${currentView().name}`);sound(520,.08);
+}
+showView();
 function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;velocity.set(0,0,0);$('joystick-knob').style.transform='';}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
@@ -213,7 +248,7 @@ addEventListener('keydown',e=>{
   if(screen!=='game')return;
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
-  if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
+  if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
   if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);
 });
 addEventListener('keyup',e=>keys.delete(e.code));
@@ -233,10 +268,10 @@ function emote(state){
   emoting=state;emoteUntil=time+duration;
 }
 renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==null)return;dragId=e.pointerId;dragX=e.clientX;dragY=e.clientY;dragDistance=0;renderer.domElement.setPointerCapture(e.pointerId);});
-renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);}});
+renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
-renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,7,25);e.preventDefault();}},{passive:false});
+renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,7,25);settling=0;e.preventDefault();}},{passive:false});
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 const joystick=$('joystick');let joyCenterX=0,joyCenterY=0;
 function moveJoy(e){const max=joystick.clientWidth*.34,dx=e.clientX-joyCenterX,dy=e.clientY-joyCenterY,length=Math.hypot(dx,dy),scale=length>max?max/length:1;joyX=dx*scale/max;joyY=dy*scale/max;if(length<5)joyX=joyY=0;$('joystick-knob').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;}
@@ -261,7 +296,7 @@ function actionButton(id,run){
   // activation, which has no press of its own behind it.
   button.addEventListener('click',e=>{if(pressed&&e.detail){pressed=false;return;}run();});
 }
-actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
+actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
 
 /**
  * CONTROL LAYOUT
@@ -382,7 +417,7 @@ addEventListener('resize', () => {
 });
 applyLayout();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
 function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();lastFrame=performance.now();save();}
@@ -397,7 +432,7 @@ function openMenu(type){
   }else if(type==='journal'){
     const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Restore the shrine</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Restore the shrine</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   if(!dialog.open)dialog.showModal();
@@ -473,7 +508,16 @@ function updateCamera(dt){
     cameraTarget.x+=spawn.x;cameraTarget.y+=spawn.y;cameraTarget.z+=spawn.z-18;
     camera.position.copy(cameraDesired);camera.lookAt(cameraTarget);
   }else{
-    if(camera.fov!==55){camera.fov=55;camera.updateProjectionMatrix();}
+    const view=currentView();
+    if(settling>0){
+      settling=Math.max(0,settling-dt);
+      pitch=damp(pitch,view.pitch,7,dt);
+      radius=damp(radius,view.radius,7,dt);
+    }
+    // The field of view belongs to the perspective rather than to the
+    // player's dragging, so it follows the preset whether or not the
+    // move is still settling.
+    if(Math.abs(camera.fov-view.fov)>.01){camera.fov=damp(camera.fov,view.fov,7,dt);camera.updateProjectionMatrix();}
     targetPoint.copy(position);targetPoint.y+=1.9;cameraTarget.lerp(targetPoint,1-Math.exp(-9*dt));
     const orbitPitch=Math.max(.08,pitch);
     cameraDesired.set(cameraTarget.x+Math.sin(yaw)*Math.cos(orbitPitch)*radius,cameraTarget.y+Math.sin(orbitPitch)*radius,cameraTarget.z+Math.cos(yaw)*Math.cos(orbitPitch)*radius);
@@ -534,7 +578,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,locomotion:{grounded:position.y<=groundHeight(position.x,position.z)+.01,groundHeight:groundHeight(position.x,position.z)},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,locomotion:{grounded:position.y<=groundHeight(position.x,position.z)+.01,groundHeight:groundHeight(position.x,position.z)},camera:{view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');

@@ -237,7 +237,7 @@ test('responsive touch controls fit and joystick drives the same player', async 
   const errors = await boot(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await start(page);
-  for (const selector of ['#joystick', '#jump-button', '#sprint-button', '#attack-button', '#ability-button']) {
+  for (const selector of ['#joystick', '#jump-button', '#sprint-button', '#attack-button', '#ability-button', '#view-button']) {
     await expect(page.locator(selector)).toBeVisible();
     const box = await page.locator(selector).boundingBox();
     expect(box.x).toBeGreaterThanOrEqual(0);
@@ -326,6 +326,54 @@ test('a dragged control keeps its new place, and driving from it still works', a
   await start(page);
   const remembered = await centre(page, '#joystick');
   expect(Math.hypot(remembered.x - moved.x, remembered.y - moved.y)).toBeLessThan(8);
+  expect(errors).toEqual([]);
+});
+
+test('the view button cycles camera perspectives and remembers the one you left on', async ({ page }) => {
+  const errors = await boot(page);
+  await start(page);
+  const settled = async () => {
+    await page.waitForFunction(() => window.__ASTRA_DEBUG__.camera.settling === 0, null, { timeout: 10000 });
+    return (await snapshot(page)).camera;
+  };
+  const shape = view => `${view.pitch.toFixed(2)}/${view.radius.toFixed(1)}/${view.fov.toFixed(0)}`;
+
+  const seen = [await settled()];
+  for (let press = 0; press < 3; press++) {
+    await page.locator('#view-button').click();
+    seen.push(await settled());
+  }
+  expect(seen.map(view => view.view)).toEqual(['follow', 'shoulder', 'wide', 'overhead']);
+  // Four names are worth nothing if they are the same camera: each one
+  // has to be a different pitch, distance and field of view.
+  expect(new Set(seen.map(shape)).size).toBe(4);
+  expect(await page.locator('#view-label').textContent()).toBe('Overhead');
+  await page.locator('#view-button').click();
+  expect((await settled()).view).toBe('follow');
+
+  // The key does what the button does.
+  await page.keyboard.press('v');
+  expect((await settled()).view).toBe('shoulder');
+
+  // Dragging moves the camera off the perspective without choosing a
+  // different one — a preset is a posture, not a mode to be locked in.
+  const posture = await settled();
+  const middle = page.viewportSize();
+  await page.mouse.move(middle.width / 2, middle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(middle.width / 2, middle.height / 2 - 100, { steps: 5 });
+  await page.mouse.up();
+  const dragged = (await snapshot(page)).camera;
+  expect(dragged.pitch).toBeLessThan(posture.pitch - 0.05);
+  expect(dragged.view).toBe('shoulder');
+
+  // And the choice outlives the session.
+  await boot(page);
+  await start(page);
+  const remembered = await settled();
+  expect(remembered.view).toBe('shoulder');
+  expect(shape(remembered)).toBe(shape(seen[1]));
+  expect(await page.locator('#view-label').textContent()).toBe('Shoulder');
   expect(errors).toEqual([]);
 });
 

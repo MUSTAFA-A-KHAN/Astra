@@ -89,6 +89,36 @@ export const HEROES = [
       sprint: 1,
     },
   },
+  {
+    id: 'Spiderman',
+    name: 'Spiderman',
+    title: 'The Web Crawler',
+    role: 'Guest adventurer',
+    description:
+      'Your original web-slinging adventurer, ready for a new world.',
+    color: '#a7d9f2',
+    stats: { power: 70, agility: 86, magic: 65 },
+    speed: 10,
+    damage: 27,
+    cooldown: 0.5,
+    range: 8,
+    ability: 'Spirit strike',
+    weapon: 'Spirit energy',
+
+    imported: true,
+    size: '16 MB',
+    model: './Spiderman.glb',
+
+    orientationYaw: 0,
+
+    // Trim on top of the measured stride. 1 keeps the feet
+    // exactly on the ground; nudge a model that reads heavy.
+    animationSpeeds: {
+      walk: 1,
+      run: 1,
+      sprint: 1,
+    },
+  },
 
   {
     id: 'arthur',
