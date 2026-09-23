@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { createCityWorld } from './city-world.js';
 import { createAtmosphere } from './atmosphere.js';
-import { SpatialHash } from './physics.js';
+import { SpatialHash, LocomotionController, PropPhysics, RagdollController } from './physics.js';
+import { FollowCamera } from './camera.js';
+import { GameAudio } from './audio.js';
+import { createGameplayWorld } from './gameplay-world.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
 
 const $ = id => document.getElementById(id);
@@ -46,7 +49,11 @@ const formatTime = hour => {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
-let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, jumpVelocity = 0, emoting = null, emoteUntil = 0;
+preferences.volumes = Object.fromEntries(['master','effects','ambience','music'].map(key => [key, finite(saved.volumes?.[key], key === 'music' ? .45 : .8, 0, 1)]));
+const audio = new GameAudio({ enabled: preferences.sound });
+audio.setVolumes(preferences.volumes);
+let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, emoting = null, emoteUntil = 0;
+let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, victoryTime = 0;
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
@@ -54,14 +61,10 @@ function save() {
   catch { /* Private browsing and full storage must never stop play. */ }
 }
 function toast(message) { $('toast-text').textContent = message; $('toast').classList.add('visible'); clearTimeout(toastTimeout); toastTimeout = setTimeout(() => $('toast').classList.remove('visible'), 3800); }
-function sound(frequency = 540, length = .12, type = 'sine') {
-  if (!preferences.sound || !audioContext || audioContext.state !== 'running') return;
-  const osc = audioContext.createOscillator(), gain = audioContext.createGain();
-  osc.type = type; osc.frequency.setValueAtTime(frequency, audioContext.currentTime); osc.frequency.exponentialRampToValueAtTime(frequency * .55, audioContext.currentTime + length);
-  gain.gain.setValueAtTime(.045, audioContext.currentTime); gain.gain.exponentialRampToValueAtTime(.001, audioContext.currentTime + length);
-  osc.connect(gain); gain.connect(audioContext.destination); osc.start(); osc.stop(audioContext.currentTime + length); osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+function sound() {
+  audio.play('interaction', { volume: .35 });
 }
-function enableAudio() { if (!preferences.sound) return; try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume().catch(() => {}); } catch {} }
+function enableAudio() { if (!preferences.sound) return; try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audio.setContext(audioContext); audioContext.resume().catch(() => {}); } catch {} }
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#9fbcb0');
@@ -104,6 +107,11 @@ const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.4,3.4), new THREE.MeshBasi
 // Static obstacle buckets limit collision checks to objects near the player.
 const collision = new SpatialHash();
 world.colliders.forEach((collider, index) => collision.insert(`city-${index}`, collider));
+const activities = createGameplayWorld(scene, world, collision);
+const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
+const propPhysics = new PropPhysics(activities.terrain, collision);
+for (const crate of activities.crates) propPhysics.addBody(crate);
+const followCamera = new FollowCamera(camera, activities.terrain, collision);
 function collide(p, radius = .65) {
   collision.resolve(p, radius, 3.3);
   const bounds = world.bounds;
@@ -176,7 +184,9 @@ createEnemySquad(enemies.length).then(squad=>{
 // The Reach refills itself: a felled automaton walks back out of its
 // old patrol once the player is far enough away not to see it arrive.
 const RESPAWN_DELAY=9,RESPAWN_CLEARANCE=26;
+for (const enemy of enemies) enemy.ragdoll = new RagdollController(enemy.group.position, activities.terrain, collision, { rotation: enemy.group.rotation, radius: .65 });
 function revive(e){
+  e.ragdoll.reset(); e.group.rotation.x=e.group.rotation.z=0;
   e.alive=true;e.hp=80;e.hit=0;e.swing=0;e.dying=0;e.respawn=0;
   e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);e.group.scale.setScalar(1);e.group.visible=true;e.rig?.reset();
 }
@@ -186,7 +196,7 @@ let pulseAge=2,pulseSize=5;
 const bolt=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,1,6),new THREE.MeshBasicMaterial({color:'#e3eec0',transparent:true,opacity:0,depthWrite:false}));effectGroup.add(bolt);let boltAge=1;
 const direction=new THREE.Vector3(),targetPoint=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 function showPulse(x,z,size,color) { pulse.position.set(x,groundHeight(x,z)+.3,z);pulse.material.color.set(color);pulseAge=0;pulseSize=size; }
-function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound(880,.3);}updateHUD();}
+function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound();}updateHUD();}
 function questStage(){return progress.restored?3:progress.collected.size<5?0:progress.kills<3?1:2;}
 const questTitles=['A glimmer in the green','Quiet the restless','Awaken the Moonwell','A light returned'];
 const questDescriptions=['Collect 5 glowing shards along the city streets.','Defeat 3 wandering wisps. Approach, then attack.','Follow the blue map marker. Restore the blue shrine.','The Reach is at peace. Keep exploring the city.'];
@@ -200,18 +210,55 @@ function attack(special=false){
   if(screen!=='game'||dialog.open||document.hidden||!hero||contextLost)return;
   if(special?abilityTimer>0:attackTimer>0)return;
   if(special)abilityTimer=7;attackTimer=heroMeta.cooldown;
+  cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
   const range=special?heroMeta.range+5:heroMeta.range,damage=(special?heroMeta.damage*2:heroMeta.damage)+(level()-1)*3;
   let nearest=null,best=range;
   for(const e of enemies){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
+  if(lockTarget?.alive && position.distanceTo(lockTarget.group.position)<range)nearest=lockTarget;
+  if(aiming&&!special&&nearest){const dx=nearest.group.position.x-position.x,dz=nearest.group.position.z-position.z;if((-Math.sin(yaw)*dx-Math.cos(yaw)*dz)/Math.max(.01,Math.hypot(dx,dz))<.82)nearest=null;}
+  if(nearest && (Math.abs(nearest.group.position.y-position.y)>4 || collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(nearest.group.position.x,nearest.group.position.y+1.8,nearest.group.position.z),.1)<.98))nearest=null;
   if(nearest){avatar.rotation.y=Math.atan2(nearest.group.position.x-position.x,nearest.group.position.z-position.z);}
-  const targets=special?enemies.filter(e=>e.alive&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range):nearest?[nearest]:[];
-  for(const e of targets){e.hp-=damage;e.hit=.3;if(e.hp<=0){e.alive=false;e.respawn=RESPAWN_DELAY;if(e.rig)e.dying=1.8;else e.group.visible=false;progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);}}
+  const targets=special?enemies.filter(e=>e.alive&&Math.abs(e.group.position.y-position.y)<4&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98):nearest?[nearest]:[];
+  for(const e of targets){
+    e.hp-=damage;e.hit=.3;audio.play('hit',{position:e.group.position,volume:.6});
+    if(e.hp<=0){
+      e.alive=false;e.respawn=RESPAWN_DELAY;e.dying=2.6;
+      const dx=e.group.position.x-position.x,dz=e.group.position.z-position.z,d=Math.max(.1,Math.hypot(dx,dz));
+      e.ragdoll.start({x:dx/d*4,y:2,z:dz/d*4});
+      if(lockTarget===e)lockTarget=null;
+      progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);
+      if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;}
+    }
+  }
   if(special){showPulse(position.x,position.z,range,heroMeta.color);if(heroMeta.id==='warden'){health=Math.min(100,health+20);updateHUD();}}
   else if(nearest){targetPoint.copy(nearest.group.position);direction.copy(targetPoint).sub(position).add(new THREE.Vector3(0,-1.6,0));bolt.position.copy(position).add(new THREE.Vector3(0,1.6,0)).addScaledVector(direction,.5);bolt.scale.set(1,direction.length(),1);bolt.quaternion.setFromUnitVectors(up,direction.normalize());bolt.material.color.set(heroMeta.color);boltAge=0;}
   else showPulse(position.x,position.z,2.5,heroMeta.color);
-  sound(special?360:680,special?.3:.1,'triangle');updateHUD();
+  updateHUD();
 }
-function interact(){if(screen!=='game'||dialog.open)return;if(questStage()===2&&Math.hypot(position.x-shrine.x,position.z-shrine.z)<10){progress.restored=true;gainXP(150);save();showPulse(shrine.x,shrine.z,22,'#b8f3e0');toast('The Moonwell awakens · Chapter complete · +150 experience');sound(900,.6);}}
+function nearbyInteraction(){
+  if(activities.mount.mounted)return {type:'mount',label:'Dismount'};
+  if(locomotion.climbing)return {type:'climb',label:'Let go of ladder'};
+  if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
+  const ladder=activities.climbables.find(c=>Math.hypot(position.x-c.x,position.z-c.z)<(c.r||1.8)&&position.y<c.top+.5);
+  if(ladder)return {type:'climb',label:'Climb lookout · forward / back',ladder};
+  if(activities.crates.some(c=>position.distanceTo(c.position)<2.8))return {type:'push',label:'Push supply crate'};
+  if(questStage()===2&&Math.hypot(position.x-shrine.x,position.z-shrine.z)<10)return {type:'shrine',label:'Restore the shrine'};
+  return null;
+}
+function interact(){
+  if(screen!=='game'||dialog.open)return;
+  const action=nearbyInteraction();if(!action)return;
+  if(action.type==='mount'){
+    const mount=activities.mount;
+    if(mount.mounted){
+      const point=world.findWalkable(position.x+2,position.z,1);const candidate=new THREE.Vector3(point.x,point.y,point.z);collide(candidate);position.copy(candidate);mount.mounted=false;locomotion.reset();
+    }else if(locomotion.grounded){mount.mounted=true;position.copy(mount.position);lockTarget=null;aiming=cinematic=false;locomotion.reset();}
+    syncCameraControls();audio.play('interaction');return;
+  }
+  if(action.type==='climb'){if(locomotion.climbing)locomotion.stopClimb();else{locomotion.startClimb(action.ladder);cinematic=false;}return;}
+  if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});return;}
+  progress.restored=true;gainXP(150);save();showPulse(shrine.x,shrine.z,22,'#b8f3e0');victoryTime=8;toast('The Moonwell awakens · Chapter complete · +150 experience');audio.play('victory');
+}
 
 const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dragX=0,dragY=0,dragDistance=0;
 let yaw=0,pitch=.48,radius=14;
@@ -239,10 +286,25 @@ function cycleView(step=1){
   // Long enough to read as a move rather than a cut, short enough
   // that a player pressing twice is not fighting the first press.
   settling=.9;
-  showView();save();toast(`Camera · ${currentView().name}`);sound(520,.08);
+  showView();save();toast(`Camera · ${currentView().name}`);sound();
 }
 showView();
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;velocity.set(0,0,0);$('joystick-knob').style.transform='';}
+function syncCameraControls(){
+  $('aim-button').setAttribute('aria-pressed',String(aiming));$('lock-button').setAttribute('aria-pressed',String(!!lockTarget));$('cinematic-button').setAttribute('aria-pressed',String(cinematic));
+  $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
+}
+function toggleAim(){if(screen!=='game'||dialog.open)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
+function toggleCinematic(){if(screen!=='game'||dialog.open)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
+function toggleLock(){
+  if(screen!=='game'||dialog.open)return;
+  if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
+  else{
+    lockTarget=enemies.filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
+    if(!lockTarget)toast('No visible target within range.');
+  }
+  aiming=cinematic=false;syncCameraControls();
+}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;aiming=false;syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
   // reaches the game, and Escape finishes the same as Done.
@@ -253,13 +315,14 @@ addEventListener('keydown',e=>{
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
+  if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();
   if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
-addEventListener('pagehide',save);
-document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
-function jump(){if(screen==='game'&&!dialog.open&&position.y<=groundHeight(position.x,position.z)+.01)jumpVelocity=8;}
+addEventListener('pagehide',()=>{save();audio.setPaused(true);});
+document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){audio.setPaused(true);save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
+function jump(){if(screen==='game'&&!dialog.open){locomotion.requestJump();cinematic=false;}}
 // Emotes are the one animation the player drives directly, so they
 // are held for exactly as long as the clip runs and dropped the
 // moment the character has somewhere else to be. `hero.emotes` only
@@ -301,6 +364,7 @@ function actionButton(id,run){
   button.addEventListener('click',e=>{if(pressed&&e.detail){pressed=false;return;}run();});
 }
 actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
+actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);
 
 /**
  * CONTROL LAYOUT
@@ -421,82 +485,92 @@ addEventListener('resize', () => {
 });
 applyLayout();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
-function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
+function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
-function closeDialog(){dialog.close();resetInput();lastFrame=performance.now();save();}
+function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
 function openMenu(type){
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?'THE FIRST LIGHT':'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Sound effects</span><input id="sound-setting" type="checkbox"></label><label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note">City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio</span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. City environment: City Set — Proto Series. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
-    $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
+    $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
+    for(const channel of ['master','effects','ambience','music'])$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
     const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Restore the shrine</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact ? climb, push, ride / dismount, restore shrine</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
-  if(!dialog.open)dialog.showModal();
+  audio.setPaused(true);if(!dialog.open)dialog.showModal();
 }
 $('settings-button').onclick=()=>openMenu('settings');$('nav-journal').onclick=$('journal-button').onclick=()=>openMenu('journal');$('pause-button').onclick=()=>openMenu('pause');
 
+function respawnPlayer(){
+  health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
+  followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
+  enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
+  toast('The city shelters you. Your journey continues.');
+}
 function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
-  // `heroMeta.speed` is the character's top speed; a walk covers about
-  // a third of it. The old 0.1 walk multiplier moved a 3.4-unit body at
-  // barely 1 unit a second, which no walk cycle can be slowed enough to
-  // match — that mismatch was the foot-skating.
-  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=heroMeta.speed*(run?1:0.34);
-  const vx=(Math.cos(yaw)*x+Math.sin(yaw)*z)*speed,vz=(-Math.sin(yaw)*x+Math.cos(yaw)*z)*speed;
-  velocity.x=damp(velocity.x,vx,12,dt);velocity.z=damp(velocity.z,vz,12,dt);
-  position.x+=velocity.x*dt;position.z+=velocity.z*dt;collide(position);
-  const floor=groundHeight(position.x,position.z);
-  jumpVelocity-=23*dt;position.y=Math.max(floor,position.y+jumpVelocity*dt);if(position.y===floor)jumpVelocity=0;
-  avatar.position.copy(position);
-  if(Math.hypot(velocity.x,velocity.z)>.2&&attackTimer<=0){const target=Math.atan2(velocity.x,velocity.z);avatar.rotation.y+=Math.atan2(Math.sin(target-avatar.rotation.y),Math.cos(target-avatar.rotation.y))*(1-Math.exp(-14*dt));}
-  // Anything the character does on purpose outranks standing
-  // around dancing, so moving, jumping or swinging drops the emote
-  // immediately rather than queueing behind it.
-  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||position.y>floor+.01))emoting=null;
-  hero.animate(dt,{
-  speed:Math.hypot(velocity.x,velocity.z),
-  moving:length>.08,
-  sprinting:run,
-  jumping:position.y>floor+.01,
-  attacking:attackTimer>heroMeta.cooldown*.45,
-  state:emoting||undefined,
-  time
-});
+  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
+  const movementYaw=lockTarget?followCamera.yaw:yaw;
+  const wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z;
+  locomotion.radius=mounted?.85:.52;
+  locomotion.update(dt,{x:wx,z:wz,magnitude:Math.min(1,length),walk:!run,sprint:run,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+  const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
+  propPhysics.update(dt);
+  for(const event of locomotion.events){
+    if(event.type==='land'&&event.speed>13){health=Math.max(0,health-(event.speed-13)*4);hurtTimer=.8;audio.play('hit',{volume:.6});}
+  }
+  if(health<=0){respawnPlayer();return;}
+  const floor=locomotion.groundHeight;
+  avatar.position.copy(position);if(mounted)avatar.position.y+=2.35;
+  const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
+  if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
+  if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
+  if(locomotion.climbing)avatar.rotation.y=Math.PI;
+  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||!locomotion.grounded))emoting=null;
+  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:run,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,state:emoting||(mounted?'Ride':locomotion.state),time});
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);
-  const nearShrine=Math.hypot(position.x-shrine.x,position.z-shrine.z)<10;$('interaction-hint').hidden=!(nearShrine&&questStage()===2);
+  const interaction=nearbyInteraction();$('interaction-hint').hidden=!interaction;if(interaction)$('interaction-text').textContent=interaction.label;
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
+  combatMemory=Math.max(0,combatMemory-dt);victoryTime=Math.max(0,victoryTime-dt);
   $('ability-cooldown').style.height=`${abilityTimer/7*100}%`;
+  let nearestThreat=Infinity;
   for(const e of enemies){
-    // A felled automaton plays its death clip out before it leaves the scene.
     if(!e.alive){
-      if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig.animate(dt,{state:'Dead',time});if(e.dying===0)e.group.visible=false;}
+      if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig?.animate(dt,{state:'Dead',time});e.ragdoll.update(dt);if(e.dying===0)e.group.visible=false;}
       e.respawn=Math.max(0,e.respawn-dt);
       if(e.respawn===0&&e.dying===0&&Math.hypot(position.x-e.x,position.z-e.z)>RESPAWN_CLEARANCE)revive(e);
       continue;
     }
-    e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
-    const chasing=d<18&&d>1.9;
+    e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);
+    const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
+    const visible=d<30&&collision.cameraFraction(new THREE.Vector3(e.group.position.x,e.group.position.y+1.7,e.group.position.z),new THREE.Vector3(position.x,position.y+1.7,position.z),.1)>.98;
+    if(visible)nearestThreat=Math.min(nearestThreat,d);
+    const chasing=visible&&d<18&&d>1.9;
     if(chasing){e.group.position.x+=dx/d*2.9*dt;e.group.position.z+=dz/d*2.9*dt;collide(e.group.position,.8);}
     e.group.rotation.y=Math.atan2(dx,dz);
-    if(e.rig){e.group.position.y=groundHeight(e.group.position.x,e.group.position.z);e.group.scale.setScalar(e.hit>0?.92:1);e.rig.animate(dt,{speed:chasing?2.9:0,moving:chasing,attacking:e.swing>0,time});}
+    if(e.rig){e.group.position.y=groundHeight(e.group.position.x,e.group.position.z);e.group.scale.setScalar(e.hit>0?.92:1);e.rig.animate(dt,{speed:chasing?2.9:0,moving:chasing,attacking:e.swing>0,state:e.hit>0?'Hit':undefined,time});}
     else{e.group.position.y=groundHeight(e.group.position.x,e.group.position.z)+1.5+Math.sin(time*2+e.index)*.25;e.core.rotation.z=Math.sin(time+e.index)*.14;e.core.scale.setScalar(e.hit>0?.8:1);}
-    if(d<2.5&&hurtTimer<=0&&position.y-floor<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;sound(110,.14,'triangle');if(health<=0){health=100;position.copy(spawn);jumpVelocity=0;velocity.set(0,0,0);enemies.forEach(enemy=>{if(enemy.alive)enemy.group.position.set(enemy.x,groundHeight(enemy.x,enemy.z)+(enemy.rig?0:1.4),enemy.z);});toast('The city shelters you. Your journey continues.');}}
+    if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
   }
+  if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
+  const threat=nearestThreat<10||combatMemory>0?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
+  audio.setPaused(false);
+  audio.update(dt,position,'city',{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
+  syncCameraControls();
 }
 function updateShards(){
   for(let i=0;i<shardPositions.length;i++){
     const [x,z]=shardPositions[i];
-    if(screen==='game'&&!dialog.open&&!progress.collected.has(i)&&Math.hypot(position.x-x,position.z-z)<2&&position.y-groundHeight(x,z)<3){progress.collected.add(i);gainXP(15);sound(1100,.16);if(progress.collected.size===5)toast('The light gathers · Seek the restless wisps');}
+    if(screen==='game'&&!dialog.open&&!progress.collected.has(i)&&Math.hypot(position.x-x,position.z-z)<2&&position.y-groundHeight(x,z)<3){progress.collected.add(i);gainXP(15);sound();if(progress.collected.size===5)toast('The light gathers · Seek the restless wisps');}
     dummy.position.set(x,groundHeight(x,z)+1.6+Math.sin(time*2+i)*.22,z);dummy.rotation.set(0,time*.7+i,.12);dummy.scale.setScalar(progress.collected.has(i)?0:1);dummy.updateMatrix();shardMesh.setMatrixAt(i,dummy.matrix);
   }
   shardMesh.instanceMatrix.needsUpdate=true;
@@ -518,25 +592,14 @@ function updateCamera(dt){
       pitch=damp(pitch,view.pitch,7,dt);
       radius=damp(radius,view.radius,7,dt);
     }
-    // The field of view belongs to the perspective rather than to the
-    // player's dragging, so it follows the preset whether or not the
-    // move is still settling.
-    if(Math.abs(camera.fov-view.fov)>.01){camera.fov=damp(camera.fov,view.fov,7,dt);camera.updateProjectionMatrix();}
-    targetPoint.copy(position);targetPoint.y+=view.height||1.9;
-    // Slide the aim sideways rather than the camera: the hero ends
-    // up off to the left of frame with the road ahead in the clear,
-    // and the orbit still turns around them.
-    if(view.shoulder){targetPoint.x+=Math.cos(yaw)*view.shoulder;targetPoint.z-=Math.sin(yaw)*view.shoulder;}
-    cameraTarget.lerp(targetPoint,1-Math.exp(-9*dt));
-    const orbitPitch=Math.max(.08,pitch);
-    cameraDesired.set(cameraTarget.x+Math.sin(yaw)*Math.cos(orbitPitch)*radius,cameraTarget.y+Math.sin(orbitPitch)*radius,cameraTarget.z+Math.cos(yaw)*Math.cos(orbitPitch)*radius);
-    const fraction=collision.cameraFraction(cameraTarget,cameraDesired,.4);
-    if(fraction<1)cameraDesired.lerpVectors(cameraTarget,cameraDesired,Math.max(.06,fraction-.025));
-    camera.position.lerp(cameraDesired,1-Math.exp(-10*dt));
-    camera.position.y=Math.max(camera.position.y,groundHeight(camera.position.x,camera.position.z)+.6);
-    camera.lookAt(cameraTarget);
-    // Let the player look up at the celestial bodies without orbiting underground.
-    if(pitch<.08)camera.rotateX(.08-pitch);
+    const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
+    followCamera.update(dt,position,yaw,pitch,radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
+    if(lockTarget&&!followCamera.locked)lockTarget=null;
+    if(lockTarget){
+      const marker=targetPoint.copy(lockTarget.group.position);marker.y+=4;marker.project(camera);
+      $('target-marker').hidden=marker.z>1||marker.z< -1; $('target-marker').style.left=`${(marker.x*.5+.5)*100}%`;$('target-marker').style.top=`${(-marker.y*.5+.5)*100}%`;
+    }else $('target-marker').hidden=true;
+
   }
 }
 const map=$('minimap').getContext('2d');
@@ -567,10 +630,12 @@ function animate(now){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
     if(screen==='game'&&hero){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,time:reducedMotion?0:time});}
+    activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
   }
+  audio.setPaused(dialog.open||screen!=='game'||contextLost||document.hidden);
   const avatarFloor=groundHeight(avatar.position.x,avatar.position.z);
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position);
@@ -583,11 +648,11 @@ function animate(now){
 }
 function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);updateCamera(1);}
 addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);
-renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();contextLost=true;renderer.setAnimationLoop(null);resetInput();save();toast('Graphics paused. Waiting for your device to recover…');});
+renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();contextLost=true;audio.setPaused(true);renderer.setAnimationLoop(null);resetInput();save();toast('Graphics paused. Waiting for your device to recover…');});
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,locomotion:{grounded:position.y<=groundHeight(position.x,position.z)+.01,groundHeight:groundHeight(position.x,position.z)},camera:{view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');

@@ -1655,6 +1655,24 @@ function makeBuiltin(meta) {
         0.025 +
       stride * 0.07;
 
+    if (activeState === 'Climb') {
+      const reach = Math.sin(time * 5) * .45;
+      shoulders[0].rotation.x = -2.5 + reach;
+      shoulders[1].rotation.x = -2.5 - reach;
+      hips[0].rotation.x = -.55 - reach;
+      hips[1].rotation.x = -.55 + reach;
+      knees[0].rotation.x = knees[1].rotation.x = -.8;
+    } else if (activeState === 'Ride') {
+      body.position.y = -1.15;
+      hips[0].rotation.x = hips[1].rotation.x = -1.15;
+      knees[0].rotation.x = knees[1].rotation.x = -1.1;
+      shoulders[0].rotation.x = shoulders[1].rotation.x = -.8;
+    } else if (activeState === 'Swim') {
+      body.rotation.x = -.7;
+      shoulders[0].rotation.x = Math.sin(time * 3) * 1.1;
+      shoulders[1].rotation.x = -Math.sin(time * 3) * 1.1;
+    }
+
     if (crystal) {
       crystal.rotation.y =
         time * 0.85;
@@ -2941,6 +2959,11 @@ async function makeImported(
     Dead:
       dead ||
       idle,
+
+    Wade: walk || idle,
+    Climb: find([/climb/i]) || walk || idle,
+    Swim: find([/swim/i]) || walk || idle,
+    Ride: find([/horse.*rid|riding|mounted|sit.*idle/i]) || idle,
 
     // No `|| idle` fallback: an emote the character does not have
     // should not be requestable at all, which `emotes` below is

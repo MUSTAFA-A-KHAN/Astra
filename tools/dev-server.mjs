@@ -24,6 +24,10 @@ const mime = {
   '.gltf': 'model/gltf+json',
   '.bin': 'application/octet-stream',
   '.wasm': 'application/wasm',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.md': 'text/plain; charset=utf-8',
 };
 
 createServer(async (request, response) => {
