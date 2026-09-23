@@ -48,13 +48,15 @@ export class FollowCamera {
     this.initialized = false;
   }
 
-  floorHeight(x, z) {
+  floorHeight(x, z, y = this.camera.position.y) {
     // A sphere must clear the terrain around its centre as well as directly below it.
+    // On stacked floors, only ground beneath this part of the boom can lift it.
+    // Reading the highest surface here would push an indoor camera onto the roof.
     const r = this.radius * .7;
+    const height = (px, pz) => this.terrain.getSupportHeight?.(px, pz, y, 0) ?? this.terrain.getHeight(px, pz);
     return Math.max(
-      this.terrain.getHeight(x, z), this.terrain.getHeight(x + r, z),
-      this.terrain.getHeight(x - r, z), this.terrain.getHeight(x, z + r),
-      this.terrain.getHeight(x, z - r),
+      height(x, z), height(x + r, z), height(x - r, z),
+      height(x, z + r), height(x, z - r),
     ) + this.radius;
   }
 
@@ -67,7 +69,7 @@ export class FollowCamera {
       const x = from.x + (to.x - from.x) * t;
       const y = from.y + (to.y - from.y) * t;
       const z = from.z + (to.z - from.z) * t;
-      if (y < this.floorHeight(x, z)) {
+      if (y < this.floorHeight(x, z, y)) {
         safe = Math.max(0, (i - 1) / steps);
         break;
       }
@@ -147,7 +149,7 @@ export class FollowCamera {
     this.pitch = snap ? desiredPitch : THREE.MathUtils.damp(this.pitch, desiredPitch, 15, dt);
     this.distance = snap ? desiredDistance : THREE.MathUtils.damp(this.distance, desiredDistance, 9, dt);
     this.anchor.copy(position).y += height;
-    this.anchor.y = Math.max(this.anchor.y, this.floorHeight(this.anchor.x, this.anchor.z));
+    this.anchor.y = Math.max(this.anchor.y, this.floorHeight(this.anchor.x, this.anchor.z, this.anchor.y));
     if (snap) this.pivot.copy(this.anchor);
     else this.pivot.lerp(this.anchor, blend(18, dt));
     // The delayed follow pivot cannot remain across a wall after the player rounds a corner.

@@ -49,7 +49,16 @@ test('camera controls enter aim and cinematic modes and restore the follow view'
 
 test('the nearby horse can be ridden, moves with momentum and returns to walking', async ({ page }) => {
   const errors = await enterCity(page);
+  const horse = (await snapshot(page)).activities.mount;
+  expect(horse.model).toBe('./horse.glb');
+  expect(horse.animation.imported).toBe(true);
+  expect(horse.animation.selectedAnimations.walk).toMatch(/Walk$/);
+  expect(horse.animation.selectedAnimations.run).toMatch(/Gallop$/);
+  expect(horse.animation.state).toBe('Idle');
+  // Activity placement leaves the arrival area clear; approach the horse first.
+  await page.keyboard.down('KeyD');
   await expect(page.locator('#interaction-text')).toHaveText('Ride trail horse');
+  await page.keyboard.up('KeyD');
   await page.locator('#interact-button').click();
   await expect.poll(async () => (await snapshot(page)).activities.mounted).toBe(true);
   await expect.poll(async () => (await snapshot(page)).camera.mode).toBe('mount');
@@ -61,8 +70,13 @@ test('the nearby horse can be ridden, moves with momentum and returns to walking
   const moving = await snapshot(page);
   expect(moving.locomotion.speed).toBeGreaterThan(1);
   expect(moving.activities.mount.z).toBeCloseTo(moving.position.z, 4);
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.activeAction).toMatch(/Walk$/);
+  await page.keyboard.down('ShiftLeft');
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.activeAction).toMatch(/Gallop$/);
+  await page.keyboard.up('ShiftLeft');
   await page.keyboard.up('KeyW');
   await expect.poll(async () => (await snapshot(page)).locomotion.speed).toBeLessThan(.1);
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.state).toBe('Idle');
   await page.locator('#interact-button').click();
   await expect.poll(async () => (await snapshot(page)).activities.mounted).toBe(false);
   await expect.poll(async () => (await snapshot(page)).camera.mode).toBe('follow');

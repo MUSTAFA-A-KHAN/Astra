@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { createNavigation } from './navigation.js';
 import { CITY_ARRIVAL, loadCityDistrict } from './city-world.js';
 import { loadForestDistrict } from './forest-world.js';
-import { PLAZA_STEP, loadPlazaDistrict } from './plaza-world.js';
+import { PLAZA_STEP, PLAZA_TRANSFORM, loadPlazaDistrict } from './plaza-world.js';
 import { loadYardDistrict } from './skibidi-world.js';
 import { createStreetLights } from './street-lights.js';
+import { createPlazaLights } from './plaza-lighting.js';
 
 // The Verdant Reach is four supplied models standing in one harbour: the city
 // on its quay, the Forest Loner diorama moored off its western seawall, the
@@ -55,7 +56,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   const yardReachable = navigation.isWalkable(southJetty.inland.x, southJetty.inland.z, 1);
   if (!yardReachable) console.warn('The south jetty does not reach the yard: its pier is unreachable from the city.');
   const streetLights = createStreetLights({ lanterns: city.lanterns, materials: city.materials, heightAt: navigation.getHeight, lights: lowPower ? 2 : 4 });
-  root.add(streetLights.group);
+  const plazaLights = createPlazaLights({ transform: PLAZA_TRANSFORM });
+  root.add(streetLights.group, plazaLights.group);
 
   const landmarks = [
     { id:'shrine', name:'Moonwell Sanctuary', ...navigation.findWalkable(0,-50,4), color:'#83e6ee' },
@@ -95,16 +97,16 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   let daylight=1;
   function setTime(hour) {
     daylight=THREE.MathUtils.clamp(Math.sin((hour-6)/12*Math.PI)*1.4,0,1);
-    city.setTime(daylight);plaza.setTime(daylight);streetLights.setTime(daylight);
+    city.setTime(daylight);plaza.setTime(daylight);streetLights.setTime(daylight);plazaLights.setTime(daylight);
     for(const marker of markers) {marker.crystal.material.emissiveIntensity=.75+(1-daylight)*.65;marker.light.intensity=2+(1-daylight)*7;}
   }
   function setQuality(level) {
     const low=level==='low'||level==='performance'||level===0;
-    city.setQuality(low);forest.setQuality(low);plaza.setQuality(low?'low':level);yard.setQuality(low);streetLights.setQuality(low);
+    city.setQuality(low);forest.setQuality(low);plaza.setQuality(low?'low':level);yard.setQuality(low);streetLights.setQuality(low);plazaLights.setQuality(low?'low':level);
     for(const marker of markers) marker.light.visible=!low;
   }
   function update(dt,time,position) {
-    streetLights.update(position);plaza.update(position);
+    streetLights.update(position);plaza.update(position);plazaLights.update(position);
     for(let i=0;i<markers.length;i++) {
       const marker=markers[i];marker.crystal.rotation.y=time*.35+i;
       marker.crystal.position.y=marker.baseHeight+Math.sin(time*1.2+i)*.16;
@@ -114,7 +116,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   setQuality(lowPower?'low':'high');setTime(15.5);scene.add(root);
   const diagnostics={ready:true,provider:'astra-world-map',asset:city.asset,assets:[city.asset,forest.asset,plaza.asset,yard.asset],
     meshCount:city.meshes.length+forest.meshes.length+yard.meshes.length,forestReachable,plazaReachable,yardReachable,shore:jetty.landing,...navigation.diagnostics,
-    get streetLights(){return streetLights.diagnostics;},get plaza(){return plaza.diagnostics;}};
+    get streetLights(){return streetLights.diagnostics;},get plaza(){return plaza.diagnostics;},get plazaLights(){return plazaLights.diagnostics;}};
   const within=(d,x,z)=>x>=d.minX && x<=d.maxX && z>=d.minZ && z<=d.maxZ;
   return {
     ...navigation,bounds,landmarks,shardPositions,enemyPositions,update,setTime,setQuality,diagnostics,
@@ -129,13 +131,16 @@ export async function createWorld(scene, { lowPower = false } = {}) {
     // The plaza is built of blocks: its ground is level everywhere, and every
     // change of height is a step, never a slope. Read as a slope, a stair's
     // edge would stop the player before the step height is even consulted.
-    getNormal(x,z,out) {
-      return within(plaza.bounds,x,z) ? (out.x=0,out.y=1,out.z=0,out) : navigation.getNormal(x,z,out);
+    getNormal(x,z,out,feetY) {
+      return within(plaza.bounds,x,z) ? (out.x=0,out.y=1,out.z=0,out) : navigation.getNormal(x,z,out,feetY);
     },
     // Fetches the detail that waits until the world is on screen: the plaza's
     // model. Its footprint is walked, and drawn, until it arrives.
     stream({ prepare } = {}) {
-      return plaza.load(prepare);
+      return plaza.load(async model => {
+        plazaLights.excludeScenery(model);
+        await prepare?.(model);
+      });
     },
     dispose() {
       const geometries=new Set(),usedMaterials=new Set(),textures=new Set();
@@ -147,7 +152,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
       for(const geometry of geometries) geometry.dispose();
       for(const material of usedMaterials) material.dispose();
       for(const texture of textures) texture.dispose();
-      streetLights.dispose();scene.remove(root);
+      streetLights.dispose();plazaLights.dispose();scene.remove(root);
     },
   };
 }

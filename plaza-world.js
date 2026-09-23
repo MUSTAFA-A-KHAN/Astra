@@ -24,123 +24,39 @@ export const PLAZA_TRANSFORM = { scale:1.8, rotation:-Math.PI/2, x:360, y:-34.65
 // block higher, and the market square and shop floors a block higher still.
 // A half-block step is a stair to climb here, not a wall; a whole block is.
 export const PLAZA_STEP = .95;
-const LEVEL = { floor:20.5, footing:.75, step:.55 };
 // On the rim at the end of the market street, in blocks: the crossing lands here.
 const STREET_END = { x:13, z:87.6 };
 // How far from the player a tile is still drawn, by quality. The fog has
 // swallowed it long before the camera's far plane on the higher settings.
 const RANGE = { low:180, balanced:260, high:Infinity };
 
-// The footprint is the model's faces below block 21 that do not face down.
-// Walk it into the terms the navigator reads. A floor is an upward face no
-// higher than the market square; a wall is an upright face, rising from that
-// height or below, at least three quarters of a block tall. Slab edges and
-// kerbs are neither. Water and glass carry no floor, but a pane is a wall.
-// A bench or a planter is a floor too, on top: what makes it an obstacle is
-// the rise to it, and the faces that rise can be modelled in half blocks. So
-// the floors are laid on a half-block grid, and wherever two neighbours differ
-// by more than a half-block step, the edge between them is a wall. The grid
-// also hands the navigator its floors as a few thousand rectangles rather
-// than every block's face, which it reads in a fraction of the time.
-function readFootprint(scene) {
-  const faces = [], wall = [];
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3(), e = new THREE.Vector3();
-  scene.updateMatrixWorld(true);
-  scene.traverse(mesh => {
-    if (!mesh.isMesh) return;
-    const position = mesh.geometry.attributes.position, index = mesh.geometry.index;
-    const solid = mesh.material.name === 'opaque';
-    for (let i = 0; i < (index ? index.count : position.count); i += 3) {
-      a.fromBufferAttribute(position, index ? index.getX(i) : i).applyMatrix4(mesh.matrixWorld);
-      b.fromBufferAttribute(position, index ? index.getX(i + 1) : i + 1).applyMatrix4(mesh.matrixWorld);
-      c.fromBufferAttribute(position, index ? index.getX(i + 2) : i + 2).applyMatrix4(mesh.matrixWorld);
-      n.subVectors(b, a).cross(e.subVectors(c, a)).normalize();
-      const low = Math.min(a.y, b.y, c.y), high = Math.max(a.y, b.y, c.y);
-      if (solid && n.y > .9 && high <= LEVEL.floor) faces.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-      else if (Math.abs(n.y) < .1 && low < LEVEL.floor && high - low >= LEVEL.footing) wall.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-    }
-  });
-  const grid = floorGrid(faces);
-  for (const value of grid.walls) wall.push(value);
-  const group = new THREE.Group();
-  for (const [name, points] of [['plaza-floor', grid.floors], ['plaza-wall', wall]]) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-    const mesh = new THREE.Mesh(geometry);
-    mesh.name = name; group.add(mesh);
+// Compact rectangles extracted offline from every storey of the supplied model.
+// Floor heights are kept separately, so a roof never replaces the room below it.
+// Vertical faces retain their actual bottom and top rather than becoming columns
+// extending from street level. Rebuild with node tools/plaza-navigation.mjs.
+export const PLAZA_NAVIGATION = 'plaza-night-time/plaza-navigation.json';
+export function createPlazaTerrain(data) {
+  if (data.version !== 1) throw new Error('Unsupported plaza navigation data.');
+  const points = [];
+  for (const [y, x0, z0, x1, z1] of data.floors) {
+    points.push(x0,y,z0, x0,y,z1, x1,y,z1, x0,y,z0, x1,y,z1, x1,y,z0);
   }
-  return group;
-}
-
-// Rasterises floor triangles onto a grid of `cells` to the block, keeping the
-// highest floor in each cell. Returns the floors merged into level rectangles,
-// and upright quads, merged into runs, along every edge where the floors on
-// either side differ by more than a step. Each quad stands two blocks above
-// the higher floor, so the navigator reads it as a wall even below sea level.
-function floorGrid(faces, cells = 2) {
-  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
-  for (let i = 0; i < faces.length; i += 3) {
-    minX = Math.min(minX, faces[i]); maxX = Math.max(maxX, faces[i]);
-    minZ = Math.min(minZ, faces[i + 2]); maxZ = Math.max(maxZ, faces[i + 2]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  const layout = new THREE.Mesh(geometry); layout.name = 'plaza-floor'; place(layout);
+  const transform = new THREE.Matrix4().copy(layout.matrixWorld), corner = new THREE.Vector3();
+  const colliders = [];
+  function box(x0, z0, x1, z1, bottom, top, extra = {}) {
+    const a = corner.set(x0, bottom, z0).applyMatrix4(transform).clone();
+    const b = corner.set(x1, top, z1).applyMatrix4(transform);
+    colliders.push({ x:(a.x+b.x)/2, z:(a.z+b.z)/2, w:Math.max(.025,Math.abs(a.x-b.x)), d:Math.max(.025,Math.abs(a.z-b.z)), bottom:a.y, top:b.y, ...extra });
   }
-  const width = Math.ceil((maxX - minX) * cells), depth = Math.ceil((maxZ - minZ) * cells);
-  const top = new Float32Array(width * depth).fill(-Infinity);
-  for (let t = 0; t < faces.length; t += 9) {
-    const [ax, ay, az, bx, by, bz, cx, cy, cz] = faces.slice(t, t + 9);
-    const den = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
-    if (Math.abs(den) < 1e-9) continue;
-    const y = Math.max(ay, by, cy);
-    const x0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - minX) * cells)), x1 = Math.min(width - 1, Math.floor((Math.max(ax, bx, cx) - minX) * cells));
-    const z0 = Math.max(0, Math.floor((Math.min(az, bz, cz) - minZ) * cells)), z1 = Math.min(depth - 1, Math.floor((Math.max(az, bz, cz) - minZ) * cells));
-    for (let iz = z0; iz <= z1; iz++) for (let ix = x0; ix <= x1; ix++) {
-      const x = minX + (ix + .5) / cells, z = minZ + (iz + .5) / cells;
-      const u = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / den, v = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / den;
-      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6 && y > top[iz * width + ix]) top[iz * width + ix] = y;
-    }
+  for (const [axis, plane, u0, y0, u1, y1] of data.walls) {
+    if (axis === 0) box(plane,u0,plane,u1,y0,y1,{walkable:true,stepable:true});
+    else box(u0,plane,u1,plane,y0,y1,{walkable:true,stepable:true});
   }
-  const gx = ix => minX + ix / cells, gz = iz => minZ + iz / cells;
-
-  // Greedy rectangles of one height: as wide as the row allows, then as deep
-  // as every row below matches it.
-  const floors = [], taken = new Uint8Array(width * depth);
-  for (let iz = 0; iz < depth; iz++) for (let ix = 0; ix < width; ix++) {
-    const k = iz * width + ix, h = top[k];
-    if (taken[k] || !Number.isFinite(h)) continue;
-    let w = 1, d = 1;
-    while (ix + w < width && !taken[k + w] && top[k + w] === h) w++;
-    rows: for (; iz + d < depth; d++) for (let j = 0; j < w; j++) {
-      const q = (iz + d) * width + ix + j;
-      if (taken[q] || top[q] !== h) break rows;
-    }
-    for (let r = 0; r < d; r++) taken.fill(1, (iz + r) * width + ix, (iz + r) * width + ix + w);
-    const [x0, x1, z0, z1] = [gx(ix), gx(ix + w), gz(iz), gz(iz + d)];
-    floors.push(x0, h, z0, x0, h, z1, x1, h, z1, x0, h, z0, x1, h, z1, x1, h, z0);
-  }
-
-  const walls = [];
-  const rise = (h, g) => Number.isFinite(h) && Number.isFinite(g) && Math.abs(h - g) > LEVEL.step ? [Math.min(h, g), Math.max(h, g) + 2] : null;
-  const same = (p, q) => p && q && p[0] === q[0] && p[1] === q[1];
-  function quad(x0, z0, x1, z1, [low, high]) {
-    walls.push(x0, low, z0, x0, high, z0, x1, high, z1, x0, low, z0, x1, high, z1, x1, low, z1);
-  }
-  // Between columns, merged down the rows; then between rows, merged along them.
-  for (let ix = 0; ix + 1 < width; ix++) {
-    let run = null, start = 0;
-    for (let iz = 0; iz <= depth; iz++) {
-      const r = iz < depth ? rise(top[iz * width + ix], top[iz * width + ix + 1]) : null;
-      if (run && !same(run, r)) { quad(gx(ix + 1), gz(start), gx(ix + 1), gz(iz), run); run = null; }
-      if (r && !run) { run = r; start = iz; }
-    }
-  }
-  for (let iz = 0; iz + 1 < depth; iz++) {
-    let run = null, start = 0;
-    for (let ix = 0; ix <= width; ix++) {
-      const r = ix < width ? rise(top[iz * width + ix], top[(iz + 1) * width + ix]) : null;
-      if (run && !same(run, r)) { quad(gx(start), gz(iz + 1), gx(ix), gz(iz + 1), run); run = null; }
-      if (r && !run) { run = r; start = ix; }
-    }
-  }
-  return { floors, walls };
+  for (const [y, x0, z0, x1, z1] of data.ceilings) box(x0,z0,x1,z1,y,y+.02,{ceilingOnly:true});
+  return { layout, ground:/plaza-floor/, layered:true, floorLimit:PLAZA_TRANSFORM.y+20.5*PLAZA_TRANSFORM.scale, colliders };
 }
 
 function place(object) {
@@ -157,12 +73,13 @@ function loader() {
 
 export async function loadPlazaDistrict({ lowPower = false } = {}) {
   const footprintURL = new URL(PLAZA_FOOTPRINT, import.meta.url), assetURL = new URL(PLAZA_ASSET, import.meta.url);
-  const outline = (await loader().loadAsync(footprintURL.href)).scene;
+  const [footprint, navigationData] = await Promise.all([loader().loadAsync(footprintURL.href), fetch(new URL(PLAZA_NAVIGATION, import.meta.url)).then(response => { if (!response.ok) throw new Error('The plaza navigation could not load.'); return response.json(); })]);
+  const outline = footprint.scene;
   const root = new THREE.Group(); root.name = 'Lantern Plaza';
   // The navigator reads floors and walls from its own copy, which never
   // reaches the renderer. Until the model arrives, the footprint stands in
   // for it, in plain stone: the streets and the foot of every wall.
-  const layout = place(readFootprint(outline));
+  const terrain = createPlazaTerrain(navigationData);
   const stone = new THREE.MeshStandardMaterial({ color:'#595d63', roughness:.95, flatShading:true, side:THREE.DoubleSide });
   outline.traverse(mesh => { if (mesh.isMesh) { mesh.material.dispose(); mesh.material = stone; mesh.receiveShadow = true; } });
   place(outline); outline.name = 'Lantern Plaza footprint';
@@ -184,7 +101,7 @@ export async function loadPlazaDistrict({ lowPower = false } = {}) {
   }
   return {
     root, bounds, landing, asset:PLAZA_ASSET,
-    terrain:{ layout, ground:/plaza-floor/, solid:/plaza-wall/, standing:-Infinity, walkable:Infinity },
+    terrain,
     // Fetches the model and puts it in place of the footprint, once prepare
     // (given the model, before it is shown) has finished. Safe to call again.
     load(prepare) {

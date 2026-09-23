@@ -114,7 +114,7 @@ const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.4,3.4), new THREE.MeshBasi
 // Static obstacle buckets limit collision checks to objects near the player.
 const collision = new SpatialHash();
 world.colliders.forEach((collider, index) => collision.insert(`city-${index}`, collider));
-const activities = createGameplayWorld(scene, world, collision);
+const activities = await createGameplayWorld(scene, world, collision);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
@@ -260,7 +260,7 @@ function interact(){
   if(action.type==='mount'){
     const mount=activities.mount;
     if(mount.mounted){
-      const point=world.findWalkable(position.x+2,position.z,1);const candidate=new THREE.Vector3(point.x,point.y,point.z);collide(candidate);position.copy(candidate);mount.mounted=false;locomotion.reset();
+      const point=world.findWalkable(position.x+2,position.z,.6,position.y);const candidate=new THREE.Vector3(point.x,point.y,point.z);collide(candidate,.52);position.copy(candidate);mount.mounted=false;locomotion.reset();
     }else if(locomotion.grounded){mount.mounted=true;position.copy(mount.position);lockTarget=null;aiming=cinematic=false;locomotion.reset();}
     syncCameraControls();audio.play('interaction');return;
   }
@@ -564,7 +564,7 @@ function updatePlayer(dt){
   }
   if(health<=0){respawnPlayer();return;}
   const floor=locomotion.groundHeight;
-  avatar.position.copy(position);if(mounted)avatar.position.y+=2.35;
+  avatar.position.copy(position);if(mounted)avatar.position.y+=activities.mount.seatHeight;
   const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
   if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
@@ -648,6 +648,7 @@ function drawMapLayer(){
   const context=layer.getContext('2d'),lx=x=>(x-bounds.minX)*MAP_SCALE,lz=z=>(z-bounds.minZ)*MAP_SCALE;
   context.fillStyle='#b5b8ad66';
   for(const c of world.colliders){
+    if(c.ceilingOnly || c.cameraOnly)continue;
     if(c.r!==undefined){context.beginPath();context.arc(lx(c.x),lz(c.z),c.r*MAP_SCALE,0,Math.PI*2);context.fill();}
     else context.fillRect(lx(c.x-c.w/2),lz(c.z-c.d/2),c.w*MAP_SCALE,c.d*MAP_SCALE);
   }
@@ -683,7 +684,7 @@ function animate(now){
     updateCamera(dt);
   }
   audio.setPaused(dialog.open||screen!=='game'||contextLost||document.hidden);
-  const avatarFloor=groundHeight(avatar.position.x,avatar.position.z);
+  const avatarFloor=screen==='game'?locomotion.groundHeight:groundHeight(avatar.position.x,avatar.position.z);
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};

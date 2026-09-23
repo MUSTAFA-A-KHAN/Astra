@@ -53,6 +53,21 @@ test('follow stays centred without accumulated shoulder drift and zoom obeys bou
   assert.equal(far.mode, 'follow');
 });
 
+test('stacked floors keep the camera indoors and support it on upper storeys', () => {
+  const terrain = {
+    getHeight: () => 30,
+    getSupportHeight: (x, z, y) => y >= 30 ? 30 : y >= 10 ? 10 : 0,
+  };
+  const { follow, position, camera } = setup(terrain);
+  tick(follow, position, { pitch: .1, distance: 4 });
+  assert.ok(camera.position.y < 10, 'the downstairs camera stays under the ceiling');
+  close(follow.target.y, 2.05);
+  position.y = 10;
+  tick(follow, position, { pitch: .1, distance: 4 });
+  assert.ok(camera.position.y > 10 && camera.position.y < 30, 'the upstairs camera stays above its own floor');
+  close(follow.target.y, 12.05);
+});
+
 test('zoom, yaw, pitch and follow smoothing behave consistently at different frame rates', () => {
   const runs = [30, 60, 144].map(fps => {
     const { follow, position } = setup();

@@ -23,6 +23,9 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
   const depth = Math.ceil((bounds.maxZ - minZ) / cellSize);
   const tops = new Float32Array(width * depth);
   const surfaceTiles = new Map(), tileSize = 8;
+  const layeredColliders = districts.flatMap(district => district.colliders ?? []);
+  const layeredBlocked = new Uint8Array(width * depth);
+  let readingLayered = false, readingFloorLimit = Infinity;
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
   const ab = new THREE.Vector3(), ac = new THREE.Vector3(), normal = new THREE.Vector3();
   let triangleCount = 0, surfaceCount = 0;
@@ -60,7 +63,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
   function addSurface() {
     const denominator=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);
     if(Math.abs(denominator)<1e-8) return;
-    const t=[a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z,1/denominator];
+    const t=[a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z,1/denominator,readingLayered,readingFloorLimit];
     for(let x=Math.floor(Math.min(a.x,b.x,c.x)/tileSize);x<=Math.floor(Math.max(a.x,b.x,c.x)/tileSize);x++) {
       for(let z=Math.floor(Math.min(a.z,b.z,c.z)/tileSize);z<=Math.floor(Math.max(a.z,b.z,c.z)/tileSize);z++) {
         const key=`${x},${z}`;
@@ -83,6 +86,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
   }
   for (const district of districts) {
     const { layout, ground = null, solid = null, standing = .75, reach = Infinity, clutter = null, walkable = Infinity, relative = false } = district;
+    readingLayered = district.layered === true; readingFloorLimit = district.floorLimit ?? Infinity;
     layout.updateMatrixWorld(true);
     layout.traverse(mesh => {
       if (!mesh.isMesh) return;
@@ -105,13 +109,16 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     });
   }
 
-  function sampleHeight(x,z) {
+  function sampleHeight(x,z,maxHeight) {
     const triangles=surfaceTiles.get(`${Math.floor(x/tileSize)},${Math.floor(z/tileSize)}`);
     let y=-Infinity;
     if(triangles) for(const t of triangles) {
       const u=((t[5]-t[8])*(x-t[6])+(t[6]-t[3])*(z-t[8]))*t[9];
       const v=((t[8]-t[2])*(x-t[6])+(t[0]-t[6])*(z-t[8]))*t[9];
-      if(u>=-.00001 && v>=-.00001 && u+v<=1.00001) y=Math.max(y,u*t[1]+v*t[4]+(1-u-v)*t[7]);
+      if(u>=-.00001 && v>=-.00001 && u+v<=1.00001) {
+        const height=u*t[1]+v*t[4]+(1-u-v)*t[7];
+        if (!t[10] || height <= (maxHeight ?? t[11]) + .0001) y=Math.max(y,height);
+      }
     }
     return y;
   }
@@ -128,6 +135,17 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
       });
     });
   }
+  // Street placement/reachability uses the floor under each wall. Upper-storey
+  // walls still collide at their own elevations without closing roads below.
+  for (const c of layeredColliders) {
+    if (c.ceilingOnly) continue;
+    const ix0=Math.max(0,Math.floor((c.x-c.w/2-minX)/cellSize)), ix1=Math.min(width-1,Math.floor((c.x+c.w/2-minX)/cellSize));
+    const iz0=Math.max(0,Math.floor((c.z-c.d/2-minZ)/cellSize)), iz1=Math.min(depth-1,Math.floor((c.z+c.d/2-minZ)/cellSize));
+    for (let iz=iz0;iz<=iz1;iz++) for (let ix=ix0;ix<=ix1;ix++) {
+      const y=sampleHeight(minX+(ix+.5)*cellSize,minZ+(iz+.5)*cellSize);
+      if (Number.isFinite(y) && c.bottom<y+3.25 && c.top>y+.95) layeredBlocked[iz*width+ix]=1;
+    }
+  }
   // Seal open water and the irregular edge of the models. These cells never
   // obstruct the camera, and prevent walking off the supplied ground.
   for(let iz=0;iz<depth;iz++) for(let ix=0;ix<width;ix++) {
@@ -142,14 +160,14 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     const ix1=Math.min(width-1,Math.floor((opening.x+opening.w/2-minX)/cellSize));
     const iz0=Math.max(0,Math.floor((opening.z-opening.d/2-minZ)/cellSize));
     const iz1=Math.min(depth-1,Math.floor((opening.z+opening.d/2-minZ)/cellSize));
-    for(let iz=iz0;iz<=iz1;iz++) for(let ix=ix0;ix<=ix1;ix++) tops[iz*width+ix]=0;
+    for(let iz=iz0;iz<=iz1;iz++) for(let ix=ix0;ix<=ix1;ix++) tops[iz*width+ix]=0,layeredBlocked[iz*width+ix]=0;
   }
   function clear(x,z,radius=.8) {
     if(x-radius<bounds.minX || x+radius>bounds.maxX || z-radius<bounds.minZ || z+radius>bounds.maxZ) return false;
     const ix0=Math.max(0,Math.floor((x-radius-minX)/cellSize)), ix1=Math.min(width-1,Math.floor((x+radius-minX)/cellSize));
     const iz0=Math.max(0,Math.floor((z-radius-minZ)/cellSize)), iz1=Math.min(depth-1,Math.floor((z+radius-minZ)/cellSize));
     for(let iz=iz0;iz<=iz1;iz++) for(let ix=ix0;ix<=ix1;ix++) {
-      if(!tops[iz*width+ix]) continue;
+      if(!tops[iz*width+ix] && !layeredBlocked[iz*width+ix]) continue;
       const dx=x-THREE.MathUtils.clamp(x,minX+ix*cellSize,minX+(ix+1)*cellSize);
       const dz=z-THREE.MathUtils.clamp(z,minZ+iz*cellSize,minZ+(iz+1)*cellSize);
       if(dx*dx+dz*dz<radius*radius+.00001) return false;
@@ -160,7 +178,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
   function findClear(x,z,radius,requireReachable) {
     let best=null,bestDistance=Infinity;
     for(let iz=0;iz<depth;iz++) for(let ix=0;ix<width;ix++) {
-      if(tops[iz*width+ix] || (requireReachable && !reachable[iz*width+ix])) continue;
+      if(tops[iz*width+ix] || layeredBlocked[iz*width+ix] || (requireReachable && !reachable[iz*width+ix])) continue;
       const px=minX+(ix+.5)*cellSize,pz=minZ+(iz+.5)*cellSize,d=(px-x)**2+(pz-z)**2;
       if(d<bestDistance && clear(px,pz,radius)) { best={x:px,z:pz}; bestDistance=d; }
     }
@@ -176,16 +194,32 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     const i=queue[head],ix=i%width,iz=Math.floor(i/width);
     for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]) {
       const nx=ix+dx,nz=iz+dz,ni=nz*width+nx;
-      if(nx<0 || nz<0 || nx>=width || nz>=depth || reachable[ni] || tops[ni]) continue;
+      if(nx<0 || nz<0 || nx>=width || nz>=depth || reachable[ni] || tops[ni] || layeredBlocked[ni]) continue;
       if(!clear(minX+(nx+.5)*cellSize,minZ+(nz+.5)*cellSize,.78)) continue;
       reachable[ni]=1;queue[count++]=ni;
     }
   }
-  function isWalkable(x,z,radius=.8) {
+  function clearAtHeight(x,z,radius,feetY) {
+    const floor=sampleHeight(x,z,feetY+.95);
+    if (!Number.isFinite(floor) || Math.abs(floor-feetY)>1) return false;
+    if(x-radius<bounds.minX || x+radius>bounds.maxX || z-radius<bounds.minZ || z+radius>bounds.maxZ) return false;
+    return !layeredColliders.some(c => !c.ceilingOnly && c.top>floor+.95 && c.bottom<floor+3.25 &&
+      (x-THREE.MathUtils.clamp(x,c.x-c.w/2,c.x+c.w/2))**2+(z-THREE.MathUtils.clamp(z,c.z-c.d/2,c.z+c.d/2))**2<radius*radius);
+  }
+  function isWalkable(x,z,radius=.8,feetY) {
+    if (Number.isFinite(feetY)) return clearAtHeight(x,z,radius,feetY);
     const ix=Math.floor((x-minX)/cellSize),iz=Math.floor((z-minZ)/cellSize);
     return ix>=0 && iz>=0 && ix<width && iz<depth && !!reachable[iz*width+ix] && clear(x,z,radius);
   }
-  function findWalkable(x,z,radius=1.5) {
+  function findWalkable(x,z,radius=1.5,feetY) {
+    if (Number.isFinite(feetY)) {
+      if (clearAtHeight(x,z,radius,feetY)) return {x,y:sampleHeight(x,z,feetY+.95),z};
+      for (let distance=.5;distance<=8;distance+=.5) for (let angle=0;angle<Math.PI*2;angle+=Math.PI/12) {
+        const px=x+Math.cos(angle)*distance,pz=z+Math.sin(angle)*distance;
+        if(clearAtHeight(px,pz,radius,feetY)) return {x:px,y:sampleHeight(px,pz,feetY+.95),z:pz};
+      }
+      return null;
+    }
     return isWalkable(x,z,radius) ? {x,y:sampleHeight(x,z),z} : findClear(x,z,radius,true);
   }
   const colliders=[], active=new Map();
@@ -206,11 +240,14 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     }
     active.clear();for(const [key,value] of next) active.set(key,value);
   }
+  for (const collider of layeredColliders) colliders.push(collider);
   return {
     colliders, spawn, isWalkable, findWalkable,
     getHeight(x,z) { const h=sampleHeight(x,z);return Number.isFinite(h)?h:0; },
-    getNormal(x,z,out) {
-      const dx=sampleHeight(x-.12,z)-sampleHeight(x+.12,z), dz=sampleHeight(x,z-.12)-sampleHeight(x,z+.12);
+    getSupportHeight(x,z,feetY,step=.48) { const h=sampleHeight(x,z,feetY+step);return Number.isFinite(h)?h:0; },
+    getNormal(x,z,out,feetY,step=.48) {
+      const limit=Number.isFinite(feetY)?feetY+step:undefined;
+      const dx=sampleHeight(x-.12,z,limit)-sampleHeight(x+.12,z,limit), dz=sampleHeight(x,z-.12,limit)-sampleHeight(x,z+.12,limit);
       out.x=Number.isFinite(dx)?dx:0;out.y=.24;out.z=Number.isFinite(dz)?dz:0;
       const length=Math.hypot(out.x,out.y,out.z);out.x/=length;out.y/=length;out.z/=length;return out;
     },

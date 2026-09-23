@@ -48,13 +48,13 @@ export class SpatialHash {
     this.lastChecks = this.candidates.length;
     return this.candidates;
   }
-  resolve(p, radius = .52, height = 3.3, ignore = null) {
+  resolve(p, radius = .52, height = 3.3, ignore = null, stepHeight = 0) {
     // Requery after projection so corners spanning cell boundaries stay solid.
     for (let pass = 0; pass < 3; pass++) {
       const nearby = this.query(p.x - radius, p.z - radius, p.x + radius, p.z + radius);
       let hit = false;
       for (const c of nearby) {
-        if (c.id === ignore || c.cameraOnly || p.y + height <= (c.bottom ?? -Infinity) || p.y > (c.top ?? Infinity) || (c.walkable && p.y >= c.top - .025)) continue;
+        if (c.id === ignore || c.cameraOnly || c.ceilingOnly || (c.stepable && c.top <= p.y + stepHeight + .001) || p.y + height <= (c.bottom ?? -Infinity) || p.y > (c.top ?? Infinity) || (c.walkable && p.y >= c.top - .025)) continue;
         if (c.r !== undefined) {
           const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), limit = c.r + radius;
           if (d < limit) { p.x = c.x + (d > 1e-6 ? dx / d : 1) * limit; p.z = c.z + (d > 1e-6 ? dz / d : 0) * limit; hit = true; }
@@ -121,7 +121,7 @@ export class LocomotionController {
   waterAt(x,z) { return this.terrain.getWaterAt?.(x,z) ?? this.waterZones.find(zone=>contains(zone,x,z)) ?? null; }
   supportHeight(x,z,feetY=this.position.y) {
     const water=this.waterAt(x,z);
-    const terrainHeight=this.terrain.getSupportHeight?.(x,z,feetY,this.stepHeight) ?? this.terrain.getHeight(x,z);
+    const terrainHeight=this.terrain.getSupportHeight?.(x,z,feetY,this.terrain.stepHeightAt?.(x,z) ?? this.stepHeight) ?? this.terrain.getHeight(x,z);
     return Number.isFinite(water?.floor)?Math.min(terrainHeight,water.floor):terrainHeight;
   }
   startClimb(climbable) {
@@ -191,7 +191,7 @@ export class LocomotionController {
       }
     }
     this.coyote=this.grounded?.1:Math.max(0,this.coyote-dt);
-    this.terrain.getNormal?.(p.x,p.z,this.normal);
+    this.terrain.getNormal?.(p.x,p.z,this.normal,p.y,this.terrain.stepHeightAt?.(p.x,p.z) ?? this.stepHeight);
     this.slope=Math.acos(clamp(this.normal.y,-1,1));
     this.updateWater();
     const speedScale=clamp((input.heroSpeed||9)/9,.9,1.22)*clamp(input.speedScale ?? 1,.1,3);
@@ -207,7 +207,7 @@ export class LocomotionController {
     const factor=change>acceleration?acceleration/change:1;
     v.x+=changeX*factor;v.z+=changeZ*factor;
     if(sliding) {v.x+=this.normal.x*this.normal.y*this.gravity*dt;v.z+=this.normal.z*this.normal.y*this.gravity*dt;}
-    moveWithCollision(p,v,dt,this.collision,this.radius,this.height);
+    moveWithCollision(p,v,dt,this.collision,this.radius,this.height,null,this.grounded ? (this.terrain.stepHeightAt?.(p.x,p.z) ?? this.stepHeight) : 0);
     const nextHeight=this.supportHeight(p.x,p.z),previousHeight=this.supportHeight(oldX,oldZ);
     // Some ground is built in taller steps than the default: a district can say so.
     const stepHeight=this.terrain.stepHeightAt?.(p.x,p.z) ?? this.stepHeight;
@@ -269,12 +269,12 @@ function contains(shape,x,z,padding=0) {
   return Math.abs(x-shape.x)<=shape.w/2+padding && Math.abs(z-shape.z)<=shape.d/2+padding;
 }
 
-function moveWithCollision(position,velocity,dt,collision,radius,height,ignore=null) {
+function moveWithCollision(position,velocity,dt,collision,radius,height,ignore=null,stepHeight=0) {
   const steps=Math.max(1,Math.ceil(Math.hypot(velocity.x,velocity.z)*dt/Math.max(.05,radius*.45)));
   for(let i=0;i<steps;i++) {
     const desiredX=position.x+velocity.x*dt/steps,desiredZ=position.z+velocity.z*dt/steps;
     position.x=desiredX;position.z=desiredZ;
-    collision?.resolve(position,radius,height,ignore);
+    collision?.resolve(position,radius,height,ignore,stepHeight);
     const dx=position.x-desiredX,dz=position.z-desiredZ,length=Math.hypot(dx,dz);
     if(length>1e-6) {
       const nx=dx/length,nz=dz/length,into=velocity.x*nx+velocity.z*nz;

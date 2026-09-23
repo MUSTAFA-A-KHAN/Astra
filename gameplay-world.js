@@ -1,7 +1,11 @@
 import * as THREE from 'three';
+import { createHero } from './characters.js';
 
 // A few authored interactions, rather than a costly rigid body for every city prop.
-export function createGameplayWorld(scene, world, collision) {
+export async function createGameplayWorld(scene, world, collision) {
+  // Use the same fitted, in-place animation rig as the imported adventurers.
+  // Finish loading before interactions are enabled so the mount is always visible.
+  const horseModel = await createHero('Horse');
   const root = new THREE.Group(); root.name = 'City activities'; scene.add(root);
   const wood = new THREE.MeshStandardMaterial({ color: '#71503b', roughness: .95 });
   const iron = new THREE.MeshStandardMaterial({ color: '#343d42', metalness: .65, roughness: .5 });
@@ -77,19 +81,8 @@ export function createGameplayWorld(scene, world, collision) {
   const waterZones = [{ id: 'moonwell-pool', x: pool.x, z: pool.z, r: 2.8, surface: pool.y + .72 }];
 
   const horsePoint = spot('horse', 3.5, 1.5, 2), horse = at(horsePoint); horse.name = 'Trail horse';
-  const hide = new THREE.MeshStandardMaterial({ color: '#6d4933', roughness: 1 });
-  box(horse, [1.05, 1.2, 2.4], [0, 1.9, 0], hide);
-  const neck = box(horse, [.65, 1.45, .65], [0, 2.6, .85], hide); neck.rotation.x = .3;
-  box(horse, [.68, .65, 1.15], [0, 3.25, 1.3], hide);
-  for (const x of [-.22, .22]) box(horse, [.16, .4, .2], [x, 3.7, 1.15], hide);
-  box(horse, [1.14, .16, .9], [0, 2.58, -.15], gold);
-  const legs = [];
-  for (const x of [-.38, .38]) for (const z of [-.8, .8]) {
-    const pivot = new THREE.Group(); pivot.position.set(x, 1.5, z); horse.add(pivot);
-    box(pivot, [.25, 1.4, .27], [0, -.7, 0], hide); box(pivot, [.3, .22, .35], [0, -1.3, .04], iron); legs.push(pivot);
-  }
-  box(horse, [.25, 1.1, .3], [0, 1.5, -1.35], iron).rotation.x = -.3;
-  const mount = { group: horse, position: horse.position, mounted: false, legs };
+  horse.add(horseModel.group);
+  const mount = { group: horse, position: horse.position, mounted: false, seatHeight: 2.35 };
 
   const crates = [];
   for (let i = 0; i < 2; i++) {
@@ -125,14 +118,15 @@ export function createGameplayWorld(scene, world, collision) {
   const terrain = {
     getHeight: (x, z) => world.getHeight(x, z),
     stepHeightAt: (x, z) => world.stepHeightAt?.(x, z),
-    getNormal(x, z, out) {
-      if (!onRamp(x, z)) return world.getNormal(x, z, out);
+    getNormal(x, z, out, feetY) {
+      if (!onRamp(x, z)) return world.getNormal(x, z, out, feetY);
       out.x = 0;out.y = 1;out.z = (z - pool.z < 2.8 ? -1 : 1) * .82 / .8;
       const length = Math.hypot(out.y, out.z);out.y /= length;out.z /= length;return out;
     },
-    getSupportHeight(x, z, feetY) {
+    getSupportHeight(x, z, feetY, stepHeight) {
+      const support = world.getSupportHeight?.(x, z, feetY, stepHeight) ?? world.getHeight(x, z);
       if (onDeck(x, z) && feetY >= climbable.top - .35) return climbable.top;
-      return onRamp(x, z) ? Math.max(world.getHeight(x, z), rampHeight(z)) : world.getHeight(x, z);
+      return onRamp(x, z) ? Math.max(support, rampHeight(z)) : support;
     },
   };
   return {
@@ -140,10 +134,12 @@ export function createGameplayWorld(scene, world, collision) {
     update(dt, time, speed = 0) {
       flame.scale.setScalar(.93 + Math.sin(time * 13) * .07); light.intensity = 4 + Math.sin(time * 11);
       water.material.opacity = .6 + Math.sin(time * .7) * .04;
-      for (let i = 0; i < legs.length; i++) legs[i].rotation.x = mount.mounted ? Math.sin(time * Math.max(4, speed * 1.6) + (i === 0 || i === 3 ? 0 : Math.PI)) * Math.min(.65, speed * .07) : 0;
+      const ridingSpeed = mount.mounted ? speed : 0;
+      horseModel.animate(dt, { speed: ridingSpeed, moving: ridingSpeed > .1, time });
     },
-    getStats() { return { mounted: mount.mounted, mount: { x: horse.position.x, y: horse.position.y, z: horse.position.z }, stations, climbables: [climbable], waterZones, crates: crates.map(c => ({ id: c.id, x: c.position.x, y: c.position.y, z: c.position.z })) }; },
+    getStats() { return { mounted: mount.mounted, mount: { x: horse.position.x, y: horse.position.y, z: horse.position.z, model: horseModel.meta.model, height: horseModel.height, seatHeight: mount.seatHeight, animation: horseModel.diagnostics }, stations, climbables: [climbable], waterZones, crates: crates.map(c => ({ id: c.id, x: c.position.x, y: c.position.y, z: c.position.z })) }; },
     dispose() {
+      horseModel.dispose();
       const geometries = new Set(), materials = new Set();
       for (const id of colliderIds) collision.remove(id);
       root.traverse(o => { if (o.geometry) geometries.add(o.geometry); if (o.material) materials.add(o.material); });

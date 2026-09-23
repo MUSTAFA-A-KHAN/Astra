@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import * as THREE from 'three';
+const b=fs.readFileSync('plaza-night-time/plaza-night.glb'),j=JSON.parse(b.subarray(20,20+b.readUInt32LE(12))),bin=b.subarray(28+b.readUInt32LE(12));
+j.images=[];j.textures=[];j.materials=j.materials.map(m=>({name:m.name}));j.buffers=[{byteLength:bin.length,uri:'data:application/octet-stream;base64,'+bin.toString('base64')}];
+globalThis.ProgressEvent=class {};
+const {scene}=await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(JSON.stringify(j),''); scene.updateMatrixWorld(true);
+let tris=0,floors=0,walls=0,down=0,min=Infinity,max=-Infinity; const levels=new Map(),coords=new Map(),a=new THREE.Vector3(),bb=new THREE.Vector3(),c=new THREE.Vector3(),n=new THREE.Vector3(),e=new THREE.Vector3();
+scene.traverse(m=>{if(!m.isMesh)return;const p=m.geometry.attributes.position,i=m.geometry.index;for(let t=0;t<(i?i.count:p.count);t+=3){a.fromBufferAttribute(p,i?i.getX(t):t).applyMatrix4(m.matrixWorld);bb.fromBufferAttribute(p,i?i.getX(t+1):t+1).applyMatrix4(m.matrixWorld);c.fromBufferAttribute(p,i?i.getX(t+2):t+2).applyMatrix4(m.matrixWorld);n.subVectors(bb,a).cross(e.subVectors(c,a)).normalize();tris++;if(n.y>.9&&m.material.name==='opaque'){floors++; const y=Math.round(a.y*100)/100;levels.set(y,(levels.get(y)||0)+1);min=Math.min(min,y);max=Math.max(max,y);}else if(Math.abs(n.y)<.1)walls++;else if(n.y<-.9)down++;}});
+console.log(JSON.stringify({tris,floors,walls,down,min,max,levels:[...levels].sort((a,b)=>b[1]-a[1]).slice(0,35)},null,2));
