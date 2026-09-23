@@ -3212,7 +3212,8 @@ async function makeImported(
         ? name => spec.bone.test(name)
         : spec.bone
           ? name => name === spec.bone
-          : name => /left_?hand$/i.test(name);
+          // Some exporters number every node: `mixamorigLeftHand_011`.
+          : name => /left_?hand(_\d+)?$/i.test(name);
 
     let holder = null;
 
