@@ -1,0 +1,5 @@
+{
+  "opaque": { "map": "plaza_RGBA.png", "normalMap": "plaza_Norm.jpeg", "emissiveMap": "plaza_Glow.jpeg", "emissiveChannel": 1, "pixelated": true, "flat": true },
+  "transparent": { "map": "plaza_RGBA.png", "normalMap": "plaza_Norm.jpeg", "emissiveMap": "plaza_Glow.jpeg", "emissiveChannel": 1, "pixelated": true, "flat": true, "blend": true },
+  "plaque": { "emissiveMap": "plaque_Glow.jpeg", "flat": true }
+}

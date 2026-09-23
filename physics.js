@@ -209,7 +209,9 @@ export class LocomotionController {
     if(sliding) {v.x+=this.normal.x*this.normal.y*this.gravity*dt;v.z+=this.normal.z*this.normal.y*this.gravity*dt;}
     moveWithCollision(p,v,dt,this.collision,this.radius,this.height);
     const nextHeight=this.supportHeight(p.x,p.z),previousHeight=this.supportHeight(oldX,oldZ);
-    if (this.grounded && ((this.slope>this.maxSlope && nextHeight>previousHeight+.002) || nextHeight-previousHeight>this.stepHeight)) {
+    // Some ground is built in taller steps than the default: a district can say so.
+    const stepHeight=this.terrain.stepHeightAt?.(p.x,p.z) ?? this.stepHeight;
+    if (this.grounded && ((this.slope>this.maxSlope && nextHeight>previousHeight+.002) || nextHeight-previousHeight>stepHeight)) {
       p.x=oldX;p.z=oldZ;v.x*=.3;v.z*=.3;this.blocked=true;
     }
     if(Math.hypot(p.x-oldX,p.z-oldZ)<.01*dt && input.magnitude>.1)this.blocked=true;

@@ -635,15 +635,28 @@ function updateCamera(dt){
   }
 }
 const map=$('minimap').getContext('2d');
+// The map follows the player at a fixed scale: the Reach is now too wide to
+// show whole at a size that still reads. Its walls never move, so they are
+// drawn once, and each update copies only the part around the player.
+const MAP_SCALE=.5;
+let mapLayer=null;
+function drawMapLayer(){
+  const bounds=world.bounds,layer=document.createElement('canvas');
+  layer.width=Math.ceil((bounds.maxX-bounds.minX)*MAP_SCALE);layer.height=Math.ceil((bounds.maxZ-bounds.minZ)*MAP_SCALE);
+  const context=layer.getContext('2d'),lx=x=>(x-bounds.minX)*MAP_SCALE,lz=z=>(z-bounds.minZ)*MAP_SCALE;
+  context.fillStyle='#b5b8ad66';
+  for(const c of world.colliders){
+    if(c.r!==undefined){context.beginPath();context.arc(lx(c.x),lz(c.z),c.r*MAP_SCALE,0,Math.PI*2);context.fill();}
+    else context.fillRect(lx(c.x-c.w/2),lz(c.z-c.d/2),c.w*MAP_SCALE,c.d*MAP_SCALE);
+  }
+  return layer;
+}
 function drawMap(){
   map.clearRect(0,0,180,180);map.fillStyle='#343c40';map.fillRect(0,0,180,180);
-  const bounds=world.bounds,scale=160/Math.max(bounds.maxX-bounds.minX,bounds.maxZ-bounds.minZ);
-  const px=x=>90+(x-(bounds.minX+bounds.maxX)/2)*scale,pz=z=>90+(z-(bounds.minZ+bounds.maxZ)/2)*scale;
-  map.fillStyle='#b5b8ad66';
-  for(const c of world.colliders){
-    if(c.r!==undefined){map.beginPath();map.arc(px(c.x),pz(c.z),c.r*scale,0,Math.PI*2);map.fill();}
-    else map.fillRect(px(c.x-c.w/2),pz(c.z-c.d/2),c.w*scale,c.d*scale);
-  }
+  const bounds=world.bounds,scale=MAP_SCALE;
+  const px=x=>90+(x-position.x)*scale,pz=z=>90+(z-position.z)*scale;
+  mapLayer??=drawMapLayer();
+  map.drawImage(mapLayer,Math.round(px(bounds.minX)),Math.round(pz(bounds.minZ)));
   for(const l of world.landmarks){map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i))continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
@@ -672,7 +685,7 @@ function animate(now){
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
-  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:region()==='forest'?'Pine Islet':'City Quarter';$('world-clock').textContent=`${region()==='forest'?'ISLET':'CITY'} · ${formatTime(preferences.time)}`;}}
+  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
   if(preferences.quality==='auto'&&frameSamples>150&&time-lastAdapt>8&&frameMS>25){if(quality==='high')applyQuality('balanced',true);else if(quality==='balanced')applyQuality('low',true);else if(resolutionScale>.7){resolutionScale=Math.max(.7,resolutionScale-.1);applyQuality('low',true);}frameSamples=0;}
@@ -692,4 +705,11 @@ try{
   if(renderer.compileAsync)await Promise.race([renderer.compileAsync(scene,camera),new Promise(resolve=>setTimeout(resolve,8000))]);
   window.astraReady=true;$('loading').classList.add('finished');setTimeout(()=>$('loading').hidden=true,600);
   lastFrame=performance.now();renderer.setAnimationLoop(animate);
+  // The plaza's model streams in behind the game rather than holding up its
+  // start. Its shaders and textures are made ready before it is shown, so its
+  // arrival costs no dropped frames.
+  world.stream({prepare:async object=>{
+    object.traverse(mesh=>{for(const value of Object.values(mesh.material||{}))if(value?.isTexture)renderer.initTexture(value);});
+    if(renderer.compileAsync)await renderer.compileAsync(object,camera,scene);
+  }}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
 }catch(error){console.error(error);$('load-message').textContent='This device could not start the 3D world. Try again with a WebGL-enabled browser.';$('retry-button').hidden=false;}

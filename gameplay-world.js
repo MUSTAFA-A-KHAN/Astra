@@ -124,6 +124,7 @@ export function createGameplayWorld(scene, world, collision) {
   const rampHeight = z => pool.y + .82 * (1 - Math.abs(z - pool.z - 2.8) / .8);
   const terrain = {
     getHeight: (x, z) => world.getHeight(x, z),
+    stepHeightAt: (x, z) => world.stepHeightAt?.(x, z),
     getNormal(x, z, out) {
       if (!onRamp(x, z)) return world.getNormal(x, z, out);
       out.x = 0;out.y = 1;out.z = (z - pool.z < 2.8 ? -1 : 1) * .82 / .8;

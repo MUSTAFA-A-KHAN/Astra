@@ -13,7 +13,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "agent-browser": "^0.38.1"
+    "agent-browser": "^0.38.1",
+    "gltfpack": "^1.2.0"
   },
   "dependencies": {
     "three": "0.186.0"

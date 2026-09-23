@@ -9,3 +9,8 @@ playwright-report/
 !.env.example
 runtime-config.js
 realistic_female.glb
+
+# Supplied archives over the 25 MB per-file limit. The plaza FBX is kept
+# brotli-compressed as plaza-night-time/source/plaza01_night.fbx.br instead.
+plaza-night-time/source/plaza01.zip
+plaza-night-time/source/plaza01/

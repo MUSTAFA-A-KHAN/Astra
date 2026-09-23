@@ -17,10 +17,10 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('both districts load offline and the roster and menus remain usable', async ({ page }) => {
+test('all three districts load offline and the roster and menus remain usable', async ({ page }) => {
   const districtResponses = [];
   const districtFailures = [];
-  const district = url => url.includes('/City_Set_-_Proto_Series/') || url.includes('/forest-loner-diorama/');
+  const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/'].some(folder => url.includes(folder));
   page.on('response', response => {
     if (district(response.url())) districtResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
   });
@@ -35,18 +35,22 @@ test('both districts load offline and the roster and menus remain usable', async
   expect(districtResponses.some(response => response.path.endsWith('.png'))).toBe(true);
   // The diorama ships as one file: its textures travel inside the binary.
   expect(districtResponses.some(response => response.path.endsWith('.glb'))).toBe(true);
-  expect(districtResponses.some(response => response.path.endsWith('.fbx'))).toBe(false);
+  expect(districtResponses.some(response => /\.fbx(\.br)?$/i.test(response.path))).toBe(false);
+  // The plaza opens on its footprint alone; its model is fetched once the game is running.
+  expect(districtResponses.some(response => response.path.endsWith('/plaza-night-footprint.glb'))).toBe(true);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
   expect(terrain.provider).toBe('astra-world-map');
   expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
-  expect(terrain.assets).toHaveLength(2);
+  expect(terrain.assets).toHaveLength(3);
   expect(terrain.triangleCount).toBeGreaterThan(500_000);
   expect(terrain.meshCount).toBeGreaterThan(0);
   expect(terrain.colliderCount).toBeGreaterThan(0);
   // The island is only a place if the jetty reaches it from the city's spawn.
   expect(terrain.forestReachable).toBe(true);
+  // And the plaza only if the east jetty does.
+  expect(terrain.plazaReachable).toBe(true);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);
@@ -540,5 +544,17 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
     expect(model.actions.Land).toMatch(/Land/i);
     expect(model.diagnostics.orientationYaw).toBe(0);
   }
+  expect(errors).toEqual([]);
+});
+
+test('the plaza model streams in once the game is running', async ({ page }) => {
+  const errors = await boot(page);
+  await start(page);
+  // It is fetched behind the game, so allow for a slow link as well as a slow renderer.
+  await expect.poll(async () => (await snapshot(page)).terrain.plaza.state, { timeout: 120000 }).toBe('ready');
+  const { terrain } = await snapshot(page);
+  expect(terrain.plazaReachable).toBe(true);
+  // Tiled, so what is out of view or out of range is never drawn.
+  expect(terrain.plaza.tiles).toBeGreaterThan(10);
   expect(errors).toEqual([]);
 });
