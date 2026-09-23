@@ -17,10 +17,10 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('all three districts load offline and the roster and menus remain usable', async ({ page }) => {
+test('all four districts load offline and the roster and menus remain usable', async ({ page }) => {
   const districtResponses = [];
   const districtFailures = [];
-  const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/'].some(folder => url.includes(folder));
+  const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/', '/map-79-void/'].some(folder => url.includes(folder));
   page.on('response', response => {
     if (district(response.url())) districtResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
   });
@@ -38,12 +38,15 @@ test('all three districts load offline and the roster and menus remain usable', 
   expect(districtResponses.some(response => /\.fbx(\.br)?$/i.test(response.path))).toBe(false);
   // The plaza opens on its footprint alone; its model is fetched once the game is running.
   expect(districtResponses.some(response => response.path.endsWith('/plaza-night-footprint.glb'))).toBe(true);
+  // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
+  expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
+  expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
   expect(terrain.provider).toBe('astra-world-map');
   expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
-  expect(terrain.assets).toHaveLength(3);
+  expect(terrain.assets).toHaveLength(4);
   expect(terrain.triangleCount).toBeGreaterThan(500_000);
   expect(terrain.meshCount).toBeGreaterThan(0);
   expect(terrain.colliderCount).toBeGreaterThan(0);
@@ -51,6 +54,8 @@ test('all three districts load offline and the roster and menus remain usable', 
   expect(terrain.forestReachable).toBe(true);
   // And the plaza only if the east jetty does.
   expect(terrain.plazaReachable).toBe(true);
+  // And the yard's pier only if the south jetty does.
+  expect(terrain.yardReachable).toBe(true);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);

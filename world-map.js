@@ -3,13 +3,15 @@ import { createNavigation } from './navigation.js';
 import { CITY_ARRIVAL, loadCityDistrict } from './city-world.js';
 import { loadForestDistrict } from './forest-world.js';
 import { PLAZA_STEP, loadPlazaDistrict } from './plaza-world.js';
+import { loadYardDistrict } from './skibidi-world.js';
 import { createStreetLights } from './street-lights.js';
 
-// The Verdant Reach is three supplied models standing in one harbour: the city
-// on its quay, the Forest Loner diorama moored off its western seawall, and the
-// Lantern Plaza on its plinth off the eastern quay. This module places them,
-// joins them with jetties, and hands the game a single piece of ground that
-// spans all three.
+// The Verdant Reach is four supplied models standing in one harbour: the city
+// on its quay, the Forest Loner diorama moored off its western seawall, the
+// Lantern Plaza on its plinth off the eastern quay, and the Skibidi Yard's
+// container pier off its south-east corner. This module places them, joins
+// them with jetties, and hands the game a single piece of ground that spans
+// all four.
 export const HARBOUR_LEVEL = -6.65;
 // The crossing west: a boardwalk on the pavement's line, high enough to step
 // over the harbour wall, running out to the island's clearing.
@@ -18,28 +20,31 @@ const JETTY = { z: 11, width: 6, deck: 2.4, quay: -69.5, rise: -75 };
 // no wall, to the rim of the plaza's plinth, which is laid at the same height.
 // The deck stands a hand above both, so neither shows through it.
 const EAST_JETTY = { z: 18, width: 5, quay: 184.5, deck: .55 };
+// The crossing south: level from the open paving at the city's south-east
+// corner, which has no wall either, to the yard's pier, laid at the same height.
+const SOUTH_JETTY = { width: 5, quay: 105, deck: .55 };
 
 export async function createWorld(scene, { lowPower = false } = {}) {
-  const [city, forest, plaza] = await Promise.all([
-    loadCityDistrict({ lowPower }), loadForestDistrict({ lowPower, waterline: HARBOUR_LEVEL }), loadPlazaDistrict({ lowPower }),
+  const [city, forest, plaza, yard] = await Promise.all([
+    loadCityDistrict({ lowPower }), loadForestDistrict({ lowPower, waterline: HARBOUR_LEVEL }), loadPlazaDistrict({ lowPower }), loadYardDistrict({ lowPower }),
   ]);
   const root = new THREE.Group(); root.name = 'The Verdant Reach';
-  root.add(city.root, forest.root, plaza.root);
+  root.add(city.root, forest.root, plaza.root, yard.root);
   // The city model includes canal banks, but no water surface. The level sits
   // inside those banks, below the supplied roads, and out past the seawall it
   // becomes the harbour the island stands in.
   const water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), new THREE.MeshStandardMaterial({ color:'#355a64', roughness:.34, metalness:.25 }));
   water.name = 'Harbour water'; water.rotation.x = -Math.PI/2; water.position.y = HARBOUR_LEVEL; water.receiveShadow = true; root.add(water);
 
-  const jetty = createForestJetty(forest), eastJetty = createPlazaJetty(plaza);
-  root.add(jetty.group, eastJetty.group);
-  const districts = [city.bounds, forest.bounds, plaza.bounds];
+  const jetty = createForestJetty(forest), eastJetty = createPlazaJetty(plaza), southJetty = createYardJetty(yard);
+  root.add(jetty.group, eastJetty.group, southJetty.group);
+  const districts = [city.bounds, forest.bounds, plaza.bounds, yard.bounds];
   const bounds = {
     minX: Math.min(...districts.map(d => d.minX)), maxX: Math.max(...districts.map(d => d.maxX)),
     minZ: Math.min(...districts.map(d => d.minZ)), maxZ: Math.max(...districts.map(d => d.maxZ)),
   };
-  const navigation = createNavigation([city.terrain, forest.terrain, plaza.terrain, jetty.terrain, eastJetty.terrain], bounds,
-    { openings: [jetty.opening, eastJetty.opening], arrival: CITY_ARRIVAL });
+  const navigation = createNavigation([city.terrain, forest.terrain, plaza.terrain, yard.terrain, jetty.terrain, eastJetty.terrain, southJetty.terrain], bounds,
+    { openings: [jetty.opening, eastJetty.opening, southJetty.opening], arrival: CITY_ARRIVAL });
   // The island and the plaza are only worth placing things on if their jetties
   // actually reach them; findWalkable would otherwise quietly drop them back in
   // the city.
@@ -47,6 +52,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   if (!forestReachable) console.warn('The jetty does not reach the island: its shore is unreachable from the city.');
   const plazaReachable = navigation.isWalkable(eastJetty.inland.x, eastJetty.inland.z, 1);
   if (!plazaReachable) console.warn('The east jetty does not reach the plaza: its street is unreachable from the city.');
+  const yardReachable = navigation.isWalkable(southJetty.inland.x, southJetty.inland.z, 1);
+  if (!yardReachable) console.warn('The south jetty does not reach the yard: its pier is unreachable from the city.');
   const streetLights = createStreetLights({ lanterns: city.lanterns, materials: city.materials, heightAt: navigation.getHeight, lights: lowPower ? 2 : 4 });
   root.add(streetLights.group);
 
@@ -57,6 +64,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
     ...(forestReachable ? [{ id:'hollow', name:'The Loner’s Hollow', ...navigation.findWalkable(-118,4,2.2), color:'#9ad07a' }] : []),
     // Before the cathedral's great door, in the market square.
     ...(plazaReachable ? [{ id:'cathedral', name:'Duskbell Cathedral', ...navigation.findWalkable(262,-40,2.2), color:'#ffb35c' }] : []),
+    // In front of the radiation crates, the first thing off the south jetty.
+    ...(yardReachable ? [{ id:'crates', name:'Hazard Crates', ...navigation.findWalkable(151,143,2.2), color:'#f2c14e' }] : []),
   ];
   const markerGeometry=new THREE.OctahedronGeometry(1);
   const ringGeometry=new THREE.TorusGeometry(2,.055,6,48);
@@ -77,8 +86,11 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   const cityShards = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30]];
   const forestShards = [[-96,8],[-105,14],[-118,4],[-125,16]];
   const plazaShards = [[232,18],[268,-28],[272,60],[345,18],[427,62],[480,18]];
-  const shardPositions = [...cityShards, ...(forestReachable ? forestShards : [[-65,-10],[66,-48],[-25,60],[25,48]]), ...(plazaReachable ? plazaShards : [])];
-  const enemyPositions = [[-9,-17],[12,-30],[-17,-38],[28,-24],[-33,-12],[45,-42],...(forestReachable ? [[-107,18]] : []),...(plazaReachable ? [[300,18],[400,18]] : [])];
+  // Round the stacks of the yard, and in the lanes between them.
+  const yardShards = [[170,140],[138,165],[210,150],[176,178],[205,206],[150,212]];
+  // The yard's come last, so progress saved before it existed keeps its indices.
+  const shardPositions = [...cityShards, ...(forestReachable ? forestShards : [[-65,-10],[66,-48],[-25,60],[25,48]]), ...(plazaReachable ? plazaShards : []), ...(yardReachable ? yardShards : [])];
+  const enemyPositions = [[-9,-17],[12,-30],[-17,-38],[28,-24],[-33,-12],[45,-42],...(forestReachable ? [[-107,18]] : []),...(plazaReachable ? [[300,18],[400,18]] : []),...(yardReachable ? [[172,160],[145,195]] : [])];
 
   let daylight=1;
   function setTime(hour) {
@@ -88,7 +100,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   }
   function setQuality(level) {
     const low=level==='low'||level==='performance'||level===0;
-    city.setQuality(low);forest.setQuality(low);plaza.setQuality(low?'low':level);streetLights.setQuality(low);
+    city.setQuality(low);forest.setQuality(low);plaza.setQuality(low?'low':level);yard.setQuality(low);streetLights.setQuality(low);
     for(const marker of markers) marker.light.visible=!low;
   }
   function update(dt,time,position) {
@@ -100,15 +112,15 @@ export async function createWorld(scene, { lowPower = false } = {}) {
     }
   }
   setQuality(lowPower?'low':'high');setTime(15.5);scene.add(root);
-  const diagnostics={ready:true,provider:'astra-world-map',asset:city.asset,assets:[city.asset,forest.asset,plaza.asset],
-    meshCount:city.meshes.length+forest.meshes.length,forestReachable,plazaReachable,shore:jetty.landing,...navigation.diagnostics,
+  const diagnostics={ready:true,provider:'astra-world-map',asset:city.asset,assets:[city.asset,forest.asset,plaza.asset,yard.asset],
+    meshCount:city.meshes.length+forest.meshes.length+yard.meshes.length,forestReachable,plazaReachable,yardReachable,shore:jetty.landing,...navigation.diagnostics,
     get streetLights(){return streetLights.diagnostics;},get plaza(){return plaza.diagnostics;}};
   const within=(d,x,z)=>x>=d.minX && x<=d.maxX && z>=d.minZ && z<=d.maxZ;
   return {
     ...navigation,bounds,landmarks,shardPositions,enemyPositions,update,setTime,setQuality,diagnostics,
     // The ambience and the sky both read the ground the player is standing on.
     biomeAt(x,z) {
-      return within(forest.bounds,x,z) ? 'forest' : within(plaza.bounds,x,z) ? 'plaza' : 'city';
+      return within(forest.bounds,x,z) ? 'forest' : within(plaza.bounds,x,z) ? 'plaza' : within(yard.bounds,x,z) ? 'yard' : 'city';
     },
     // How high a step the ground allows here, where it differs from the default.
     stepHeightAt(x,z) {
@@ -235,5 +247,22 @@ function createPlazaJetty(plaza) {
     group, landing, inland,
     terrain: { layout: group, ground:/jetty-deck|jetty-ramp/, walkable: Infinity },
     opening: corridor(EAST_JETTY, inland.x),
+  };
+}
+
+// A level boardwalk south from the city's south-east corner to the yard's
+// pier, overlapping the paving at one end and the pier at the other. A
+// boardwalk is built along x: laid on the line z = -x and turned a quarter,
+// it runs down z on the line of the landing instead.
+function createYardJetty(yard) {
+  const { landing } = yard, { width, quay, deck } = SOUTH_JETTY;
+  const group = boardwalk('South jetty', { z: -landing.x, width }, [[quay, deck], [landing.z, deck]]);
+  group.rotation.y = -Math.PI / 2;
+  // Past the pier's edge, onto the yard's open floor.
+  const inland = { x: landing.x, z: landing.z + 5 };
+  return {
+    group, landing, inland,
+    terrain: { layout: group, ground:/jetty-deck|jetty-ramp/, walkable: Infinity },
+    opening: { x: landing.x, z: (quay + inland.z) / 2, w: width - 1.2, d: inland.z - quay },
   };
 }

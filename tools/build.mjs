@@ -11,9 +11,9 @@ await mkdir(destination, { recursive: true });
 await prepareVendor();
 
 const runtimeExtensions = new Set(['.html', '.js', '.css', '.glb', '.svg', '.png', '.jpg', '.webp', '.ico']);
-// The diorama and plaza folders also hold the supplied FBX and its loose
-// texture pages, which the game never fetches: ship the converted models alone.
-const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb', 'plaza-night-time/plaza-night.glb', 'plaza-night-time/plaza-night-footprint.glb'];
+// The diorama, plaza and yard folders also hold the supplied model and its
+// loose texture pages, which the game never fetches: ship the converted models alone.
+const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb', 'plaza-night-time/plaza-night.glb', 'plaza-night-time/plaza-night-footprint.glb', 'map-79-void/skibidi-toilet-79.glb'];
 for (const entry of await readdir(root, { withFileTypes: true })) {
   if (['runtime-config.js', 'config.js'].includes(entry.name)) continue;
   if ((entry.isFile() && runtimeExtensions.has(extname(entry.name))) ||

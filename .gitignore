@@ -14,3 +14,7 @@ realistic_female.glb
 # brotli-compressed as plaza-night-time/source/plaza01_night.fbx.br instead.
 plaza-night-time/source/plaza01.zip
 plaza-night-time/source/plaza01/
+
+# The yard's textures flipped for an FBX export: the glTF under source/ carries
+# the same images the right way up, and is what the yard is built from.
+map-79-void/textures/

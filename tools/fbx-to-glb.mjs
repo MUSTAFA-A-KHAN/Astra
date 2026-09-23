@@ -2,8 +2,11 @@
 // GLB, so the game keeps one loader and downloads a few megabytes instead of
 // sixty. Runs the three.js FBX loader and glTF exporter inside headless
 // Chromium, which has the image decoders and the canvas the exporter needs.
+// A supplied glTF goes through the same batching and packing; it names its
+// own textures, so it needs no texture folder, and images it repeats under
+// several names are sent once.
 //
-//   node tools/fbx-to-glb.mjs <source.fbx> <output.glb> [textures/] [materials.json]
+//   node tools/fbx-to-glb.mjs <source.fbx|.gltf> <output.glb> [textures/] [materials.json]
 //   MAX_TEXTURE=2048 INSPECT=1 node tools/fbx-to-glb.mjs …   (report only)
 //   MESHOPT=1 node tools/fbx-to-glb.mjs …   (quantize and meshopt-compress)
 //   CHUNK=32 node tools/fbx-to-glb.mjs …   (tile each batch every 32 source units)
@@ -29,6 +32,7 @@ import { readdir, readFile, rm, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { dirname, extname, relative, resolve, sep } from 'node:path';
 import { createBrotliDecompress } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -57,6 +61,7 @@ const page = `<!doctype html><meta charset="utf-8">
 <script type="module">
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -135,12 +140,13 @@ window.convert = async ({ source, textures, maxTextureSize, inspect, supplied, m
   const report = { missing: [], renamed: [], sourceMeshes: 0, materials: [], batches: [] };
   const manager = new THREE.LoadingManager();
   manager.onError = asset => report.missing.push(asset.split('/').pop());
+  const gltf = /\\.(gltf|glb)$/i.test(source);
   // An asset pack's texture folder rarely matches the paths baked into the FBX
   // character for character; match on the stem instead of importing it untextured.
   const key = name => name.toLowerCase().replace(/[0-9]+/g, '').replace(/[^a-z]/g, '');
   const byKey = new Map(supplied.map(name => [key(name), name]));
   const lower = new Map(supplied.map(name => [name.toLowerCase(), name]));
-  manager.setURLModifier(requested => {
+  if (!gltf) manager.setURLModifier(requested => {
     if (!requested.startsWith(textures)) return requested;
     const name = decodeURIComponent(requested.slice(textures.length));
     if (supplied.includes(name)) return requested;
@@ -156,7 +162,7 @@ window.convert = async ({ source, textures, maxTextureSize, inspect, supplied, m
   const itemStart = manager.itemStart.bind(manager), itemEnd = manager.itemEnd.bind(manager);
   manager.itemStart = asset => { outstanding++; itemStart(asset); };
   manager.itemEnd = asset => { outstanding--; itemEnd(asset); if (outstanding <= 0 && settled) settled(); };
-  const model = await new FBXLoader(manager).setResourcePath(textures).loadAsync(source);
+  const model = gltf ? (await new GLTFLoader(manager).loadAsync(source)).scene : await new FBXLoader(manager).setResourcePath(textures).loadAsync(source);
   await new Promise(done => { settled = done; setTimeout(done, 120000); if (outstanding <= 0) done(); });
   model.updateMatrixWorld(true);
 
@@ -324,6 +330,20 @@ async function patchedLoader() {
   return text;
 }
 
+// A Sketchfab export writes out a copy of a texture for every material that
+// uses it. Point each copy at the first: the loader then shares one texture
+// between those materials, and the exporter writes its image once.
+let sharedImages = 0;
+async function dedupedGltf(file) {
+  const json = JSON.parse(await readFile(file, 'utf8')), first = new Map();
+  for (const image of json.images ?? []) {
+    if (!image.uri || image.uri.startsWith('data:')) continue;
+    const digest = createHash('sha1').update(await readFile(resolve(dirname(file), decodeURIComponent(image.uri)))).digest('hex');
+    if (first.has(digest)) { image.uri = first.get(digest); sharedImages++; } else first.set(digest, image.uri);
+  }
+  return JSON.stringify(json);
+}
+
 const server = createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -337,6 +357,7 @@ const server = createServer(async (request, response) => {
     const file = resolve(root, '.' + pathname);
     if (!file.startsWith(root + sep)) throw new Error('Forbidden');
     const info = await stat(file);
+    if (file === source && extname(file) === '.gltf') { response.writeHead(200, { 'Content-Type': 'model/gltf+json' }).end(await dedupedGltf(file)); return; }
     if (extname(file) === '.br') {
       response.writeHead(200, { 'Content-Type': 'application/octet-stream' });
       await pipeline(createReadStream(file), createBrotliDecompress(), response); return;
@@ -371,6 +392,7 @@ try {
       if (packed.status !== 0) throw new Error('gltfpack could not compress the ' + kind);
     }
   }
-  if (!inspect) report.bytes = Object.fromEntries(await Promise.all(Object.entries(outputs).map(async ([kind, path]) => [relative(root, path), (await stat(path)).size])));
+  if (sharedImages) report.sharedImages = sharedImages;
+  if (!inspect) report.bytes =Object.fromEntries(await Promise.all(Object.entries(outputs).map(async ([kind, path]) => [relative(root, path), (await stat(path)).size])));
   console.log(JSON.stringify(report, null, 1));
 } finally { await browser.close(); server.close(); }
