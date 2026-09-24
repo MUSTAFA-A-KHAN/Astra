@@ -56,13 +56,40 @@ async function bootPlaza(page) {
   return errors;
 }
 
-test('plaza streets and upper floors preserve the hero floor and local night lighting', async ({ page }) => {
+test('plaza stairs connect walkable upper floors without lifting the street below', async ({ page }) => {
   const errors = await bootPlaza(page);
-  const street = await page.evaluate(() => window.__PLAZA_TEST__.place([13, 19.5, 70]));
-  expect(street.position.y).toBeCloseTo(.45, 1);
+  const { PLAZA_TRANSFORM: t } = await import('../plaza-world.js');
+  const street = await page.evaluate(() => window.__PLAZA_TEST__.place([13, 19, 70]));
+  expect(street.position.y).toBeCloseTo(t.y + 19 * t.scale, 1);
   expect(street.locomotion.grounded).toBe(true);
   expect(street.camera.position.y).toBeLessThan(15);
-  // Stair traversal and upper-storey fixtures are checked below at coordinates
-  // from the supplied model, rather than an artificial staircase.
+  // Walk the house's actual stairs and cross each room to the next flight.
+  // Only the initial position is placed; every floor above must be reached on foot.
+  async function walkTo(local) {
+    const result = await page.evaluate(local => window.__PLAZA_TEST__.walk(local), local);
+    expect(result.distance, `Could not reach ${local}`).toBeLessThan(.2);
+    expect(result.position.y).toBeCloseTo(t.y + local[1] * t.scale, 1);
+    expect(result.locomotion.grounded).toBe(true);
+  }
+  // This hollow flight previously hit an invisible water barrier partway up.
+  await page.evaluate(() => window.__PLAZA_TEST__.place([24, 20, -53.5]));
+  await walkTo([31, 26, -53.5]);
+  await walkTo([24, 20, -53.5]);
+  await page.evaluate(() => window.__PLAZA_TEST__.place([30.5, 20, 39]));
+  for (const height of [25, 30]) {
+    await walkTo([30.5, height, 32]);
+    await walkTo([28, height, 32]);
+    await walkTo([28, height, 40]);
+    await walkTo([30.5, height, 40]);
+  }
+  // Return across the room and down both flights using the same controller.
+  for (const height of [30, 25]) {
+    await walkTo([28, height, 40]);
+    await walkTo([28, height, 32]);
+    await walkTo([30.5, height, 32]);
+    await walkTo([30.5, height - 5, 39]);
+  }
+  const downstairs = await page.evaluate(() => window.__PLAZA_TEST__.place([28, 20, 32]));
+  expect(downstairs.position.y).toBeCloseTo(t.y + 20 * t.scale, 1);
   expect(errors).toEqual([]);
 });

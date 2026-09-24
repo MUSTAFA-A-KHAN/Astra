@@ -146,11 +146,18 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
       if (Number.isFinite(y) && c.bottom<y+3.25 && c.top>y+.95) layeredBlocked[iz*width+ix]=1;
     }
   }
-  // Seal open water and the irregular edge of the models. These cells never
-  // obstruct the camera, and prevent walking off the supplied ground.
+  // Seal open water and the irregular edge of the models. An elevated floor
+  // can be the only ground beneath a stair or landing: the street-height
+  // placement limit must not turn that floor into an invisible wall.
   for(let iz=0;iz<depth;iz++) for(let ix=0;ix<width;ix++) {
     const i=iz*width+ix;
-    if(!tops[i] && sampleHeight(minX+(ix+.5)*cellSize,minZ+(iz+.5)*cellSize)<-1.1) tops[i]=-1;
+    if(tops[i]) continue;
+    const x=minX+(ix+.5)*cellSize,z=minZ+(iz+.5)*cellSize;
+    if(sampleHeight(x,z)<-1.1) {
+      if(sampleHeight(x,z,Infinity)<-1.1) tops[i]=-1;
+      // Keep street-level spawns and placements out of upper-only cells.
+      else layeredBlocked[i]=1;
+    }
   }
   // A crossing built between districts decides its own way through: the deck
   // of the jetty is the floor here, not the harbour wall it steps over. Each
