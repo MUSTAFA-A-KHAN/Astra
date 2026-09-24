@@ -19,3 +19,7 @@ plaza-night-time/source/plaza01/
 # the same images the right way up, and is what the yard is built from.
 map-79-void/textures/
 blender-output/*
+
+# The Sketchfab originals of assets/story/, repacked from here by
+# tools/pack-story-assets.mjs. The whale alone is over the 25 MB limit.
+3D-model-glb/
