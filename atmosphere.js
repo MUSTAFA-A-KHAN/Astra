@@ -1,10 +1,14 @@
 import * as THREE from 'three';
+import { DRAW_DISTANCE, FOG_START } from './streaming.js';
 
+// The fog is complete at the draw distance, so nothing is seen to leave the
+// world: it has faded into the horizon before the streamer puts it away.
+const fog = level => ({ fogNear: DRAW_DISTANCE[level] * FOG_START, fogFar: DRAW_DISTANCE[level] });
 const qualityProfiles = {
-  low: { clouds: 0, fogNear: 120, fogFar: 380, shadow: 34 },
-  balanced: { clouds: .55, fogNear: 150, fogFar: 550, shadow: 48 },
-  high: { clouds: .8, fogNear: 170, fogFar: 700, shadow: 65 },
-  ultra: { clouds: 1, fogNear: 190, fogFar: 850, shadow: 82 },
+  low: { clouds: 0, ...fog('low'), shadow: 34 },
+  balanced: { clouds: .55, ...fog('balanced'), shadow: 48 },
+  high: { clouds: .8, ...fog('high'), shadow: 65 },
+  ultra: { clouds: 1, ...fog('ultra'), shadow: 82 },
 };
 
 /** A tilted east-to-west orbit with sunrise at 06:00 and sunset at 18:00. */
@@ -93,7 +97,7 @@ export function createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lo
   moonLight.name = 'Moonlight';
   moonLight.shadow.mapSize.copy(sun.shadow.mapSize);
   scene.add(moonLight, moonLight.target);
-  if (!scene.fog) scene.fog = new THREE.Fog(dayHorizon, 170, 700);
+  if (!scene.fog) scene.fog = new THREE.Fog(dayHorizon, qualityProfiles[quality].fogNear, qualityProfiles[quality].fogFar);
   sun.shadow.bias = -.00015; sun.shadow.normalBias = .045;
   sun.shadow.camera.near = .5; sun.shadow.camera.far = 280;
   moonLight.shadow.bias = sun.shadow.bias; moonLight.shadow.normalBias = sun.shadow.normalBias;

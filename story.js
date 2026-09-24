@@ -126,10 +126,14 @@ export function createStory({ world, activities, collision }) {
   for (const side of [-1, 1]) collide(`story-notice-${side}`, { ...along(places.notice, side * .95 * M), r: .25 * M });
 
   let restored = false, departed = false, talking = null;
-  const loaded = {}, tweens = [], mixers = [];
-  const add = (name, object, place) => {
+  const loaded = {}, tweens = [];
+  // Each model stands in a holder of its own: the world shows and hides the
+  // holder by the player's distance, and the story the model inside it.
+  const add = (name, object, place, { kind = 'props', bounds } = {}) => {
     object.name = name; object.position.set(place.x, place.y, place.z); object.rotation.y = place.facing || 0;
-    root.add(object); loaded[name] = object; return object;
+    const holder = new THREE.Group(); holder.name = `${name} holder`; holder.add(object); root.add(holder);
+    world.streaming.add(holder, { kind, bounds });
+    loaded[name] = object; return object;
   };
   const tween = (duration, step) => new Promise(resolve => tweens.push({ duration, t: 0, step, resolve }));
   const ease = k => k * k * (3 - 2 * k);
@@ -153,7 +157,6 @@ export function createStory({ world, activities, collision }) {
       const model = fit(gltf.scene, size, measure, options.measure);
       shadows(model, options.castShadow !== false);
       const mixer = gltf.animations.length ? new THREE.AnimationMixer(gltf.scene) : null;
-      if (mixer) mixers.push(mixer);
       return { model, gltf, mixer, clips: gltf.animations };
     });
   }
@@ -196,7 +199,7 @@ export function createStory({ world, activities, collision }) {
       place('tobin', Promise.all([load('harbour-villager', 1.78 * M, 'height'), fetch(new URL('harbour-villager-clips.json', ASSETS)).then(r => r.json())]).then(([part, clips]) => {
         // His own clip is a single frame of T-pose; these replace it.
         part.clips = clips.map(clip => THREE.AnimationClip.parse(clip));
-        if (!part.mixer) { part.mixer = new THREE.AnimationMixer(part.gltf.scene); mixers.push(part.mixer); }
+        part.mixer ??= new THREE.AnimationMixer(part.gltf.scene);
         return part;
       }), part => {
         add('Tobin', part.model, places.tobin);
@@ -220,7 +223,8 @@ export function createStory({ world, activities, collision }) {
         for (const child of activities.campfire.group.children) if (child.isMesh) child.visible = false;
       }),
       place('tidewarden', load('harbour-mythic-whale', 20 * M, 'length'), part => {
-        add('The Tidewarden', part.model, { x: TIDEWARDEN.x, y: HARBOUR_LEVEL, z: TIDEWARDEN.z }); loop(part);
+        // Streamed by the whole of the water it circles, as far out as the city.
+        add('The Tidewarden', part.model, { x: TIDEWARDEN.x, y: HARBOUR_LEVEL, z: TIDEWARDEN.z }, { kind: 'scenery', bounds: { x: TIDEWARDEN.x, z: TIDEWARDEN.z, radius: TIDEWARDEN.radius + 10 * M } }); loop(part);
         shadows(part.model, false);
       }),
     ];
@@ -333,7 +337,8 @@ export function createStory({ world, activities, collision }) {
   const turn = (object, target, dt, rate = 5) => { object.rotation.y += Math.atan2(Math.sin(target - object.rotation.y), Math.cos(target - object.rotation.y)) * (1 - Math.exp(-rate * dt)); };
 
   function update(dt, time, player, step) {
-    for (const mixer of mixers) mixer.update(dt);
+    // Nobody out of sight is animated: they pick up where they left off.
+    for (const part of Object.values(parts)) if (part.mixer && part.model.parent?.visible) part.mixer.update(dt);
     for (let i = tweens.length - 1; i >= 0; i--) {
       const t = tweens[i]; t.t = Math.min(t.duration, t.t + dt); t.step(t.t / t.duration);
       if (t.t >= t.duration) { tweens.splice(i, 1); t.resolve(); }
@@ -377,7 +382,7 @@ export function createStory({ world, activities, collision }) {
     },
     dispose() {
       for (const id of colliderIds) collision.remove(id);
-      for (const mixer of mixers) mixer.stopAllAction();
+      for (const part of Object.values(parts)) part.mixer?.stopAllAction();
       root.traverse(object => { object.geometry?.dispose(); for (const material of [object.material].flat()) material?.dispose?.(); });
       root.removeFromParent();
     },

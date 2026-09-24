@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { chunkMeshes } from './streaming.js';
 
 export const CITY_ASSET = 'City_Set_-_Proto_Series/City_Set_-_Proto_Series.gltf';
 // Source geometry uses Y-up centimetres. Its principal road intersection is
@@ -66,8 +67,15 @@ export async function loadCityDistrict({ lowPower = false } = {}) {
   layout.updateMatrixWorld(true);
   const floorBox=new THREE.Box3().setFromObject(floor);
   const bounds={minX:floorBox.min.x+.75,maxX:floorBox.max.x-.75,minZ:floorBox.min.z+.75,maxZ:floorBox.max.z-.75};
+  const lanterns=findLanterns(layout);
+  // Every batch spans the whole city, so the renderer could skip none of it.
+  // Cut into chunks, only the streets around the player are drawn. A chunk
+  // keeps its batch's name, so the navigator reads it as it read the batch.
+  const role=mesh=>CITY_TERRAIN.ground.test(mesh.name)?'ground':CITY_TERRAIN.solid.test(mesh.name)?'solid':'scenery';
+  const chunks=chunkMeshes(layout,meshes,{key:mesh=>`${mesh.material.uuid}|${role(mesh)}`});
+  meshes.splice(0,meshes.length,...chunks);
   return {
-    root, layout, bounds, meshes, materials:[...materials], lanterns:findLanterns(layout),
+    root, layout, bounds, meshes, materials:[...materials], lanterns,
     terrain:{...CITY_TERRAIN,layout},
     asset:CITY_ASSET,
     setTime(daylight) {

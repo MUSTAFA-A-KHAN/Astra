@@ -99,6 +99,9 @@ export async function createGameplayWorld(scene, world, collision) {
   addCollider('market-stall', { x: market.position.x, z: market.position.z, w: 3, d: 1.4, bottom: market.position.y, top: market.position.y + 3 });
   const forge = at(reserveSpot('smithy', camp.x - 4, camp.z, 1.6)); forge.name = 'Camp smithy';
   box(forge, [1.5, .55, 1], [0, .4, 0], stone); box(forge, [1.8, .25, .7], [0, 1, 0], iron);
+  // What stands still is put away with the scenery once the player is far off.
+  // The fire holds a light, and the horse and the crates move, so they stay.
+  for (const prop of [platform, basin, market, forge]) world.streaming.add(prop, { kind: 'props' });
   addCollider('smithy-anvil', { x: forge.position.x, z: forge.position.z, w: 1.8, d: 1, bottom: forge.position.y, top: forge.position.y + 1.125 });
   const fire = at(firePoint);
   const flame = new THREE.Mesh(new THREE.ConeGeometry(.5, 1.2, 7), new THREE.MeshBasicMaterial({ color: '#ffb254', transparent: true, opacity: .85 }));

@@ -26,9 +26,6 @@ export const PLAZA_TRANSFORM = { scale:1.8, rotation:-Math.PI/2, x:360, y:-34.65
 export const PLAZA_STEP = .95;
 // On the rim at the end of the market street, in blocks: the crossing lands here.
 const STREET_END = { x:13, z:87.6 };
-// How far from the player a tile is still drawn, by quality. The fog has
-// swallowed it long before the camera's far plane on the higher settings.
-const RANGE = { low:180, balanced:260, high:Infinity };
 
 // Compact rectangles extracted offline from every storey of the supplied model.
 // Floor heights are kept separately, so a roof never replaces the room below it.
@@ -88,7 +85,7 @@ export async function loadPlazaDistrict({ lowPower = false } = {}) {
   const bounds = { minX:box.min.x, maxX:box.max.x, minZ:box.min.z, maxZ:box.max.z };
   const landing = new THREE.Vector3(STREET_END.x, 19.5, STREET_END.z).applyMatrix4(outline.matrixWorld);
 
-  const tiles = [], materials = new Set(), nearest = new THREE.Vector2(), player = new THREE.Vector2();
+  const tiles = [], materials = new Set();
   let daylight = 1, level = lowPower ? 'balanced' : 'high', state = 'waiting', loading = null;
   function applyTime() {
     // The lightmap is the street as it looks at night, lamps and all. It is
@@ -96,7 +93,7 @@ export async function loadPlazaDistrict({ lowPower = false } = {}) {
     for (const material of materials) if (material.emissiveMap) material.emissiveIntensity = .1 + (1 - daylight) * .9;
   }
   function applyQuality() {
-    for (const tile of tiles) tile.mesh.castShadow = level === 'high';
+    for (const tile of tiles) tile.castShadow = level === 'high';
     for (const material of materials) if (material.map) material.map.anisotropy = level === 'low' ? 1 : 4;
   }
   return {
@@ -112,8 +109,7 @@ export async function loadPlazaDistrict({ lowPower = false } = {}) {
           if (!mesh.isMesh) return;
           mesh.receiveShadow = true;
           materials.add(mesh.material);
-          const extent = new THREE.Box3().setFromObject(mesh);
-          tiles.push({ mesh, min:new THREE.Vector2(extent.min.x, extent.min.z), max:new THREE.Vector2(extent.max.x, extent.max.z) });
+          tiles.push(mesh);
         });
         applyTime(); applyQuality();
         await prepare?.(model);
@@ -124,15 +120,9 @@ export async function loadPlazaDistrict({ lowPower = false } = {}) {
       return loading;
     },
     setTime(value) { daylight = value; applyTime(); },
-    setQuality(value) { level = RANGE[value] !== undefined ? value : 'high'; applyQuality(); },
-    update(position) {
-      if (!position) return;
-      const range = RANGE[level];
-      player.set(position.x, position.z);
-      for (const tile of tiles) tile.mesh.visible = nearest.copy(player).clamp(tile.min, tile.max).distanceTo(player) < range;
-    },
+    setQuality(value) { level = ['low', 'balanced', 'high'].includes(value) ? value : 'high'; applyQuality(); },
     get diagnostics() {
-      return { state, tiles:tiles.length, drawn:tiles.filter(tile => tile.mesh.visible).length };
+      return { state, tiles:tiles.length, drawn:tiles.filter(tile => tile.visible).length };
     },
   };
 }

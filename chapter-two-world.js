@@ -30,7 +30,8 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
     const shape = kind === 'bell' ? new THREE.CylinderGeometry(.3, .9, 1.3, 12, 1, true) : kind === 'valve' ? new THREE.TorusGeometry(.7, .13, 6, 16) : new THREE.OctahedronGeometry(.6);
     const icon = new THREE.Mesh(shape, material); icon.position.y = 1.7; group.add(icon);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.25, .045, 4, 32), material); ring.rotation.x = -Math.PI / 2; ring.position.y = .06; group.add(ring);
-    root.add(group); props[id] = { group, icon, material }; return spot;
+    root.add(group); world.streaming?.add(group, { kind: 'props' });
+    props[id] = { group, icon, material }; return spot;
   }
   // Along the island clearing, then round the container lanes of Map 79's
   // yard: the bell verse just off the south bridge, a bell in each far corner,

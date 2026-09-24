@@ -751,6 +751,8 @@ function updatePlayer(dt){
     }
     e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);
     const dx=position.x-e.group.position.x,dz=position.z-e.group.position.z,d=Math.hypot(dx,dz);
+    // Far off, a wisp is neither drawn nor animated until the player comes back.
+    e.group.visible=d<world.streaming.reach('props');if(!e.group.visible)continue;
     const visible=d<30&&collision.cameraFraction(new THREE.Vector3(e.group.position.x,e.group.position.y+1.7,e.group.position.z),new THREE.Vector3(position.x,position.y+1.7,position.z),.1)>.98;
     if(visible)nearestThreat=Math.min(nearestThreat,d);
     const chasing=visible&&d<18&&d>1.9;

@@ -6,6 +6,7 @@ import { PLAZA_STEP, PLAZA_TRANSFORM, loadPlazaDistrict } from './plaza-world.js
 import { loadYardDistrict } from './skibidi-world.js';
 import { createStreetLights } from './street-lights.js';
 import { createPlazaLights } from './plaza-lighting.js';
+import { createStreamer } from './streaming.js';
 
 // The Verdant Reach is four supplied models standing in one harbour: the city
 // on its quay, the Forest Loner diorama moored off its western seawall, the
@@ -59,6 +60,12 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   if (!plazaReachable) console.warn('The east jetty does not reach the plaza: its street is unreachable from the city.');
   const yardReachable = navigation.isWalkable(southJetty.inland.x, southJetty.inland.z, 1);
   if (!yardReachable) console.warn('The south jetty does not reach the yard: its pier is unreachable from the city.');
+  // Only what is near the player is drawn: the city chunk by chunk, the other
+  // districts mesh by mesh, each crossing whole. The plaza's tiles join them
+  // when its model arrives, and the story's people and props as they land.
+  const streaming = createStreamer({ quality: lowPower ? 'low' : 'high' });
+  for (const mesh of [...city.meshes, ...forest.meshes, ...yard.meshes]) streaming.add(mesh);
+  for (const crossing of [jetty, eastJetty, southJetty]) streaming.add(crossing.group);
   const streetLights = createStreetLights({ lanterns: city.lanterns, materials: city.materials, heightAt: navigation.getHeight, lights: lowPower ? 2 : 4 });
   const plazaLights = createPlazaLights({ transform: PLAZA_TRANSFORM });
   root.add(streetLights.group, plazaLights.group);
@@ -108,10 +115,11 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   function setQuality(level) {
     const low=level==='low'||level==='performance'||level===0;
     city.setQuality(low);forest.setQuality(low);plaza.setQuality(low?'low':level);yard.setQuality(low);streetLights.setQuality(low);plazaLights.setQuality(low?'low':level);
+    streaming.setQuality(low?'low':level);
     for(const marker of markers) marker.light.visible=!low;
   }
   function update(dt,time,position) {
-    streetLights.update(position);plaza.update(position);plazaLights.update(position);
+    streaming.update(position);streetLights.update(position);plazaLights.update(position);
     for(let i=0;i<markers.length;i++) {
       const marker=markers[i];marker.crystal.rotation.y=time*.35+i;
       marker.crystal.position.y=marker.baseHeight+Math.sin(time*1.2+i)*.16;
@@ -121,10 +129,10 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   setQuality(lowPower?'low':'high');setTime(15.5);scene.add(root);
   const diagnostics={ready:true,provider:'astra-world-map',asset:city.asset,assets:[city.asset,forest.asset,plaza.asset,yard.asset],
     meshCount:city.meshes.length+forest.meshes.length+yard.meshes.length,forestReachable,plazaReachable,yardReachable,shore:jetty.landing,...navigation.diagnostics,
-    get streetLights(){return streetLights.diagnostics;},get plaza(){return plaza.diagnostics;},get plazaLights(){return plazaLights.diagnostics;}};
+    get streetLights(){return streetLights.diagnostics;},get plaza(){return plaza.diagnostics;},get plazaLights(){return plazaLights.diagnostics;},get streaming(){return streaming.diagnostics;}};
   const within=(d,x,z)=>x>=d.minX && x<=d.maxX && z>=d.minZ && z<=d.maxZ;
   return {
-    ...navigation,bounds,landmarks,shardPositions,enemyPositions,update,setTime,setQuality,diagnostics,
+    ...navigation,bounds,landmarks,shardPositions,enemyPositions,update,setTime,setQuality,diagnostics,streaming,
     // The ambience and the sky both read the ground the player is standing on.
     biomeAt(x,z) {
       return within(forest.bounds,x,z) ? 'forest' : within(plaza.bounds,x,z) ? 'plaza' : within(yard.bounds,x,z) ? 'yard' : 'city';
@@ -145,6 +153,7 @@ export async function createWorld(scene, { lowPower = false } = {}) {
       return plaza.load(async model => {
         plazaLights.excludeScenery(model);
         await prepare?.(model);
+        model.traverse(tile => { if (tile.isMesh) streaming.add(tile); });
       });
     },
     dispose() {
