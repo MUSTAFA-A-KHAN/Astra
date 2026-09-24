@@ -9,6 +9,8 @@ import { createGameplayWorld } from './gameplay-world.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
 import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
+import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
+import { createChapterTwo } from './chapter-two-world.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -20,6 +22,10 @@ function readSave() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) ||
 const saved = readSave();
 const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v, min, max) : fallback;
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0) : []), story: readStory(saved) };
+progress.chapterTwo = readChapterTwo(saved);
+const chapterTwoUnlocked = () => progress.restored && progress.story.farewell;
+const currentChapter = () => chapterTwoUnlocked() ? CHAPTER_TWO : CHAPTER;
+const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE };
 // Where the player has put each on-screen control, as a fraction of
 // the viewport: a phone that rotates, or a window that resizes, keeps
 // the thumb rest in the same corner instead of the same pixel. An
@@ -60,7 +66,7 @@ let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, vict
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, hero: heroMeta.id })); dirtySave = false; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, hero: heroMeta.id })); dirtySave = false; }
   catch { /* Private browsing and full storage must never stop play. */ }
 }
 // A toast marked `after` waits for the one on screen instead of replacing it:
@@ -132,7 +138,14 @@ const activities = await createGameplayWorld(scene, world, collision);
 // starts; who stands where is known already, so they can be spoken to at once.
 const story = createStory({ world, activities, collision });
 scene.add(story.root); story.setState({ restored: progress.restored });
-const currentStep = () => STEPS[storyStep(progress)];
+const currentStep = () => chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
+const questIndex = () => chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
+const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterTwo, storyPlaces: story.places, isUnlocked: chapterTwoUnlocked,
+  onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); if(flag==='warden'){victoryTime=10;audio.play('victory');} },
+  onMessage: message => toast(message),
+  onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
+});
+scene.add(chapterTwo.root);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
@@ -235,18 +248,28 @@ function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=tr
 $('quest-eyebrow').textContent=`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`;
 // The step the tracker last showed: when the story moves on, the new step is
 // announced once, and the tracker flashes to draw the eye to it.
-let shownStep=storyStep(progress);
+let shownStep=questIndex();
 function updateHUD(){
   $('health-fill').style.width=`${health}%`;$('health-meter').setAttribute('aria-valuenow',Math.ceil(health));$('health-label').textContent=`${Math.ceil(health)} / 100`;
   $('xp-fill').style.width=`${progress.xp%150/150*100}%`;$('xp-meter').setAttribute('aria-valuenow',Math.round(progress.xp%150/150*100));$('level-label').textContent=`LV. ${level()}`;$('shards-label').textContent=`${progress.collected.size} shards`;
-  const index=storyStep(progress),step=STEPS[index],complete=step.id==='complete';
+  const index=questIndex(),step=currentStep(),complete=step.id==='complete',chapter=currentChapter();
+  $('quest-eyebrow').textContent=`${chapter.eyebrow} · ${chapter.title.toUpperCase()}`;
+  const card=document.querySelector('.journey-card');
+  if(chapterTwoUnlocked()&&card.dataset.chapter!=='two'){
+    card.dataset.chapter='two';card.querySelector('.eyebrow').textContent='CHAPTER TWO';
+    card.querySelector('h2').textContent=CHAPTER_TWO.title;
+    card.querySelector('p').textContent='A stolen voice. Three ancient locks. Follow the tide across four maps and face the Hollow Warden.';
+    card.querySelector('.location-tag').textContent='CITY · ISLET · PLAZA · YARD';
+  }
   const value=step.goal?Math.min(step.goal,step.count(progress)):complete?1:0;
   $('quest-title').textContent=step.title;$('quest-description').textContent=step.description;
+  const status=$('chapter-status');status.hidden=!chapterTwoUnlocked()||complete;
+  if(!status.hidden){const goal=chapterTwo.objective(),distance=goal?Math.round(Math.hypot(goal.x-position.x,goal.z-position.z)):0;status.textContent=chapterTwo.status||`${step.where} · ${distance} paces · follow the gold map marker`;}
   $('quest-count').textContent=step.goal?`${value} / ${step.goal}`:complete?'COMPLETE':`◇ ${step.where}`;$('quest-fill').style.width=`${step.goal?value/step.goal*100:complete?100:0}%`;
   // Held back through the finale, so it lands after the keeper has gone.
   if(index!==shownStep&&!finale){
     shownStep=index;const tracker=document.querySelector('.quest-tracker');tracker.classList.remove('updated');void tracker.offsetWidth;tracker.classList.add('updated');
-    toast(complete?`${CHAPTER.title} · Chapter complete`:`New task · ${step.title}`,{after:true});
+    toast(complete?`${chapter.title} · Chapter complete`:`New task · ${step.title}`,{after:true});
   }
 }
 function attack(special=false){
@@ -256,12 +279,12 @@ function attack(special=false){
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
   const range=special?heroMeta.range+5:heroMeta.range,damage=(special?heroMeta.damage*2:heroMeta.damage)+(level()-1)*3;
   let nearest=null,best=range;
-  for(const e of enemies){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
+  for(const e of [...enemies,...chapterTwo.combatants]){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
   if(lockTarget?.alive && position.distanceTo(lockTarget.group.position)<range)nearest=lockTarget;
   if(aiming&&!special&&nearest){const dx=nearest.group.position.x-position.x,dz=nearest.group.position.z-position.z;if((-Math.sin(yaw)*dx-Math.cos(yaw)*dz)/Math.max(.01,Math.hypot(dx,dz))<.82)nearest=null;}
   if(nearest && (Math.abs(nearest.group.position.y-position.y)>4 || collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(nearest.group.position.x,nearest.group.position.y+1.8,nearest.group.position.z),.1)<.98))nearest=null;
   if(nearest){avatar.rotation.y=Math.atan2(nearest.group.position.x-position.x,nearest.group.position.z-position.z);}
-  const targets=special?enemies.filter(e=>e.alive&&Math.abs(e.group.position.y-position.y)<4&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98):nearest?[nearest]:[];
+  const targets=special?enemies.filter(e=>e.alive&&Math.abs(e.group.position.y-position.y)<4&&Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z)<range&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98):nearest&&enemies.includes(nearest)?[nearest]:[];
   for(const e of targets){
     e.hp-=damage;e.hit=.3;audio.play('hit',{position:e.group.position,volume:.6});
     if(e.hp<=0){
@@ -273,6 +296,8 @@ function attack(special=false){
       if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;}
     }
   }
+  const trialHit=chapterTwo.attack({position,range,damage,special,target:nearest,lineOfSight:(a,b)=>collision.cameraFraction(new THREE.Vector3(a.x,a.y+1.8,a.z),new THREE.Vector3(b.x,b.y+1.8,b.z),.1)>.98});
+  if(trialHit.hits){audio.play('hit',{position,volume:.6});showPulse(position.x,position.z,range,heroMeta.color);}
   if(special){showPulse(position.x,position.z,range,heroMeta.color);if(heroMeta.id==='warden'){health=Math.min(100,health+20);updateHUD();}}
   else if(nearest){targetPoint.copy(nearest.group.position);direction.copy(targetPoint).sub(position).add(new THREE.Vector3(0,-1.6,0));bolt.position.copy(position).add(new THREE.Vector3(0,1.6,0)).addScaledVector(direction,.5);bolt.scale.set(1,direction.length(),1);bolt.quaternion.setFromUnitVectors(up,direction.normalize());bolt.material.color.set(heroMeta.color);boltAge=0;}
   else showPulse(position.x,position.z,2.5,heroMeta.color);
@@ -284,13 +309,19 @@ function nearbyInteraction(){
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
   const ladder=activities.climbables.find(c=>Math.hypot(position.x-c.x,position.z-c.z)<(c.r||1.8)&&position.y<c.top+.5);
   if(ladder)return {type:'climb',label:'Climb lookout · forward / back',ladder};
-  if(!finale){const person=story.nearby(position,currentStep().id);if(person)return person;}
+  if(!finale){const trial=chapterTwo.nearby(position);if(trial)return trial;const person=story.nearby(position,STEPS[storyStep(progress)].id);if(person)return person;}
   if(activities.crates.some(c=>position.distanceTo(c.position)<2.8))return {type:'push',label:'Push supply crate'};
   return null;
 }
 function interact(){
   if(screen!=='game'||dialog.open||chat)return;
   const action=nearbyInteraction();if(!action)return;
+  if(action.type==='chapterTwo'){
+    if(action.id===closed.person&&performance.now()-closed.at<400)return;
+    const result=chapterTwo.interact(action);
+    if(result?.person){const entry=chapterTwoConversation(result.person,progress.chapterTwo);if(entry)begin(result.person,entry.lines,()=>heardChapterTwo(entry));}
+    sound();updateHUD();return;
+  }
   // The press that closes a conversation is not also the one that opens it again.
   if(action.type==='story'){if(action.person!==closed.person||performance.now()-closed.at>400)talk(action.person);return;}
   if(action.type==='mount'){
@@ -316,19 +347,19 @@ function interact(){
  */
 let chat=null,finale=false,closed={person:null,at:0};
 function talk(person){
-  const entry=conversation(person,currentStep().id);if(!entry)return;
+  const entry=conversation(person,STEPS[storyStep(progress)].id);if(!entry)return;
   begin(person,entry.lines,()=>heard(entry));
 }
 function begin(person,lines,onEnd){
-  const place=story.places[person]||story.places.maren;
+  const place=chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
   avatar.rotation.y=Math.atan2(dx,dz);lockTarget=null;aiming=cinematic=false;resetInput();syncCameraControls();
   story.talking=person;document.body.classList.add('conversing');$('conversation').hidden=false;sound();showLine();
 }
 function showLine(){
-  const [who,text]=chat.lines[chat.index],host=PEOPLE[chat.person],reading=!host.title;
-  const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?PEOPLE[who]:reading?host:null;
+  const [who,text]=chat.lines[chat.index],host=speakers[chat.person],reading=!host.title;
+  const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?speakers[who]:reading?host:null;
   $('conversation').classList.toggle('narration',!who);
   $('conversation').style.setProperty('--speaker',speaker?.color||'var(--gold)');
   $('conversation-name').textContent=speaker?.name||'';$('conversation-title').textContent=speaker?.title||'';
@@ -357,6 +388,13 @@ function heard(entry){
     if(entry.sets==='farewell'){gainXP(100);victoryTime=8;audio.play('victory');}
     else if(entry.sets!=='notice')gainXP(40);
   }
+  updateHUD();
+}
+function heardChapterTwo(entry){
+  if(!chapterTwoUnlocked()||!entry.sets||progress.chapterTwo[entry.sets])return;
+  progress.chapterTwo[entry.sets]=true;
+  gainXP(entry.sets==='complete'?300:50);save();
+  if(entry.sets==='complete'){victoryTime=12;audio.play('victory');showPulse(story.places.maren.x,story.places.maren.z,24,'#c6fff0');toast('The Drowned Meridian · Chapter complete · +300 experience');}
   updateHUD();
 }
 // The chapter's end: the light goes into the well, the Hart comes, and the
@@ -423,7 +461,7 @@ function toggleLock(){
   if(screen!=='game'||dialog.open||chat)return;
   if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
   else{
-    lockTarget=enemies.filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
+    lockTarget=[...enemies,...chapterTwo.combatants].filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
     if(!lockTarget)toast('No visible target within range.');
   }
   aiming=cinematic=false;syncCameraControls();
@@ -642,7 +680,7 @@ $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventL
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
 function openMenu(type){
-  resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
+  resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${currentChapter().eyebrow} · ${currentChapter().title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
     content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
@@ -650,9 +688,16 @@ function openMenu(type){
     for(const channel of ['master','effects','ambience','music'])$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
-    // What has happened so far and what is asked now; what lies ahead stays unwritten.
-    const index=storyStep(progress),last=STEPS.length-1;
-    content.innerHTML=`<p class="dialog-copy">${INTRO}</p>`+STEPS.slice(0,index+1).map((step,i)=>{const done=i<index;return `<div class="journal-entry"><span>${done?'✓':'◇'}</span><div><h3>${step.title}</h3><p>${done?step.recap:step.description}</p>${!done&&step.goal?`<div class="journal-reward">${Math.min(step.goal,step.count(progress))} / ${step.goal}</div>`:!done&&step.where?`<div class="journal-reward">◇ ${step.where}</div>`:''}</div></div>`;}).join('')+(index<last?'<p class="dialog-copy">More of the story waits ahead.</p>':'')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows the story’s next step as a gold diamond, shards as gold dots, wisps in violet, and you in ivory.</p>`;
+    const second=chapterTwoUnlocked(),steps=second?CHAPTER_TWO_STEPS:STEPS,index=second?steps.indexOf(currentStep()):storyStep(progress);
+    const entries=(list,at)=>list.slice(0,at+1).map((step,i)=>{
+      const done=i<at,detail=done?step.recap:step.description;
+      return '<div class="journal-entry"><span>'+ (done?'✓':'◇') +'</span><div><h3>'+step.title+'</h3><p>'+detail+'</p>'+(!done&&step.goal?'<div class="journal-reward">'+Math.min(step.goal,step.count(progress))+' / '+step.goal+'</div>':!done&&step.where?'<div class="journal-reward">◇ '+step.where+'</div>':'')+'</div></div>';
+    }).join('');
+    content.innerHTML='<p class="dialog-copy">'+(second?CHAPTER_TWO.intro:INTRO)+'</p>'+
+      (second?'<div class="chapter-route">CITY → PINE ISLET → LANTERN PLAZA → YARD → PLAZA → YARD → MOONWELL</div>':'')+
+      entries(steps,index)+(second&&chapterTwo.status?'<p class="dialog-copy">'+chapterTwo.status+'</p>':'')+
+      (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
+      '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';
   }else{
     content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
@@ -662,6 +707,7 @@ function openMenu(type){
 $('settings-button').onclick=()=>openMenu('settings');$('nav-journal').onclick=$('journal-button').onclick=()=>openMenu('journal');$('pause-button').onclick=()=>openMenu('pause');
 
 function respawnPlayer(){
+  chapterTwo.resetChallenge();
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
   followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
   enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
@@ -715,7 +761,7 @@ function updatePlayer(dt){
     if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
   }
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
-  const threat=nearestThreat<10||combatMemory>0?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
+  const threat=nearestThreat<10||combatMemory>0||chapterTwo.combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
   audio.setPaused(false);
   audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
   syncCameraControls();
@@ -788,13 +834,15 @@ function drawMap(){
   mapLayer??=drawMapLayer();
   map.drawImage(mapLayer,Math.round(px(bounds.minX)),Math.round(pz(bounds.minZ)));
   for(const l of world.landmarks){map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
-  const goal=story.objective(currentStep().id);
+  const goal=chapterTwoUnlocked()?chapterTwo.objective():story.objective(currentStep().id);
   if(goal){
     let gx=px(goal.x)-90,gz=pz(goal.z)-90;const reach=Math.hypot(gx,gz);if(reach>80){gx*=80/reach;gz*=80/reach;}
     map.save();map.translate(90+gx,90+gz);map.rotate(Math.PI/4);map.fillStyle='#ffd98a';map.strokeStyle='#3b2b0d';map.lineWidth=1.5;map.fillRect(-4.5,-4.5,9,9);map.strokeRect(-4.5,-4.5,9,9);map.restore();
   }
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i))continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
+  map.fillStyle='#ff987d';for(const e of chapterTwo.combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
+  map.strokeStyle='#9fe8ed';map.lineWidth=1.5;for(const p of chapterTwo.mapTargets){map.beginPath();map.arc(px(p.x),pz(p.z),3.5,0,Math.PI*2);map.stroke();}
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
 }
 
@@ -812,7 +860,9 @@ function animate(now){
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,time:reducedMotion?0:time});}
     activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
-    story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,currentStep().id);
+    story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id);
+    chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat});
+    chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
     flashlight.update(dt,{facing:avatar.rotation.y,camera});
@@ -834,7 +884,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},story:{step:currentStep().id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');

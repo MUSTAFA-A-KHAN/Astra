@@ -130,7 +130,8 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   const heroName = await page.locator('#hud-name').textContent();
   expect(await hear(page, 'farewell')).toEqual(expect.arrayContaining(['Tobin', heroName]));
   expect((await snapshot(page)).story.step).toBe('complete');
-  await expect(page.locator('#quest-count')).toHaveText('COMPLETE');
+  await expect(page.locator('#quest-eyebrow')).toHaveText('CHAPTER TWO · THE DROWNED MERIDIAN');
+  expect((await snapshot(page)).chapterTwo.step).toBe('summons');
 
   // The ending is kept: the keeper has gone, and the well stays lit.
   await page.reload();

@@ -28,3 +28,6 @@ body[data-screen="game"] .scene-shade{opacity:0}#game-hud{position:fixed;inset:0
 @media(pointer:coarse){#conversation-next kbd{display:none}}
 @media(max-width:600px){#conversation{padding:14px 16px 10px;bottom:max(20px,env(safe-area-inset-bottom))}.conversation-speaker strong{font-size:22px}#conversation-text{font-size:12px;line-height:1.65}#conversation.narration #conversation-text{font-size:16px}}
 @media(max-height:500px){#conversation{bottom:10px;padding:10px 16px 8px}.conversation-speaker{margin-bottom:4px}.conversation-speaker strong{font-size:19px}#conversation-text{font-size:11px;line-height:1.5;min-height:0}#conversation.narration #conversation-text{font-size:15px}#conversation-next{margin-top:4px;padding:3px 0}}
+
+/* Chapter Two: live trial feedback and the route between harbour maps. */
+.quest-tracker .chapter-status{margin-top:9px;padding:7px 0 0;border-top:1px solid #e4c99344;color:#ffe1a1;font-size:9px;line-height:1.5}.chapter-route{padding:12px 14px;border:1px solid #d5c18b44;color:var(--gold);font-size:10px;line-height:1.8;letter-spacing:1px;margin:14px 0}.previous-chapter{margin-top:20px;border-top:1px solid #d5c18b33;padding-top:15px}.previous-chapter summary{cursor:pointer;color:var(--gold);font-size:12px}
