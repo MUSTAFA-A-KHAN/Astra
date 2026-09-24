@@ -1,9 +1,12 @@
 /** Local files; source authors, license URLs and edits are in assets/audio/CREDITS.md. */
 export const AUDIO_ASSETS = Object.freeze({
-  stepGrass: { files: ['step-grass-1.ogg', 'step-grass-2.ogg'], volume: .7 },
-  stepStone: { files: ['step-grass-2.ogg'], volume: .1 },
-  stepWood: { files: ['step-wood-1.ogg', 'step-wood-2.ogg'], volume: .65 },
-  stepWater: { files: ['step-water.ogg'], volume: .7 },
+  // Recordings of someone walking, cut into single steps as they load: each
+  // stride plays one, drawn from every recording of the ground underfoot.
+  walkDirt: { files: ['walks/soumages-walking-on-dirt-363354.ogg'], steps: true, volume: .8 },
+  walkGrass: { files: ['walks/freesound_community-walking-through-grass-80308.ogg', 'walks/joentnt-walk-on-grass-2-291985.ogg'], steps: true, volume: .75 },
+  walkGravel: { files: ['walks/kokoreli777-walking-on-a-gravel-169409.ogg'], steps: true, volume: .75 },
+  walkWater: { files: ['walks/alex_jauk-walking-in-water-199418.ogg'], steps: true, volume: .75 },
+  walkHorse: { files: ['walks/universfield-horse-walking-123782.ogg', 'walks/yodguard-horse-walking-sound-4-450266.ogg'], steps: true, volume: .85 },
   sword: { files: ['sword-1.ogg', 'sword-2.ogg'], volume: .85 },
   jump: { files: ['jump.ogg'], volume: .65 },
   landing: { files: ['landing.ogg'], volume: .8 },

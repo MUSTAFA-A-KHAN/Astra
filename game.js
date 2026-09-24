@@ -765,7 +765,7 @@ function updatePlayer(dt){
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
   const threat=nearestThreat<10||combatMemory>0||chapterTwo.combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
   audio.setPaused(false);
-  audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
+  audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':region(),state:locomotion.state,mounted}, {sources:activities.sources,threat});
   syncCameraControls();
 }
 // The hero stands and listens, the line types itself out, and the camera

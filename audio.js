@@ -2,13 +2,56 @@ import { AUDIO_ASSETS } from './audio-manifest.js';
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 const MUSIC_STATES = new Set(['exploration', 'suspicion', 'combat', 'victory']);
-const CORE = ['stepStone', 'stepGrass', 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction'];
+// Loaded first, ahead of ambience and music. Every walk is among them, so the
+// first steps on new ground are not lost while its recording downloads.
+const WALKS = Object.keys(AUDIO_ASSETS).filter(name => AUDIO_ASSETS[name].steps);
+const CORE = [...WALKS, 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction'];
+// How loud a step is brought to, whatever level it was recorded at: the RMS
+// of its loudest hundredth of a second.
+const STEP_LEVEL = .15;
 
-export function footstepSurface(surface = '') {
-  if (/water|lake|river|mud|wet/i.test(surface)) return 'stepWater';
-  if (/wood|bridge|plank/i.test(surface)) return 'stepWood';
-  if (/stone|rock|mountain|ruin|pavement|city|gravel/i.test(surface)) return 'stepStone';
-  return 'stepGrass';
+/** Which walk a stride plays: the horse's when riding, otherwise the ground's, dirt by default. */
+export function footstepSurface(surface = '', mounted = false) {
+  if (mounted) return 'walkHorse';
+  if (/water|lake|river|wet/i.test(surface)) return 'walkWater';
+  if (/forest|grass|meadow/i.test(surface)) return 'walkGrass';
+  if (/plaza|gravel|cobble/i.test(surface)) return 'walkGravel';
+  return 'walkDirt';
+}
+
+/**
+ * Where the single steps are in a walking recording. Each starts just before
+ * a footfall and runs until the next, and carries the gain that brings it to
+ * STEP_LEVEL. Steps too faint beside the rest (someone walking up from far
+ * off) are left out, rather than raised along with their hiss.
+ */
+export function stepSlices(buffer) {
+  const rate = buffer.sampleRate, window = Math.max(1, Math.round(rate * .01)), channels = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+  const envelope = new Float32Array(Math.floor(channels[0].length / window));
+  for (let w = 0; w < envelope.length; w++) {
+    let sum = 0;
+    for (const data of channels) for (let i = w * window, end = i + window; i < end; i++) sum += data[i] * data[i];
+    envelope[w] = Math.sqrt(sum / (window * channels.length));
+  }
+  const sorted = Float32Array.from(envelope).sort(), peak = sorted[sorted.length - 1] || 0, floor = sorted[sorted.length >> 1] || 0;
+  if (!peak) return [];
+  // A footfall is where the level rises through a quarter of the way from the
+  // background to the loudest step, at least 0.22 s after the last.
+  const threshold = floor + (peak - floor) * .25, onsets = [];
+  for (let w = 0; w < envelope.length; w++) {
+    if (envelope[w] > threshold && (w === 0 || envelope[w - 1] <= threshold) && (!onsets.length || w - onsets[onsets.length - 1] >= 22)) onsets.push(w);
+  }
+  const slices = [];
+  onsets.forEach((w, i) => {
+    const start = Math.max(0, w - 3), end = Math.min(envelope.length, w + 45, onsets[i + 1] === undefined ? Infinity : onsets[i + 1] - 2);
+    let loudest = 0;
+    for (let k = w; k < end; k++) loudest = Math.max(loudest, envelope[k]);
+    if (loudest < peak * .3) return;
+    // Never more than twelvefold: a recording of near silence is not raised into a roar of hiss.
+    slices.push({ offset: start * window / rate, duration: (end - start) * window / rate, gain: Math.min(12, STEP_LEVEL / loudest) });
+  });
+  return slices;
 }
 
 /** Safari decodes AAC natively but Vorbis late or not at all, so anything short of a confident "probably" gets the .m4a twins. */
@@ -22,7 +65,7 @@ export class GameAudio {
     this.context = null; this.enabled = enabled; this.paused = false; this.disposed = false;
     this.fetcher = fetcher; this.random = random; this.master = null; this.buses = {};
     this.volumes = { master: .75, effects: .8, ambience: .5, music: .3 };
-    this.buffers = new Map(); this.pending = new Map(); this.failed = new Set();
+    this.buffers = new Map(); this.pending = new Map(); this.failed = new Set(); this.slices = new WeakMap();
     this.voices = new Set(); this.loops = new Map(); this.lastVariant = new Map(); this.lastEvent = new Map();
     this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0; this.format = format;
     this.musicState = 'exploration'; this.victoryRemaining = 0; this.combatRemaining = 0;
@@ -83,11 +126,13 @@ export class GameAudio {
       const task = this.queue.shift(); this.downloads++;
       Promise.resolve().then(async () => {
         let buffer;
-        try { buffer = await this.decode(task, this.format); }
+        const tried = this.format;
+        try { buffer = await this.decode(task, tried); }
         catch (error) {
           // The format guess was wrong for this browser: the twin serves this file and, once it decodes, every later one.
+          // The twin is of the format this file tried, not the format now: a download finishing meanwhile may have switched it.
           if (task.signal.aborted) throw error;
-          const other = this.format === 'ogg' ? 'm4a' : 'ogg';
+          const other = tried === 'ogg' ? 'm4a' : 'ogg';
           buffer = await this.decode(task, other); this.format = other;
         }
         if (this.generation !== task.generation || this.disposed) return null;
@@ -114,22 +159,49 @@ export class GameAudio {
     if (files.length > 1 && index === this.lastVariant.get(name)) index = (index + 1) % files.length;
     this.lastVariant.set(name, index); return files[index];
   }
+  /** One step of a walk, from any of its recordings that has loaded, never the step just heard. */
+  step(name) {
+    const pool = [];
+    for (const file of AUDIO_ASSETS[name].files) {
+      const buffer = this.buffers.get(file);
+      if (!buffer) { this.load(file); continue; }
+      if (!this.slices.has(buffer)) this.slices.set(buffer, stepSlices(buffer));
+      for (const span of this.slices.get(buffer)) pool.push({ buffer, span });
+    }
+    if (!pool.length) return null;
+    let index = Math.floor(this.random() * pool.length) % pool.length;
+    if (pool.length > 1 && index === this.lastVariant.get(name)) index = (index + 1) % pool.length;
+    this.lastVariant.set(name, index); return pool[index];
+  }
   /** Missed short effects load for the next event; stale sword/hit events never replay late. */
   play(name, { position = null, volume = 1, rate = 1, cooldown = .055 } = {}) {
     const definition = AUDIO_ASSETS[name];
     if (!definition || !this.active || this.voices.size >= 24) return false;
     const now = this.context.currentTime;
     if (now - (this.lastEvent.get(name) ?? -Infinity) < cooldown) return false;
-    const file = this.variant(name), buffer = this.buffers.get(file);
-    if (!buffer) { this.load(file); return false; }
+    let buffer, span = null;
+    if (definition.steps) {
+      const step = this.step(name);
+      if (!step) return false;
+      ({ buffer, span } = step);
+    } else {
+      const file = this.variant(name); buffer = this.buffers.get(file);
+      if (!buffer) { this.load(file); return false; }
+    }
     this.lastEvent.set(name, now);
-    this.createVoice(buffer, { bus: definition.bus || 'effects', volume: clamp(volume, 0, 2) * (definition.volume ?? 1), rate, position });
+    this.createVoice(buffer, { bus: definition.bus || 'effects', volume: clamp(volume, 0, 2) * (definition.volume ?? 1) * (span?.gain ?? 1), rate, position, span });
     return true;
   }
-  createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false }) {
+  createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false, span = null }) {
     const context = this.context, source = context.createBufferSource(), gain = context.createGain();
     source.buffer = buffer; source.loop = loop; source.playbackRate.value = clamp(rate, .65, 1.5);
     gain.gain.value = volume; source.connect(gain);
+    if (span) {
+      // A step cut from a longer recording is faded in and out, so the cut never clicks.
+      const now = context.currentTime, length = span.duration / source.playbackRate.value;
+      gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(volume, now + .006);
+      gain.gain.setValueAtTime(volume, now + length - .04); gain.gain.linearRampToValueAtTime(0, now + length);
+    }
     let panner = null;
     if (position && context.createPanner) {
       panner = context.createPanner(); panner.panningModel = 'equalpower'; panner.distanceModel = 'inverse';
@@ -139,7 +211,8 @@ export class GameAudio {
     const voice = { source, gain, panner, stopped: false, silentTime: 0, target: volume };
     this.voices.add(voice); this.played++;
     source.onended = () => this.disconnectVoice(voice);
-    source.start(0, loop && bus !== 'music' ? this.random() * buffer.duration : 0);
+    if (span) source.start(0, span.offset, span.duration);
+    else source.start(0, loop && bus !== 'music' ? this.random() * buffer.duration : 0);
     return voice;
   }
   disconnectVoice(voice) {
@@ -199,10 +272,13 @@ export class GameAudio {
     this.wasGrounded = grounded; this.initializedMotion = true;
     if (grounded && speed > .4 && !dead && !climbing) {
       this.stepDistance += dt * speed;
-      const stride = /sprint/.test(state) ? 2.5 : /walk/.test(state) ? 1.45 : 1.95;
+      // Ground covered between footfalls, walking, running and sprinting. A
+      // horse's hooves fall closer together for the ground it covers.
+      const gait = /sprint/.test(state) ? 2 : /walk/.test(state) ? 0 : 1;
+      const stride = (locomotion.mounted ? [1.5, 2, 2.6] : [1.45, 1.95, 2.5])[gait];
       if (this.stepDistance >= stride) {
         this.stepDistance %= stride;
-        this.play(footstepSurface(surface), { volume: /sprint/.test(state) ? .9 : .6, rate: .95 + this.random() * .1 });
+        this.play(footstepSurface(surface, locomotion.mounted), { volume: gait === 2 ? .9 : .6, rate: .95 + this.random() * .1 });
       }
     } else this.stepDistance = 0;
     this.climbTimer -= dt;
@@ -240,7 +316,7 @@ export class GameAudio {
     else if (this.musicState === 'victory' && this.victoryRemaining <= 0) this.setMusicState('exploration');
     for (const stateName of MUSIC_STATES) this.loop(`music${stateName[0].toUpperCase()}${stateName.slice(1)}`, this.musicState === stateName ? 1 : 0, dt);
   }
-  footstep(surface, volume = .7) { return this.play(footstepSurface(surface), { volume }); }
+  footstep(surface, volume = .7, mounted = false) { return this.play(footstepSurface(surface, mounted), { volume }); }
   bird() { return this.play('birds', { volume: .25 }); }
   getStats() {
     return { enabled: this.enabled, paused: this.paused, state: this.context?.state || 'locked', format: this.format, loaded: this.buffers.size,
