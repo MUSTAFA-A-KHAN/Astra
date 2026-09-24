@@ -61,8 +61,8 @@ test('Chapter Two waits for Tobin’s farewell and keeps its trials on their own
   expect((await state(page)).unlocked).toBe(false);
   const sites=await page.evaluate(()=>window.__CHAPTER_TEST__.sites());
   for(const id of ['rootTablet','root','rain','moon'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'forest',walkable:true});
-  for(const id of ['bellTablet','dusk','tide','dawn','beacon'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'plaza',walkable:true});
-  for(const id of ['valvePanel','valve1','valve2','valve3','warden'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'yard',walkable:true});
+  // Every trial after the islet's runes stands in Map 79's yard.
+  for(const id of ['bellTablet','dusk','tide','dawn','valvePanel','valve1','valve2','valve3','beacon','warden'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'yard',walkable:true});
   expect(errors).toEqual([]);
 });
 
@@ -76,7 +76,7 @@ test('The Drowned Meridian plays through puzzles, retries, waves, boss and saved
   for(const id of ['root','rain','moon'])await use(page,id);
   expect((await state(page)).step).toBe('bells');
   await read(page,'bellTablet');
-  await page.screenshot({path:`test-results/chapter-two-${test.info().project.name}-plaza.png`});
+  await page.screenshot({path:`test-results/chapter-two-${test.info().project.name}-bells.png`});
   await use(page,'dawn');expect((await state(page)).bellIndex).toBe(0);
   for(const id of ['dusk','tide','dawn'])await use(page,id);
   expect((await state(page)).step).toBe('valves');

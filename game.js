@@ -258,8 +258,8 @@ function updateHUD(){
   if(chapterTwoUnlocked()&&card.dataset.chapter!=='two'){
     card.dataset.chapter='two';card.querySelector('.eyebrow').textContent='CHAPTER TWO';
     card.querySelector('h2').textContent=CHAPTER_TWO.title;
-    card.querySelector('p').textContent='A stolen voice. Three ancient locks. Follow the tide across four maps and face the Hollow Warden.';
-    card.querySelector('.location-tag').textContent='CITY · ISLET · PLAZA · YARD';
+    card.querySelector('p').textContent='A stolen voice. Three ancient locks. Follow the tide from Pine Islet to the old pumping yard and face the Hollow Warden.';
+    card.querySelector('.location-tag').textContent='CITY · ISLET · YARD';
   }
   const value=step.goal?Math.min(step.goal,step.count(progress)):complete?1:0;
   $('quest-title').textContent=step.title;$('quest-description').textContent=step.description;
@@ -694,7 +694,7 @@ function openMenu(type){
       return '<div class="journal-entry"><span>'+ (done?'✓':'◇') +'</span><div><h3>'+step.title+'</h3><p>'+detail+'</p>'+(!done&&step.goal?'<div class="journal-reward">'+Math.min(step.goal,step.count(progress))+' / '+step.goal+'</div>':!done&&step.where?'<div class="journal-reward">◇ '+step.where+'</div>':'')+'</div></div>';
     }).join('');
     content.innerHTML='<p class="dialog-copy">'+(second?CHAPTER_TWO.intro:INTRO)+'</p>'+
-      (second?'<div class="chapter-route">CITY → PINE ISLET → LANTERN PLAZA → YARD → PLAZA → YARD → MOONWELL</div>':'')+
+      (second?'<div class="chapter-route">CITY → PINE ISLET → SKIBIDI YARD → MOONWELL</div>':'')+
       entries(steps,index)+(second&&chapterTwo.status?'<p class="dialog-copy">'+chapterTwo.status+'</p>':'')+
       (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
       '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';

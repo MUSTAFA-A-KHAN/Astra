@@ -32,20 +32,23 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
     const ring = new THREE.Mesh(new THREE.TorusGeometry(1.25, .045, 4, 32), material); ring.rotation.x = -Math.PI / 2; ring.position.y = .06; group.add(ring);
     root.add(group); props[id] = { group, icon, material }; return spot;
   }
-  // Along the island clearing, the cathedral street and the container lanes.
+  // Along the island clearing, then round the container lanes of Map 79's
+  // yard: the bell verse just off the south bridge, a bell in each far corner,
+  // the valves by the landing, the beacon in the open west lane and the
+  // Hollow Warden at the north end.
   place('rootTablet', -96, 8, 'forest', '#b3cda0');
   place('root', -106, 5, 'forest', '#9aca75');
   place('rain', -121, 13, 'forest', '#72c8ef');
   place('moon', -115, -3, 'forest', '#d5b6fa');
-  place('bellTablet', 240, 18, 'plaza', '#ffd9a4');
-  place('dusk', 268, -28, 'plaza', '#ed9477', 'bell');
-  place('tide', 300, 18, 'plaza', '#7ddddd', 'bell');
-  place('dawn', 272, 60, 'plaza', '#efcd76', 'bell');
+  place('bellTablet', 186, 136, 'yard', '#ffd9a4');
+  place('dusk', 132, 200, 'yard', '#ed9477', 'bell');
+  place('tide', 211, 165, 'yard', '#7ddddd', 'bell');
+  place('dawn', 170, 212, 'yard', '#efcd76', 'bell');
   place('valvePanel', 157, 143, 'yard', '#ecc674');
   place('valve1', 170, 140, 'yard', '#f1a265', 'valve');
   place('valve2', 138, 165, 'yard', '#f1a265', 'valve');
   place('valve3', 176, 178, 'yard', '#f1a265', 'valve');
-  place('beacon', 345, 18, 'plaza', '#b6fff2');
+  place('beacon', 140, 182, 'yard', '#b6fff2');
   place('warden', 205, 206, 'yard', '#c5a5fc');
   const marker = new THREE.Mesh(new THREE.OctahedronGeometry(.45), glow('#ffe3a1')); root.add(marker);
   const warning = new THREE.Mesh(new THREE.RingGeometry(.1, 10, 64), new THREE.MeshBasicMaterial({ color: '#ff7255', transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false }));
@@ -176,7 +179,7 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   }
   function status() {
     if(step()==='roots')return `Runes ${runeIndex} / 3 · inscription at the island landing`;
-    if(step()==='bells')return `Bells ${bellIndex} / 3 · inscription off the east jetty`;
+    if(step()==='bells')return `Bells ${bellIndex} / 3 · inscription by the south jetty`;
     if(step()==='valves')return valveTime>0?`Valves ${valves.size} / 3 · ${Math.ceil(valveTime)}s left`:'Three valves · 45 seconds · timer starts at the first valve';
     if(arena==='vigil')return `Wave ${wave} / 3 · ${fighters.filter(f=>f.alive).length} sentinels remain`;
     if(arena==='warden')return `Hollow Warden ${Math.max(0,Math.ceil(fighters[0]?.hp||0))} / ${CHALLENGE_RULES.bossHP} · ${bossTime%7<3.4?'DODGE THE RED PULSE':'SHIELD DOWN · ATTACK'}`;

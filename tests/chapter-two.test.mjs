@@ -18,7 +18,7 @@ test('chapter two saves only explicit booleans and never inherits chapter one co
   assert.equal(saved.chapterTwo.accepted, true, 'reading creates an independent state object');
 });
 
-test('the chapter advances through four maps and retains completed trials', () => {
+test('the chapter advances through three maps and retains completed trials', () => {
   const state = readChapterTwo({});
   const expected = ['summons', 'roots', 'bells', 'valves', 'vigil', 'warden', 'homecoming', 'complete'];
   assert.equal(CHAPTER_TWO.title, 'The Drowned Meridian');
@@ -28,7 +28,7 @@ test('the chapter advances through four maps and retains completed trials', () =
     state[flags[index]] = true;
     assert.equal(chapterTwoStep(state).id, expected[index + 1]);
   }
-  assert.deepEqual([...new Set(CHAPTER_TWO_STEPS.map(step => step.map))].sort(), ['city', 'forest', 'plaza', 'yard']);
+  assert.deepEqual([...new Set(CHAPTER_TWO_STEPS.map(step => step.map))].sort(), ['city', 'forest', 'yard']);
   state.bells = false;
   assert.equal(chapterTwoStep(state).id, 'bells', 'a later flag cannot skip an unfinished trial');
 });
