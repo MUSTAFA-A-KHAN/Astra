@@ -131,6 +131,9 @@ export async function createGameplayWorld(scene, world, collision) {
   };
   return {
     root, terrain, waterZones, climbables: [climbable], crates, mount, sources, stations,
+    // The story places its people and props through the same reservations,
+    // and dresses the camp's fire with its own model.
+    reserve: reserveSpot, campfire: { group: fire },
     update(dt, time, speed = 0) {
       flame.scale.setScalar(.93 + Math.sin(time * 13) * .07); light.intensity = 4 + Math.sin(time * 11);
       water.material.opacity = .6 + Math.sin(time * .7) * .04;

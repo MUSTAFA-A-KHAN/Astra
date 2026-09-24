@@ -7,6 +7,8 @@ import { FollowCamera } from './camera.js';
 import { GameAudio } from './audio.js';
 import { createGameplayWorld } from './gameplay-world.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
+import { createStory } from './story.js';
+import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -17,7 +19,7 @@ const SAVE_KEY = 'astra-journey-v1';
 function readSave() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch { return {}; } }
 const saved = readSave();
 const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v, min, max) : fallback;
-const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0) : []) };
+const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0) : []), story: readStory(saved) };
 // Where the player has put each on-screen control, as a fraction of
 // the viewport: a phone that rotates, or a window that resizes, keeps
 // the thumb rest in the same corner instead of the same pixel. An
@@ -58,10 +60,17 @@ let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, vict
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], hero: heroMeta.id })); dirtySave = false; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, hero: heroMeta.id })); dirtySave = false; }
   catch { /* Private browsing and full storage must never stop play. */ }
 }
-function toast(message) { $('toast-text').textContent = message; $('toast').classList.add('visible'); clearTimeout(toastTimeout); toastTimeout = setTimeout(() => $('toast').classList.remove('visible'), 3800); }
+// A toast marked `after` waits for the one on screen instead of replacing it:
+// the story's next step is announced once a wisp has finished whispering.
+const toastQueue = [];
+function toast(message, { after = false } = {}) {
+  if (after && $('toast').classList.contains('visible')) { toastQueue.push(message); return; }
+  $('toast-text').textContent = message; $('toast').classList.add('visible'); clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { if (toastQueue.length) toast(toastQueue.shift()); else $('toast').classList.remove('visible'); }, 3800);
+}
 function sound() {
   audio.play('interaction', { volume: .35 });
 }
@@ -105,7 +114,6 @@ const groundHeight = (x, z) => world.getHeight(x, z);
 // The Reach is two districts: the ambience, the sky and the HUD all ask which.
 const region = () => world.biomeAt(position.x, position.z);
 const spawn = new THREE.Vector3(world.spawn.x, groundHeight(world.spawn.x, world.spawn.z), world.spawn.z);
-const shrine = world.landmarks.find(landmark => landmark.id === 'shrine') || world.landmarks[0];
 const camp = world.landmarks.find(landmark => landmark.id === 'camp') || world.landmarks[1];
 const avatar = new THREE.Group(); scene.add(avatar); avatar.position.copy(spawn);
 const position = spawn.clone(), velocity = new THREE.Vector3();
@@ -120,6 +128,11 @@ const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.4,3.4), new THREE.MeshBasi
 const collision = new SpatialHash();
 world.colliders.forEach((collider, index) => collision.insert(`city-${index}`, collider));
 const activities = await createGameplayWorld(scene, world, collision);
+// The Last Keeper's people and places. Their models stream in after the game
+// starts; who stands where is known already, so they can be spoken to at once.
+const story = createStory({ world, activities, collision });
+scene.add(story.root); story.setState({ restored: progress.restored });
+const currentStep = () => STEPS[storyStep(progress)];
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
@@ -184,6 +197,8 @@ const shardPositions = (world.shardPositions || [[0,9],[1,0],[-1,-10],[2,-20],[0
 // Each district across the water adds shards, so a save is checked against the world it loads into.
 for(const i of progress.collected)if(i>=shardPositions.length)progress.collected.delete(i);
 const shardMesh = new THREE.InstancedMesh(new THREE.OctahedronGeometry(.48),new THREE.MeshStandardMaterial({color:'#c1f6df',emissive:'#43a995',emissiveIntensity:.8,metalness:.2,roughness:.25}),shardPositions.length); shardMesh.frustumCulled=false; scene.add(shardMesh);
+// The Moonwell's own crystal takes over from the stand-in once it arrives.
+story.shard().then(({geometry,material})=>{shardMesh.geometry.dispose();shardMesh.material.dispose();shardMesh.geometry=geometry;shardMesh.material=material;}).catch(error=>console.warn('The shard model did not load; the stand-in stays.',error));
 const dummy=new THREE.Object3D();
 const enemyGeo=new THREE.IcosahedronGeometry(.85,1),enemyMat=new THREE.MeshStandardMaterial({color:'#9380b0',emissive:'#3c235c',emissiveIntensity:.65,roughness:.5});
 const eyeGeo=new THREE.SphereGeometry(.12,6,4),eyeMat=new THREE.MeshBasicMaterial({color:'#ffdbaf'});
@@ -193,12 +208,15 @@ const enemies=(world.enemyPositions || [[-9,-17],[12,-30],[-17,-38],[28,-24],[-3
   for(const side of [-1,1]){const eye=new THREE.Mesh(eyeGeo,eyeMat);eye.position.set(side*.27,.18,.72);wisp.add(eye);}
   group.add(wisp);group.position.set(x,groundHeight(x,z)+1.4,z);scene.add(group);return{group,wisp,core,x,z,hp:80,index:i,hit:0,alive:true,rig:null,swing:0,dying:0,respawn:0};
 });
-// Walking automatons replace the placeholder wisps once the shared model lands.
-// A failed download leaves the wisps in play rather than emptying the field.
+// The drowned take shape once their shared model lands: pale, half-seen, lit
+// from within. A failed download leaves the stand-in wisps in play rather than
+// emptying the field.
 createEnemySquad(enemies.length).then(squad=>{
   squad.members.forEach((rig,i)=>{const e=enemies[i];e.rig=rig;e.wisp.visible=false;e.group.add(rig.group);e.group.position.y=groundHeight(e.group.position.x,e.group.position.z);});
+  const spectral=new Set();for(const rig of squad.members)rig.group.traverse(o=>{if(o.isMesh){o.castShadow=false;for(const m of [o.material].flat())spectral.add(m);}});
+  for(const m of spectral){m.transparent=true;m.opacity=.78;m.depthWrite=false;if(m.emissive){m.emissive.set('#9fe2ff');m.emissiveIntensity=.55;}}
 }).catch(error=>console.warn('Enemy model unavailable:',error));
-// The Reach refills itself: a felled automaton walks back out of its
+// The Reach refills itself: a released wisp drifts back out of its
 // old patrol once the player is far enough away not to see it arrive.
 const RESPAWN_DELAY=9,RESPAWN_CLEARANCE=26;
 for (const enemy of enemies) enemy.ragdoll = new RagdollController(enemy.group.position, activities.terrain, collision, { rotation: enemy.group.rotation, radius: .65 });
@@ -214,17 +232,25 @@ const bolt=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,1,6),new THREE.Mesh
 const direction=new THREE.Vector3(),targetPoint=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 function showPulse(x,z,size,color) { pulse.position.set(x,groundHeight(x,z)+.3,z);pulse.material.color.set(color);pulseAge=0;pulseSize=size; }
 function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound();}updateHUD();}
-function questStage(){return progress.restored?3:progress.collected.size<5?0:progress.kills<3?1:2;}
-const questTitles=['A glimmer in the green','Quiet the restless','Awaken the Moonwell','A light returned'];
-const questDescriptions=['Collect 5 glowing shards along the city streets.','Defeat 3 wandering wisps. Approach, then attack.','Follow the blue map marker. Restore the blue shrine.','The Reach is at peace. Keep exploring the city.'];
+$('quest-eyebrow').textContent=`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`;
+// The step the tracker last showed: when the story moves on, the new step is
+// announced once, and the tracker flashes to draw the eye to it.
+let shownStep=storyStep(progress);
 function updateHUD(){
   $('health-fill').style.width=`${health}%`;$('health-meter').setAttribute('aria-valuenow',Math.ceil(health));$('health-label').textContent=`${Math.ceil(health)} / 100`;
   $('xp-fill').style.width=`${progress.xp%150/150*100}%`;$('xp-meter').setAttribute('aria-valuenow',Math.round(progress.xp%150/150*100));$('level-label').textContent=`LV. ${level()}`;$('shards-label').textContent=`${progress.collected.size} shards`;
-  const q=questStage(),value=q===0?progress.collected.size:q===1?progress.kills:1,max=q===0?5:q===1?3:1;
-  $('quest-title').textContent=questTitles[q];$('quest-description').textContent=questDescriptions[q];$('quest-count').textContent=q===2?'◇ SHRINE':q===3?'COMPLETE':`${value} / ${max}`;$('quest-fill').style.width=`${value/max*100}%`;
+  const index=storyStep(progress),step=STEPS[index],complete=step.id==='complete';
+  const value=step.goal?Math.min(step.goal,step.count(progress)):complete?1:0;
+  $('quest-title').textContent=step.title;$('quest-description').textContent=step.description;
+  $('quest-count').textContent=step.goal?`${value} / ${step.goal}`:complete?'COMPLETE':`◇ ${step.where}`;$('quest-fill').style.width=`${step.goal?value/step.goal*100:complete?100:0}%`;
+  // Held back through the finale, so it lands after the keeper has gone.
+  if(index!==shownStep&&!finale){
+    shownStep=index;const tracker=document.querySelector('.quest-tracker');tracker.classList.remove('updated');void tracker.offsetWidth;tracker.classList.add('updated');
+    toast(complete?`${CHAPTER.title} · Chapter complete`:`New task · ${step.title}`,{after:true});
+  }
 }
 function attack(special=false){
-  if(screen!=='game'||dialog.open||document.hidden||!hero||contextLost)return;
+  if(screen!=='game'||dialog.open||chat||document.hidden||!hero||contextLost)return;
   if(special?abilityTimer>0:attackTimer>0)return;
   if(special)abilityTimer=7;attackTimer=heroMeta.cooldown;
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
@@ -243,7 +269,7 @@ function attack(special=false){
       const dx=e.group.position.x-position.x,dz=e.group.position.z-position.z,d=Math.max(.1,Math.hypot(dx,dz));
       e.ragdoll.start({x:dx/d*4,y:2,z:dz/d*4});
       if(lockTarget===e)lockTarget=null;
-      progress.kills++;gainXP(35);toast(`Wisp released · +35 experience${progress.kills===3?' · Return to the Moonwell':''}`);
+      progress.kills++;gainXP(35);toast(`${whisper(progress.kills)} · +35 experience`);
       if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;}
     }
   }
@@ -258,13 +284,15 @@ function nearbyInteraction(){
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
   const ladder=activities.climbables.find(c=>Math.hypot(position.x-c.x,position.z-c.z)<(c.r||1.8)&&position.y<c.top+.5);
   if(ladder)return {type:'climb',label:'Climb lookout · forward / back',ladder};
+  if(!finale){const person=story.nearby(position,currentStep().id);if(person)return person;}
   if(activities.crates.some(c=>position.distanceTo(c.position)<2.8))return {type:'push',label:'Push supply crate'};
-  if(questStage()===2&&Math.hypot(position.x-shrine.x,position.z-shrine.z)<10)return {type:'shrine',label:'Restore the shrine'};
   return null;
 }
 function interact(){
-  if(screen!=='game'||dialog.open)return;
+  if(screen!=='game'||dialog.open||chat)return;
   const action=nearbyInteraction();if(!action)return;
+  // The press that closes a conversation is not also the one that opens it again.
+  if(action.type==='story'){if(action.person!==closed.person||performance.now()-closed.at>400)talk(action.person);return;}
   if(action.type==='mount'){
     const mount=activities.mount;
     if(mount.mounted){
@@ -273,9 +301,79 @@ function interact(){
     syncCameraControls();audio.play('interaction');return;
   }
   if(action.type==='climb'){if(locomotion.climbing)locomotion.stopClimb();else{locomotion.startClimb(action.ladder);cinematic=false;}return;}
-  if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});return;}
-  progress.restored=true;gainXP(150);save();showPulse(shrine.x,shrine.z,22,'#b8f3e0');victoryTime=8;toast('The Moonwell awakens · Chapter complete · +150 experience');audio.play('victory');
+  if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});}
 }
+
+/**
+ * CONVERSATIONS
+ *
+ * A conversation holds the hero still, turns them and the camera toward
+ * whoever is speaking, and pages through the lines one press at a time. The
+ * world keeps running behind it, but nothing in it can reach the player: the
+ * wisps wait, and the clock only ticks. A line types itself out; a press
+ * mid-line finishes it, the next press moves on, and Escape skips to the end,
+ * which still counts as having heard it all.
+ */
+let chat=null,finale=false,closed={person:null,at:0};
+function talk(person){
+  const entry=conversation(person,currentStep().id);if(!entry)return;
+  begin(person,entry.lines,()=>heard(entry));
+}
+function begin(person,lines,onEnd){
+  const place=story.places[person]||story.places.maren;
+  const dx=place.x-position.x,dz=place.z-position.z;
+  chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
+  avatar.rotation.y=Math.atan2(dx,dz);lockTarget=null;aiming=cinematic=false;resetInput();syncCameraControls();
+  story.talking=person;document.body.classList.add('conversing');$('conversation').hidden=false;sound();showLine();
+}
+function showLine(){
+  const [who,text]=chat.lines[chat.index],host=PEOPLE[chat.person],reading=!host.title;
+  const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?PEOPLE[who]:reading?host:null;
+  $('conversation').classList.toggle('narration',!who);
+  $('conversation').style.setProperty('--speaker',speaker?.color||'var(--gold)');
+  $('conversation-name').textContent=speaker?.name||'';$('conversation-title').textContent=speaker?.title||'';
+  chat.text=text;chat.shown=reducedMotion?text.length:0;$('conversation-text').textContent=reducedMotion?text:'';
+  $('conversation-next-label').textContent=chat.index<chat.lines.length-1?'Continue':'Done';
+}
+function advance(){
+  if(!chat)return;
+  if(chat.shown<chat.text.length){chat.shown=chat.text.length;$('conversation-text').textContent=chat.text;return;}
+  if(++chat.index<chat.lines.length){sound();showLine();return;}
+  endConversation();
+}
+function endConversation(){
+  if(!chat)return;
+  const {onEnd,person}=chat;chat=null;closed={person,at:performance.now()};story.talking=null;
+  $('conversation').hidden=true;document.body.classList.remove('conversing');
+  // Back to the view the player had chosen, eased rather than cut.
+  settling=.9;resetInput();onEnd?.();
+}
+// What having heard a conversation to the end changes.
+function heard(entry){
+  if(entry.finale){awaken();return;}
+  if(entry.sets&&!progress.story[entry.sets]){
+    progress.story[entry.sets]=true;save();
+    if(entry.sets==='notice')toast('Something about that last name stays with you.');
+    if(entry.sets==='farewell'){gainXP(100);victoryTime=8;audio.play('victory');}
+    else if(entry.sets!=='notice')gainXP(40);
+  }
+  updateHUD();
+}
+// The chapter's end: the light goes into the well, the Hart comes, and the
+// keeper goes home. The save records it first, so closing the game partway
+// through still keeps it.
+async function awaken(){
+  finale=true;progress.restored=true;gainXP(150);save();
+  audio.play('victory');showPulse(story.places.maren.x,story.places.maren.z,22,'#b8f3e0');victoryTime=12;
+  await story.awaken();
+  begin('maren',conversation('maren','finale').lines,async()=>{
+    await story.depart();finale=false;
+    toast('The Moonwell awakens · The Keeper is at rest · +150 experience');updateHUD();
+  });
+}
+$('conversation').addEventListener('click',advance);
+// Skipping still counts as hearing it all: the story never hangs on a line.
+function skipConversation(){if(chat){chat.index=chat.lines.length-1;chat.shown=Infinity;endConversation();}}
 
 const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dragX=0,dragY=0,dragDistance=0;
 let yaw=0,pitch=.48,radius=14;
@@ -319,10 +417,10 @@ function toggleFlashlight(){
   toast(flashlight.dark?`Flashlight ${preferences.flashlight?'on':'off'}`:preferences.flashlight?'Flashlight ready · it comes out at dusk':'Flashlight packed away for tonight');
 }
 syncFlashlight();
-function toggleAim(){if(screen!=='game'||dialog.open)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
-function toggleCinematic(){if(screen!=='game'||dialog.open)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
+function toggleAim(){if(screen!=='game'||dialog.open||chat)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
+function toggleCinematic(){if(screen!=='game'||dialog.open||chat)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
 function toggleLock(){
-  if(screen!=='game'||dialog.open)return;
+  if(screen!=='game'||dialog.open||chat)return;
   if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
   else{
     lockTarget=enemies.filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
@@ -338,6 +436,8 @@ addEventListener('keydown',e=>{
   if(dialog.open){if(e.code==='Escape'){e.preventDefault();closeDialog();}return;}
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
   if(screen!=='game')return;
+  // A conversation takes the keys it pages with; everything else waits.
+  if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
@@ -348,7 +448,7 @@ addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
 addEventListener('pagehide',()=>{save();audio.setPaused(true);});
 document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){audio.setPaused(true);save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
-function jump(){if(screen==='game'&&!dialog.open){locomotion.requestJump();cinematic=false;}}
+function jump(){if(screen==='game'&&!dialog.open&&!chat){locomotion.requestJump();cinematic=false;}}
 // Emotes are the one animation the player drives directly, so they
 // are held for exactly as long as the clip runs and dropped the
 // moment the character has somewhere else to be. `hero.emotes` only
@@ -356,7 +456,7 @@ function jump(){if(screen==='game'&&!dialog.open){locomotion.requestJump();cinem
 // pressed by someone playing a starter hero does nothing at all.
 const EMOTE_KEYS={Digit1:'Dance',Digit2:'Nod',Digit3:'Shake',Digit4:'Sad'};
 function emote(state){
-  if(screen!=='game'||dialog.open)return;
+  if(screen!=='game'||dialog.open||chat)return;
   const duration=hero?.emotes?.[state];if(!duration)return;
   emoting=state;emoteUntil=time+duration;
 }
@@ -536,23 +636,25 @@ addEventListener('resize', () => {
 });
 applyLayout();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();toast('Follow the glowing shards. Your journey begins.');}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the gold marker':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
 function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
 function openMenu(type){
-  resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?'THE FIRST LIGHT':'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
+  resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('audio-status').textContent=audioStatus();$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
     for(const channel of ['master','effects','ambience','music'])$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
-    const q=questStage();content.innerHTML=`<p class="dialog-copy">An old light sleeps beneath the city. Gather its scattered pieces, quiet the restless wisps, and bring the Moonwell back to life.</p>`+questTitles.slice(0,3).map((title,i)=>`<div class="journal-entry ${i>q?'locked':''}"><span>${i<q?'✓':i===q?'◇':'·'}</span><div><h3>${title}</h3><p>${questDescriptions[i]}</p><div class="journal-reward">${i===0?`${Math.min(5,progress.collected.size)} / 5 shards · 15 XP per shard`:i===1?`${Math.min(3,progress.kills)} / 3 wisps · 35 XP per wisp`:`${progress.restored?'RESTORED':'BLUE MARKER'} · 150 XP`}</div></div></div>`).join('')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows shards in gold, wisps in violet, and you in ivory.</p>`;
+    // What has happened so far and what is asked now; what lies ahead stays unwritten.
+    const index=storyStep(progress),last=STEPS.length-1;
+    content.innerHTML=`<p class="dialog-copy">${INTRO}</p>`+STEPS.slice(0,index+1).map((step,i)=>{const done=i<index;return `<div class="journal-entry"><span>${done?'✓':'◇'}</span><div><h3>${step.title}</h3><p>${done?step.recap:step.description}</p>${!done&&step.goal?`<div class="journal-reward">${Math.min(step.goal,step.count(progress))} / ${step.goal}</div>`:!done&&step.where?`<div class="journal-reward">◇ ${step.where}</div>`:''}</div></div>`;}).join('')+(index<last?'<p class="dialog-copy">More of the story waits ahead.</p>':'')+`<p class="dialog-copy">Rest near the golden camp marker to recover health. The map shows the story’s next step as a gold diamond, shards as gold dots, wisps in violet, and you in ivory.</p>`;
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact ? climb, push, ride / dismount, restore shrine</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   audio.setPaused(true);if(!dialog.open)dialog.showModal();
@@ -618,6 +720,14 @@ function updatePlayer(dt){
   audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':'stone',state:locomotion.state,mounted}, {sources:activities.sources,threat});
   syncCameraControls();
 }
+// The hero stands and listens, the line types itself out, and the camera
+// comes round over their shoulder to whoever is speaking.
+function updateConversation(dt){
+  if(chat.shown<chat.text.length){chat.shown=Math.min(chat.text.length,chat.shown+dt*60);$('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));}
+  yaw+=Math.atan2(Math.sin(chat.yaw-yaw),Math.cos(chat.yaw-yaw))*(1-Math.exp(-3*dt));
+  pitch=damp(pitch,.2,3,dt);radius=damp(radius,Math.min(radius,10),3,dt);
+  hero.animate(dt,{speed:0,holding:flashlight.out,time});
+}
 function updateShards(){
   for(let i=0;i<shardPositions.length;i++){
     const [x,z]=shardPositions[i];
@@ -678,6 +788,11 @@ function drawMap(){
   mapLayer??=drawMapLayer();
   map.drawImage(mapLayer,Math.round(px(bounds.minX)),Math.round(pz(bounds.minZ)));
   for(const l of world.landmarks){map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
+  const goal=story.objective(currentStep().id);
+  if(goal){
+    let gx=px(goal.x)-90,gz=pz(goal.z)-90;const reach=Math.hypot(gx,gz);if(reach>80){gx*=80/reach;gz*=80/reach;}
+    map.save();map.translate(90+gx,90+gz);map.rotate(Math.PI/4);map.fillStyle='#ffd98a';map.strokeStyle='#3b2b0d';map.lineWidth=1.5;map.fillRect(-4.5,-4.5,9,9);map.strokeRect(-4.5,-4.5,9,9);map.restore();
+  }
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i))continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
@@ -693,10 +808,11 @@ function animate(now){
   const raw=Math.max(0,(now-lastFrame)/1000);lastFrame=now;const dt=Math.min(raw,.08);time+=dt;
   if(!dialog.open){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
-    if(screen==='game'&&hero){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}
+    if(screen==='game'&&hero){if(chat)updateConversation(dt);else{const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,time:reducedMotion?0:time});}
     activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
+    story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,currentStep().id);
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
     flashlight.update(dt,{facing:avatar.rotation.y,camera});
@@ -718,7 +834,7 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:questStage()},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},story:{step:currentStep().id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');
@@ -732,8 +848,11 @@ try{
   // The plaza's model streams in behind the game rather than holding up its
   // start. Its shaders and textures are made ready before it is shown, so its
   // arrival costs no dropped frames.
-  world.stream({prepare:async object=>{
-    object.traverse(mesh=>{for(const value of Object.values(mesh.material||{}))if(value?.isTexture)renderer.initTexture(value);});
+  const prepare=async object=>{
+    object.traverse(mesh=>{for(const material of [mesh.material].flat())for(const value of Object.values(material||{}))if(value?.isTexture)renderer.initTexture(value);});
     if(renderer.compileAsync)await renderer.compileAsync(object,camera,scene);
-  }}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
+  };
+  world.stream({prepare}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
+  // The story's people and props follow the same way, each ready before it is shown.
+  story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
 }catch(error){console.error(error);$('load-message').textContent='This device could not start the 3D world. Try again with a WebGL-enabled browser.';$('retry-button').hidden=false;}

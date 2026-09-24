@@ -79,7 +79,8 @@ export async function createWorld(scene, { lowPower = false } = {}) {
   for(const landmark of landmarks) {
     const group=new THREE.Group();group.name=landmark.name;group.position.set(landmark.x,landmark.y,landmark.z);root.add(group);
     const mat=new THREE.MeshStandardMaterial({color:landmark.color,emissive:landmark.color,emissiveIntensity:.9,metalness:.2,roughness:.3});
-    const crystal=new THREE.Mesh(markerGeometry,mat);crystal.position.y=landmark.id==='shrine'?3.4:2.6;
+    // The shrine's crystal hangs clear of the Moonwell's roof (story.js).
+    const crystal=new THREE.Mesh(markerGeometry,mat);crystal.position.y=landmark.id==='shrine'?6.6:2.6;
     crystal.scale.set(landmark.id==='shrine'?.95:.6,landmark.id==='shrine'?1.7:1,.7);group.add(crystal);
     const ring=new THREE.Mesh(ringGeometry,new THREE.MeshBasicMaterial({color:landmark.color,transparent:true,opacity:.8,depthWrite:false}));
     ring.rotation.x=-Math.PI/2;ring.position.y=.12;group.add(ring);

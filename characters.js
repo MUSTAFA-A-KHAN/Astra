@@ -248,18 +248,18 @@ export const HEROES = [
 /**
  * Enemy
  */
+// One of the drowned of the Long Tide: see story-script.js.
 export const ENEMY = {
-  id: 'automaton',
-  name: 'Rogue Automaton',
+  id: 'wisp',
+  name: 'Restless Wisp',
   title: 'The Restless',
   role: 'Hostile',
   description:
-    'A hollow machine still walking its old patrol.',
+    'Someone the sea took, still drifting where they drowned.',
   color: '#9380b0',
   imported: true,
-  model:
-    'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
-  height: 2.6,
+  model: './assets/story/restless-wisp.glb',
+  height: 3,
   orientationYaw: 0,
 
   animationSpeeds: {
@@ -2851,7 +2851,8 @@ async function makeImported(
    */
   const attack =
     find([
-      /attack/i,
+      // The restless wisp's clip is spelt "Action_Atack".
+      /at+ack/i,
       /slash/i,
       /punch/i,
       /swing/i,

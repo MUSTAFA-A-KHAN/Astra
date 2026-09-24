@@ -24,9 +24,10 @@ async function setHour(page, hour) {
 }
 
 test('heroes take the flashlight out after dusk, and the player can switch it off and on', async ({ page }) => {
-  // The plaza and the automatons arrive behind the game and build their own
-  // shaders when they do. Left out, only the flashlight can add one.
-  await page.route(/plaza-night\.glb$|RobotExpressive\.glb$/, route => route.abort());
+  // The plaza, the wisps and the story's people and props arrive behind the
+  // game and build their own shaders when they do. Left out, only the
+  // flashlight can add one.
+  await page.route(/plaza-night\.glb$|\/assets\/story\//, route => route.abort());
   const errors = await boot(page);
   await setHour(page, 13);
   expect(await flashlight(page)).toMatchObject({ ready: true, enabled: true, out: false, intensity: 0, mount: 'shield' });
