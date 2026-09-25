@@ -6,7 +6,7 @@ import { SpatialHash, LocomotionController, PropPhysics, RagdollController } fro
 import { FollowCamera } from './camera.js';
 import { GameAudio } from './audio.js';
 import { createGameplayWorld } from './gameplay-world.js';
-import { alignRider } from './riding.js';
+import { alignRider, MountSteering } from './riding.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
 import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
@@ -148,6 +148,8 @@ const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterT
 });
 scene.add(chapterTwo.root);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
+// A ridden horse keeps its own heading and wheels round rather than turning on the spot.
+const reins = new MountSteering();
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
 const followCamera = new FollowCamera(camera, activities.terrain, collision);
@@ -329,7 +331,7 @@ function interact(){
     const mount=activities.mount;
     if(mount.mounted){
       const point=world.findWalkable(position.x+2,position.z,.6,position.y);const candidate=new THREE.Vector3(point.x,point.y,point.z);collide(candidate,.52);position.copy(candidate);mount.mounted=false;locomotion.reset();
-    }else if(locomotion.grounded){mount.mounted=true;position.copy(mount.position);lockTarget=null;aiming=cinematic=false;locomotion.reset();}
+    }else if(locomotion.grounded){mount.mounted=true;position.copy(mount.position);lockTarget=null;aiming=cinematic=false;locomotion.reset();reins.reset(mount.group.rotation.y);avatar.rotation.y=mount.group.rotation.y;}
     syncCameraControls();audio.play('interaction');return;
   }
   if(action.type==='climb'){if(locomotion.climbing)locomotion.stopClimb();else{locomotion.startClimb(action.ladder);cinematic=false;}return;}
@@ -729,9 +731,11 @@ function updatePlayer(dt){
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
   const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
   const movementYaw=lockTarget?followCamera.yaw:yaw;
-  const wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z;
+  let wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z,magnitude=Math.min(1,length);
+  // Mounted, the controls ask for a way to go and the horse swings round to it.
+  if(mounted)({x:wx,z:wz,magnitude}=reins.update(dt,{x:wx,z:wz,speed:locomotion.speed}));
   locomotion.radius=mounted?.85:.52;
-  locomotion.update(dt,{x:wx,z:wz,magnitude:Math.min(1,length),walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
   const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
   updateStamina();
   propPhysics.update(dt);
@@ -742,7 +746,8 @@ function updatePlayer(dt){
   const floor=locomotion.groundHeight;
   avatar.position.copy(position);
   const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
-  if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
+  if(mounted)avatar.rotation.y=reins.heading;
+  else if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
   if(locomotion.climbing)avatar.rotation.y=Math.PI;
   if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||!locomotion.grounded))emoting=null;
@@ -902,7 +907,7 @@ function ridingStats(){
   if(!hero||!activities.mount.mounted)return null;
   const contact=hero.ridingAnchor.getWorldPosition(new THREE.Vector3());
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
-  return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y};
+  return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
 Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{

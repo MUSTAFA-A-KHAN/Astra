@@ -196,12 +196,29 @@ test('steering the ridden horse right and back leans it right, then left', async
   await page.keyboard.up('KeyD');
   await page.locator('#interact-button').click();
   await expect.poll(async () => (await snapshot(page)).activities.mounted).toBe(true);
-  // Riding straight on keeps the straight stride.
+  // The horse stands facing the camera, so riding away from it is an about-turn,
+  // which it wheels round through instead of snapping to.
+  await page.evaluate(() => {
+    const headings = window.__headings = [];
+    const record = () => {
+      if (window.__headings !== headings) return;
+      headings.push(window.__ASTRA_DEBUG__.riding.heading);
+      requestAnimationFrame(record);
+    };
+    requestAnimationFrame(record);
+  });
   await page.keyboard.down('KeyW');
+  // Riding straight on keeps the straight stride.
   await page.waitForFunction(() => {
     const { state, turning } = window.__ASTRA_DEBUG__.activities.mount.animation;
     return state === 'Walk' && Math.abs(turning) < .1;
   });
+  const headings = await page.evaluate(() => { const headings = window.__headings; window.__headings = null; return headings; });
+  const swing = (a, b) => Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a)));
+  expect(swing(headings[0], headings.at(-1))).toBeGreaterThan(2.5);
+  // Even the longest frame the game steps (.08 s) turns it only a little.
+  expect(Math.max(...headings.slice(1).map((heading, i) => swing(headings[i], heading)))).toBeLessThan(.25);
+  expect(headings.length).toBeGreaterThan(10);
   expect((await snapshot(page)).activities.mount.animation.turnAction).toBeNull();
   // Bearing right, then straightening up again, which is a turn to the left.
   await watchTurn(page);

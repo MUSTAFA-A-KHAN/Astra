@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createRidingAnchor, alignRider } from '../riding.js';
+import { createRidingAnchor, alignRider, MountSteering, maxTurnRate } from '../riding.js';
 
 function closeVector(actual, expected, message) {
   assert.ok(actual.distanceTo(expected) < 1e-8,
@@ -139,4 +139,75 @@ test('alignment accounts for a rotated and scaled avatar parent independently of
   assert.equal(avatar.parent, avatarParent);
   assert.ok(avatar.quaternion.equals(rotation), 'the parent correction only translates the avatar');
   closeVector(avatar.scale, scale, 'the parent correction preserves scale');
+});
+
+// Rides the reins at 60 Hz toward a requested heading, with ground speed
+// chasing the throttle the way locomotion's acceleration does.
+function ride({ heading = 0, speed = 5, pace = 5, toward, seconds = 4, wobble = 0 }) {
+  const reins = new MountSteering(heading), dt = 1 / 60, frames = [];
+  let x = 0, z = 0;
+  for (let i = 0; i < seconds * 60; i++) {
+    const asked = toward + (i % 2 ? wobble : -wobble);
+    const before = reins.heading;
+    const out = reins.update(dt, { x: Math.sin(asked), z: Math.cos(asked), speed });
+    speed += THREE.MathUtils.clamp(out.magnitude * pace - speed, -18 * dt, 18 * dt);
+    x += out.x / Math.max(out.magnitude, 1e-9) * speed * dt; z += out.z / Math.max(out.magnitude, 1e-9) * speed * dt;
+    const turned = Math.atan2(Math.sin(reins.heading - before), Math.cos(reins.heading - before));
+    frames.push({ t: (i + 1) * dt, heading: reins.heading, turned, out, speed, x, z });
+  }
+  return frames;
+}
+const off = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
+test('asked to go back the way it came, a ridden horse wheels round in an arc instead of spinning on the spot', () => {
+  const frames = ride({ heading: 0, toward: Math.PI });
+  assert.ok(off(frames[5].heading, 0) < .25, `no snap round: ${frames[5].heading} after 0.1 s`);
+  for (const frame of frames) {
+    assert.ok(Math.abs(frame.turned) <= maxTurnRate(0) / 60 + 1e-9, `turned ${frame.turned} in one frame`);
+    if (off(frame.heading, Math.PI) > .05) assert.ok(frame.turned > -1e-9, `turned back by ${frame.turned} at ${frame.t} s`);
+    assert.ok(off(Math.atan2(frame.out.x, frame.out.z), frame.heading) < 1e-9, 'it travels the way it faces');
+  }
+  const past = Math.max(...frames.map(frame => Math.atan2(Math.sin(frame.heading - Math.PI), Math.cos(frame.heading - Math.PI))).filter(a => a > -1));
+  assert.ok(past < .03, `swung ${past} rad past the way back`);
+  const turning = frames.filter(frame => off(frame.heading, Math.PI) > 1);
+  assert.ok(Math.min(...turning.map(frame => frame.out.magnitude)) < .4, 'it eases off through the turn');
+  assert.ok(Math.max(...frames.map(frame => Math.abs(frame.x))) > .5, 'the turn sweeps out an arc');
+  const around = frames.find(frame => off(frame.heading, Math.PI) < .05);
+  assert.ok(around && around.t > .9 && around.t < 3, `wheeled round in ${around?.t} s`);
+  assert.ok(frames.at(-1).out.magnitude > .99, 'lined up again, it pushes on at full pace');
+});
+
+test('a horse turns tighter at a walk than at a gallop', () => {
+  assert.ok(maxTurnRate(0) > maxTurnRate(5));
+  assert.ok(maxTurnRate(5) > maxTurnRate(14));
+  assert.equal(maxTurnRate(20), maxTurnRate(14));
+  const quarter = frames => frames.find(frame => off(frame.heading, Math.PI / 2) < .05).t;
+  const walking = quarter(ride({ speed: 5, pace: 5, toward: Math.PI / 2 }));
+  const galloping = quarter(ride({ speed: 14, pace: 14, toward: Math.PI / 2 }));
+  assert.ok(galloping > walking * 1.3, `a gallop takes ${galloping} s to turn a quarter, a walk ${walking} s`);
+});
+
+test('asked dead astern with a wavering stick, the horse commits to one way round', () => {
+  const frames = ride({ heading: .4, toward: .4 + Math.PI, wobble: .03 });
+  const direction = Math.sign(frames.find(frame => Math.abs(frame.turned) > 1e-4).turned);
+  for (const frame of frames.filter(frame => off(frame.heading, .4 + Math.PI) > .1)) {
+    assert.ok(frame.turned * direction > -1e-9, `turned back by ${frame.turned} at ${frame.t} s`);
+  }
+});
+
+test('the horse settles onto a new line without swinging past it', () => {
+  const target = -Math.PI / 4;
+  const frames = ride({ heading: 0, toward: target, seconds: 3 });
+  const past = Math.max(...frames.map(frame => target - frame.heading));
+  assert.ok(past < .03, `swung ${past} rad past the new line`);
+  assert.ok(off(frames.at(-1).heading, target) < .01);
+});
+
+test('with no request the horse holds its heading and stops pushing', () => {
+  const reins = new MountSteering(1.2);
+  for (let i = 0; i < 60; i++) {
+    const out = reins.update(1 / 60, { x: 0, z: 0, speed: 3 });
+    assert.equal(out.magnitude, 0);
+  }
+  assert.equal(reins.heading, 1.2);
 });
