@@ -278,7 +278,7 @@ export class GameAudio {
       const stride = (locomotion.mounted ? [1.5, 2, 2.6] : [1.45, 1.95, 2.5])[gait];
       if (this.stepDistance >= stride) {
         this.stepDistance %= stride;
-        this.play(footstepSurface(surface, locomotion.mounted), { volume: gait === 2 ? .9 : .6, rate: .95 + this.random() * .1 });
+        this.play(footstepSurface(surface, locomotion.mounted), { volume: gait === 2 ? .9 : .6, rate: .6 + this.random() * .1 });
       }
     } else this.stepDistance = 0;
     this.climbTimer -= dt;
