@@ -6,6 +6,7 @@ import { SpatialHash, LocomotionController, PropPhysics, RagdollController } fro
 import { FollowCamera } from './camera.js';
 import { GameAudio } from './audio.js';
 import { createGameplayWorld } from './gameplay-world.js';
+import { alignRider } from './riding.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
 import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
@@ -739,7 +740,7 @@ function updatePlayer(dt){
   }
   if(health<=0){respawnPlayer();return;}
   const floor=locomotion.groundHeight;
-  avatar.position.copy(position);if(mounted)avatar.position.y+=activities.mount.seatHeight;
+  avatar.position.copy(position);
   const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
   if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
@@ -870,7 +871,8 @@ function animate(now){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
     if(screen==='game'&&hero){if(chat)updateConversation(dt);else{const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,time:reducedMotion?0:time});}
-    activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed);
+    activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
+    if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
     story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id);
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat});
@@ -896,7 +898,13 @@ renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();c
 renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=false;lastFrame=performance.now();applyQuality(quality);if(!document.hidden)renderer.setAnimationLoop(animate);toast('The world is ready again.');});
 
 // Read-only diagnostics for browser verification and device profiling.
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+function ridingStats(){
+  if(!hero||!activities.mount.mounted)return null;
+  const contact=hero.ridingAnchor.getWorldPosition(new THREE.Vector3());
+  const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
+  return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y};
+}
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');

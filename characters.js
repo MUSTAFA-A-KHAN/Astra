@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
+import { createRidingAnchor } from './riding.js';
 
 /**
  * Built-in adventurers are original, lightweight geometry;
@@ -1808,6 +1809,8 @@ function makeBuiltin(meta) {
 
   animate(0, {});
 
+  const ridingAnchor = createRidingAnchor(group, body, new THREE.Vector3(0, 1.15, 0));
+
   /**
    * Measured with the free arm in its holding pose, so the prop
    * points ahead once the arm is raised. The warden's lamp is
@@ -1852,6 +1855,7 @@ function makeBuiltin(meta) {
     height: 3.4,
     animate,
     flashlightMount,
+    ridingAnchor,
 
     // The starter heroes are built from primitives and have no
     // gesture clips. Reporting none keeps callers from having to
@@ -3306,6 +3310,20 @@ async function makeImported(
   const baseHeight =
     fitted.position.y;
 
+  // Feet are the model origin, but a rider meets the saddle at the pelvis.
+  // Measure in fitted space so imported sizes and sitting root offsets agree.
+  mixer?.update(0);
+  let pelvis = null;
+  model.traverse(node => {
+    if (!pelvis && node.isBone && /(hips|pelvis)(_\d+)*$/i.test(node.name)) pelvis = node;
+  });
+  const seatPoint = pelvis
+    ? group.worldToLocal(pelvis.getWorldPosition(new THREE.Vector3()))
+    : new THREE.Vector3(0, targetHeight * .5, 0);
+  // The seated mesh contacts the saddle about .27 units below the hip joint.
+  seatPoint.y -= targetHeight * .08;
+  const ridingAnchor = createRidingAnchor(group, pelvis || group, seatPoint);
+
   /**
    * Emotes this character can actually play, and how long each
    * one runs. The caller drives them by passing the state name
@@ -3331,6 +3349,7 @@ async function makeImported(
     mixer,
     emotes,
     flashlightMount,
+    ridingAnchor,
 
     get diagnostics() {
       return {

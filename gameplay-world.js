@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createHero } from './characters.js';
+import { createRidingAnchor } from './riding.js';
 
 // A few authored interactions, rather than a costly rigid body for every city prop.
 export async function createGameplayWorld(scene, world, collision) {
@@ -82,7 +83,18 @@ export async function createGameplayWorld(scene, world, collision) {
 
   const horsePoint = spot('horse', 3.5, 1.5, 2), horse = at(horsePoint); horse.name = 'Trail horse';
   horse.add(horseModel.group);
-  const mount = { group: horse, position: horse.position, mounted: false, seatHeight: 2.35 };
+  let back = null;
+  horseModel.group.traverse(node => {
+    if (node.isBone && /^BN_Spine_01_/.test(node.name)) back = node;
+  });
+  const seat = back
+    ? horseModel.group.worldToLocal(back.getWorldPosition(new THREE.Vector3()))
+    : new THREE.Vector3(0, horseModel.height * .76, 0);
+  // The supplied saddle surface is .45 fitted units above this spine joint.
+  seat.y += horseModel.height * .132;
+  const saddle = createRidingAnchor(horseModel.group, back || horseModel.group, seat);
+  saddle.name = 'Horse saddle';
+  const mount = { group: horse, position: horse.position, mounted: false, saddle, seatHeight: seat.y };
 
   const crates = [];
   for (let i = 0; i < 2; i++) {
@@ -137,11 +149,14 @@ export async function createGameplayWorld(scene, world, collision) {
     // The story places its people and props through the same reservations,
     // and dresses the camp's fire with its own model.
     reserve: reserveSpot, campfire: { group: fire },
-    update(dt, time, speed = 0) {
+    update(dt, time, speed = 0, sprinting = false) {
       flame.scale.setScalar(.93 + Math.sin(time * 13) * .07); light.intensity = 4 + Math.sin(time * 11);
       water.material.opacity = .6 + Math.sin(time * .7) * .04;
       const ridingSpeed = mount.mounted ? speed : 0;
-      horseModel.animate(dt, { speed: ridingSpeed, moving: ridingSpeed > .1, time });
+      // Mounted walking is faster than the rig's automatic run threshold.
+      // Choose the gait from the rider's controls and use speed only for cadence.
+      const moving = ridingSpeed > .1;
+      horseModel.animate(dt, { speed: ridingSpeed, moving, state: moving ? (sprinting ? 'Sprint' : 'Walk') : 'Idle', time });
     },
     getStats() { return { mounted: mount.mounted, mount: { x: horse.position.x, y: horse.position.y, z: horse.position.z, model: horseModel.meta.model, height: horseModel.height, seatHeight: mount.seatHeight, animation: horseModel.diagnostics }, stations, climbables: [climbable], waterZones, crates: crates.map(c => ({ id: c.id, x: c.position.x, y: c.position.y, z: c.position.z })) }; },
     dispose() {

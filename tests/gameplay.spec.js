@@ -1,11 +1,15 @@
 import { test, expect } from '@playwright/test';
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
-async function enterCity(page) {
+async function enterCity(page, heroId) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?debug=1');
   await page.waitForFunction(() => window.astraReady === true);
+  if (heroId) {
+    await page.locator(`[data-hero="${heroId}"]`).click();
+    await page.waitForFunction(id => window.__ASTRA_DEBUG__?.hero === id && !window.__ASTRA_DEBUG__.switching, heroId);
+  }
   await expect(page.locator('#play-button')).toBeEnabled();
   await page.locator('#play-button').click();
   await page.waitForFunction(() => window.__ASTRA_DEBUG__?.screen === 'game');
@@ -47,8 +51,10 @@ test('camera controls enter aim and cinematic modes and restore the follow view'
   expect(errors).toEqual([]);
 });
 
-test('the nearby horse can be ridden, moves with momentum and returns to walking', async ({ page }) => {
-  const errors = await enterCity(page);
+for (const heroId of ['warden', 'arthur', 'Spiderman']) {
+test(`${heroId} sits on the nearby horse, walks without Shift and sprints only while held`, async ({ page }, testInfo) => {
+  test.skip(heroId !== 'warden' && testInfo.project.name !== 'desktop', 'Imported riding poses are checked once on desktop.');
+  const errors = await enterCity(page, heroId);
   const horse = (await snapshot(page)).activities.mount;
   expect(horse.model).toBe('./horse.glb');
   expect(horse.animation.imported).toBe(true);
@@ -64,16 +70,36 @@ test('the nearby horse can be ridden, moves with momentum and returns to walking
   await expect.poll(async () => (await snapshot(page)).camera.mode).toBe('mount');
   await expect(page.locator('#camera-mode')).toHaveText('MOUNTED');
   await expect(page.locator('#interaction-text')).toHaveText('Dismount');
+  await expect.poll(async () => (await snapshot(page)).riding.seatGap).toBeLessThan(.001);
+  if (heroId !== 'warden') {
+    await expect.poll(async () => (await snapshot(page)).heroRuntime.activeAction).toMatch(/Sitting_Idle/);
+    await expect.poll(async () => (await snapshot(page)).riding.rootHeight).toBeLessThan(horse.seatHeight - .8);
+  }
+  await page.screenshot({ path: testInfo.outputPath(`${heroId}-mounted.png`) });
   const initial = await snapshot(page);
   await page.keyboard.down('KeyW');
   await expect.poll(async () => (await snapshot(page)).position.z).toBeLessThan(initial.position.z - .5);
   const moving = await snapshot(page);
   expect(moving.locomotion.speed).toBeGreaterThan(1);
   expect(moving.activities.mount.z).toBeCloseTo(moving.position.z, 4);
+  // Check the sustained walking pace, beyond the brief walk during acceleration.
+  await expect.poll(async () => (await snapshot(page)).locomotion.speed).toBeGreaterThan(4.4);
+  expect((await snapshot(page)).locomotion.sprinting).toBe(false);
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.state).toBe('Walk');
   await expect.poll(async () => (await snapshot(page)).activities.mount.animation.activeAction).toMatch(/Walk$/);
+  expect((await snapshot(page)).riding.seatGap).toBeLessThan(.001);
   await page.keyboard.down('ShiftLeft');
+  await expect.poll(async () => (await snapshot(page)).locomotion.sprinting).toBe(true);
+  await expect.poll(async () => (await snapshot(page)).locomotion.speed).toBeGreaterThan(7);
   await expect.poll(async () => (await snapshot(page)).activities.mount.animation.activeAction).toMatch(/Gallop$/);
+  expect((await snapshot(page)).riding.seatGap).toBeLessThan(.001);
   await page.keyboard.up('ShiftLeft');
+  // Releasing Shift must return to walking even while forward remains held.
+  await expect.poll(async () => (await snapshot(page)).locomotion.sprinting).toBe(false);
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.state).toBe('Walk');
+  await expect.poll(async () => (await snapshot(page)).activities.mount.animation.activeAction).toMatch(/Walk$/);
+  await expect.poll(async () => (await snapshot(page)).locomotion.speed).toBeLessThan(6.1);
+  expect((await snapshot(page)).locomotion.speed).toBeGreaterThan(1);
   await page.keyboard.up('KeyW');
   await expect.poll(async () => (await snapshot(page)).locomotion.speed).toBeLessThan(.1);
   await expect.poll(async () => (await snapshot(page)).activities.mount.animation.state).toBe('Idle');
@@ -83,8 +109,10 @@ test('the nearby horse can be ridden, moves with momentum and returns to walking
   const dismounted = await snapshot(page);
   expect(dismounted.locomotion.grounded).toBe(true);
   expect(dismounted.position.y).toBeCloseTo(dismounted.terrain.height, 2);
+  expect(dismounted.riding).toBeNull();
   expect(errors).toEqual([]);
 });
+}
 
 test('keyboard camera modes and zoom remain usable after a menu pause', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Keyboard shortcuts and mouse zoom run on desktop.');
