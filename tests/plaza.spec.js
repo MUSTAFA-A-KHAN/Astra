@@ -43,6 +43,8 @@ window.__PLAZA_TEST__ = {
 
 async function bootPlaza(page) {
   const errors = [];
+  // The plaza is only there once the player has turned it on.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ plaza: true })));
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/game.js', async route => {
     const response = await route.fetch();

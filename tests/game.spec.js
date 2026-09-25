@@ -17,7 +17,7 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('all four districts load offline and the roster and menus remain usable', async ({ page }) => {
+test('the three standing districts load offline and the roster and menus remain usable', async ({ page }) => {
   const districtResponses = [];
   const districtFailures = [];
   const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/', '/map-79-void/', '/map/'].some(folder => url.includes(folder));
@@ -38,30 +38,27 @@ test('all four districts load offline and the roster and menus remain usable', a
   // The diorama ships as one file: its textures travel inside the binary.
   expect(districtResponses.some(response => response.path.endsWith('.glb'))).toBe(true);
   expect(districtResponses.some(response => /\.fbx(\.br)?$/i.test(response.path))).toBe(false);
-  // The plaza opens on its footprint alone; its model is fetched once the game is running.
-  expect(districtResponses.some(response => response.path.endsWith('/plaza-night-footprint.glb'))).toBe(true);
   // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
   expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
-  // The Nightwood and the Red Mesa are off until the player turns them on: neither model nor module is fetched.
-  expect(districtResponses.some(response => response.path.includes('/map/'))).toBe(false);
-  expect(requested.some(path => path.endsWith('/nightwood-world.js') || path.endsWith('/mesa-world.js') || path.endsWith('/bank.js'))).toBe(false);
+  // The plaza, the Nightwood and the Red Mesa are off until the player turns them on: no model, footprint or module of theirs is fetched.
+  expect(districtResponses.some(response => response.path.includes('/map/') || response.path.includes('/plaza-night-time/'))).toBe(false);
+  expect(requested.some(path => /\/(plaza-world|plaza-lighting|plaza-light-sources|nightwood-world|mesa-world|bank)\.js$/.test(path))).toBe(false);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
   expect(terrain.provider).toBe('astra-world-map');
   expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
-  expect(terrain.assets).toHaveLength(4);
+  expect(terrain.assets).toHaveLength(3);
   expect(terrain.triangleCount).toBeGreaterThan(500_000);
   expect(terrain.meshCount).toBeGreaterThan(0);
   expect(terrain.colliderCount).toBeGreaterThan(0);
   // The island is only a place if the jetty reaches it from the city's spawn.
   expect(terrain.forestReachable).toBe(true);
-  // And the plaza only if the east jetty does.
-  expect(terrain.plazaReachable).toBe(true);
   // And the yard's pier only if the south jetty does.
   expect(terrain.yardReachable).toBe(true);
-  // There is no north jetty, and no Nightwood to reach; nor any mesa.
+  // There is no east jetty and no plaza to reach, no north jetty and no Nightwood; nor any mesa.
+  expect(terrain.plazaReachable).toBe(false);
   expect(terrain.woodReachable).toBe(false);
   expect(terrain.mesaReachable).toBe(false);
   // Every street lantern in the city model is found and given light.
@@ -657,6 +654,8 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
 });
 
 test('the plaza model streams in once the game is running', async ({ page }) => {
+  // The plaza is only there once the player has turned it on.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ plaza: true })));
   const errors = await boot(page);
   await start(page);
   // It is fetched behind the game, so allow for a slow link as well as a slow renderer.

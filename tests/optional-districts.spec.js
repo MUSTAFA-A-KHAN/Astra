@@ -55,6 +55,7 @@ window.__DISTRICT_TEST__ = {
 `;
 // What each district fetches, once it is on.
 const FILES = {
+  plaza: ['/plaza-world.js', '/plaza-lighting.js', '/plaza-light-sources.js', '/plaza-night-time/plaza-night-footprint.glb', '/plaza-night-time/plaza-navigation.json', '/plaza-night-time/plaza-night.glb'],
   nightwood: ['/nightwood-world.js', '/map/a_forest_3_with_a_road_at_night_for_game.glb'],
   mesa: ['/mesa-world.js', '/map/worldmachine_terrain.glb'],
 };
@@ -81,7 +82,8 @@ async function turnOn(page, district) {
   await Promise.all([page.waitForEvent('load'), setting.click()]);
   await page.waitForFunction(() => window.astraReady && window.__DISTRICT_TEST__);
   await expect(page.locator('#loading')).toBeHidden();
-  expect(requested.filter(path => optional.includes(path)).sort()).toEqual([...FILES[district]].sort());
+  // A model that streams in behind the game is asked for a moment after it opens.
+  await expect.poll(() => requested.filter(path => optional.includes(path)).sort()).toEqual([...FILES[district]].sort());
   await page.getByRole('button', { name: 'Open settings' }).click();
   await expect(setting).toBeChecked();
   await page.getByRole('button', { name: 'Close menu' }).click();
@@ -91,8 +93,9 @@ async function turnOn(page, district) {
 }
 
 // Walks the route from `start`, standing on the ground all the way; from the
-// crossing's landing on, inside `region`. On a slope steep enough to slide, a
-// hero who stops settles a little downhill: `tolerance` allows for that.
+// crossing's landing on (where `from` says, given x and z), inside `region`.
+// On a slope steep enough to slide, a hero who stops settles a little
+// downhill: `tolerance` allows for that.
 async function walk(page, start, route, { region, from, tolerance = .2 }) {
   await page.evaluate(([x, z]) => window.__DISTRICT_TEST__.place(x, z), start);
   for (const [x, z] of route) {
@@ -100,7 +103,7 @@ async function walk(page, start, route, { region, from, tolerance = .2 }) {
     expect(step.distance, `Could not reach ${x},${z}`).toBeLessThan(tolerance);
     expect(step.inWater, `In the water at ${x},${z}`).toBe(false);
     expect(Math.abs(step.y - step.ground), `Not standing on the ground at ${x},${z}`).toBeLessThan(.05);
-    if (from(z)) expect(step.region).toBe(region);
+    if (from(x, z)) expect(step.region).toBe(region);
   }
 }
 
@@ -116,16 +119,29 @@ async function hear(page) {
   return lines;
 }
 
+test('the Lantern Plaza is fetched only once turned on, and the east jetty reaches its street', async ({ page }) => {
+  test.setTimeout(240000);
+  const errors = await turnOn(page, 'plaza');
+  const { terrain } = await page.evaluate(() => window.__ASTRA_DEBUG__);
+  expect(terrain.assets).toHaveLength(4);
+  expect(terrain.plazaReachable).toBe(true);
+  await expect.poll(async () => (await page.evaluate(() => window.__ASTRA_DEBUG__)).terrain.plaza.state, { timeout: 120000 }).toBe('ready');
+  // From the end of the spawn road, along the east jetty, over the plinth's
+  // rim and down onto the market street.
+  await walk(page, [180, 18], [[190, 18], [202, 18], [207, 18]], { region: 'plaza', from: x => x >= 207 });
+  expect(errors).toEqual([]);
+});
+
 test('the Nightwood is fetched only once turned on, and its road is walked from the north quay', async ({ page }) => {
   test.setTimeout(240000);
   const errors = await turnOn(page, 'nightwood');
   const { terrain } = await page.evaluate(() => window.__ASTRA_DEBUG__);
-  expect(terrain.assets).toHaveLength(5);
+  expect(terrain.assets).toHaveLength(4);
   expect(terrain.woodReachable).toBe(true);
   // On the promenade along the north quay, then up the ramp, along the deck,
   // off its buried end, and round both of the road's bends to the far side.
   await walk(page, [0, -146], [[0,-155],[0,-165],[0,-176],[1,-197],[13,-207],[31,-215],[48,-223],[60,-235],[61,-247],[54,-258],[42,-268],[31,-279],[19,-290]],
-    { region: 'nightwood', from: z => z <= -176 });
+    { region: 'nightwood', from: (x, z) => z <= -176 });
   expect(errors).toEqual([]);
 });
 
@@ -133,13 +149,13 @@ test('the Red Mesa is fetched only once turned on, and its gully climbs from the
   test.setTimeout(240000);
   const errors = await turnOn(page, 'mesa');
   const { terrain } = await page.evaluate(() => window.__ASTRA_DEBUG__);
-  expect(terrain.assets).toHaveLength(5);
+  expect(terrain.assets).toHaveLength(4);
   expect(terrain.mesaReachable).toBe(true);
   // Along the pavement above the south quay to the ramp's foot, up it and
   // over the harbour wall, off the jetty's buried end onto the plain, and up
   // the gully, and its shoulder, to the butte's highest point.
   await walk(page, [-10, 88.3], [[-5,88.3],[-5,100],[-5,112],[-5,125],[-5,150],[-5,176],[-5,191],[-11,197],[-17,202],[-23,208],[-29,214],[-35,218],[-41,223],[-47,229]],
-    { region: 'mesa', from: z => z >= 125, tolerance: .6 });
+    { region: 'mesa', from: (x, z) => z >= 125, tolerance: .6 });
   const summit = await page.evaluate(() => window.__ASTRA_DEBUG__.position.y);
   expect(summit).toBeGreaterThan(58);
   // The Wanderer's Camp moves out onto the mesa's sands with it, fire, tent
