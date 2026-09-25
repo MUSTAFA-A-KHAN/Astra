@@ -13,11 +13,11 @@ test('stamina live check', async ({ page }, testInfo) => {
   await page.keyboard.down('KeyW');
   await page.keyboard.down('ShiftLeft');
   const samples = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 13; i++) {
     await page.waitForTimeout(1000);
     const s = await snapshot(page);
     samples.push({ t: i + 1, stamina: +s.locomotion.stamina.toFixed(2), exhausted: s.locomotion.exhausted, state: s.locomotion.state, speed: +s.locomotion.speed.toFixed(1) });
-    if (i === 6) await page.locator('.player-panel').screenshot({ path: testInfo.outputPath('hud-exhausted.png') });
+    if (i === 15) await page.locator('.player-panel').screenshot({ path: testInfo.outputPath('hud-exhausted.png') });
   }
   await page.keyboard.up('ShiftLeft');
   await page.keyboard.up('KeyW');

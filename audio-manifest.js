@@ -13,7 +13,7 @@ export const AUDIO_ASSETS = Object.freeze({
   climb: { files: ['climb.ogg'], volume: .65 },
   hit: { files: ['hit-1.ogg', 'hit-2.ogg'], volume: .7 },
   interaction: { files: ['interaction.ogg'], volume: .55 },
-  breathing: { files: ['breathing.ogg'], bus: 'effects', volume: .08 },
+  breathing: { files: ['breathing.ogg'], bus: 'effects', volume: .03 },
   wind: { files: ['wind.ogg'], bus: 'ambience', volume: .55 },
   birds: { files: ['birds.ogg'], bus: 'ambience', volume: .5 },
   market: { files: ['market.ogg'], bus: 'ambience', volume: .38 },

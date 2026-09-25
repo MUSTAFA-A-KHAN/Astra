@@ -117,7 +117,7 @@ export class LocomotionController {
     this.speed=0; this.slope=0; this.blocked=false; this.stateTime=0;
     this.inWater=false;this.swimming=false;this.waterDepth=0;this.climbing=null;this.events=[];this.pendingEvents=[];
     // Seconds a full stamina bar sprints for, and seconds an empty one takes to refill.
-    this.sprintTime=options.sprintTime ?? 7;this.staminaRecovery=options.staminaRecovery ?? 4;
+    this.sprintTime=options.sprintTime ?? 15;this.staminaRecovery=options.staminaRecovery ?? 4;
     this.stamina=1;this.exhausted=false;this.sprinting=false;this.staminaRest=0;
   }
   requestJump() { this.jumpBuffer=.14; }
