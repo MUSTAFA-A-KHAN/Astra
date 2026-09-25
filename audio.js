@@ -8,7 +8,7 @@ const WALKS = Object.keys(AUDIO_ASSETS).filter(name => AUDIO_ASSETS[name].steps)
 const CORE = [...WALKS, 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction'];
 // How loud a step is brought to, whatever level it was recorded at: the RMS
 // of its loudest hundredth of a second.
-const STEP_LEVEL = .15;
+const STEP_LEVEL = .05;
 
 /** Which walk a stride plays: the horse's when riding, otherwise the ground's, dirt by default. */
 export function footstepSurface(surface = '', mounted = false) {
