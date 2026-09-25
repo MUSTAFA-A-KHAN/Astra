@@ -3187,6 +3187,54 @@ async function makeImported(
       true;
   }
 
+  /**
+   * TURNS
+   *
+   * A mount ships each gait bent both ways, named after its
+   * straight clip — `Skeleton|Walk_L`, `Skeleton|Gallop_R`.
+   * While it is being steered the gait blends toward the side
+   * it is turning to, so it leans into the curve instead of
+   * sliding round on a straight stride.
+   */
+  const turnVariant = (clip, side) =>
+    clips.find(
+      other =>
+        other.name.startsWith(clip.name) &&
+        new RegExp(`^[_ -]?${side}$`, 'i').test(
+          other.name.slice(clip.name.length),
+        ),
+    );
+
+  /**
+   * [left, right] turn actions, keyed by the gait's straight
+   * action.
+   */
+  const turnActions =
+    new Map();
+
+  for (
+    const clip of new Set(
+      [walk, run, sprint].filter(Boolean),
+    )
+  ) {
+    const left = turnVariant(clip, 'l(eft)?');
+    const right = turnVariant(clip, 'r(ight)?');
+
+    if (left && right) {
+      turnActions.set(
+        actions.get(clip),
+        [left, right].map(turn => mixer.clipAction(turn)),
+      );
+    }
+  }
+
+  /**
+   * How fast the character must be turning, in radians per
+   * second, before the turn clip plays outright. A gentler
+   * curve blends it part way.
+   */
+  const fullTurnRate = 1.5;
+
   let current =
     idle
       ? actions.get(idle)
@@ -3294,6 +3342,12 @@ async function makeImported(
   let lean = 0;
   let landing = 0;
   let death = 0;
+
+  /**
+   * How far into its turn clips the gait has blended: 1 is
+   * fully turning left, -1 fully right.
+   */
+  let turning = 0;
 
   /**
    * Per-character trim on top of the measured gait, for models
@@ -3415,6 +3469,25 @@ async function makeImported(
                 ],
               ),
             ),
+
+          // [left, right] turn clips, for the gaits that have them.
+          turns:
+            Object.fromEntries(
+              Object.entries({
+                walk,
+                run,
+                sprint,
+              })
+                .filter(([, clip]) =>
+                  turnActions.has(actions.get(clip)),
+                )
+                .map(([gait, clip]) => [
+                  gait,
+                  turnActions
+                    .get(actions.get(clip))
+                    .map(turn => turn.getClip().name),
+                ]),
+            ),
         },
 
         activeAction:
@@ -3422,6 +3495,18 @@ async function makeImported(
             ?.getClip()
             ?.name ||
           null,
+
+        turning,
+
+        // The turn clip carrying most of the stride, if either is.
+        turnAction:
+          Math.abs(turning) > 0.5
+            ? turnActions
+                .get(current)
+                ?.[turning > 0 ? 0 : 1]
+                .getClip()
+                .name ?? null
+            : null,
 
         state:
           activeState,
@@ -3446,6 +3531,8 @@ async function makeImported(
         sprinting = false,
         jumping = false,
         attacking = false,
+        // Radians per second, positive to the character's left.
+        turnRate = 0,
         state,
         time = 0,
       } = {},
@@ -3526,9 +3613,21 @@ async function makeImported(
           .fadeIn(0.18)
           .play();
 
+        // A gait's turn clips fade with it, starting in step.
+        for (const turn of turnActions.get(next) || []) {
+          turn
+            .reset()
+            .fadeIn(0.18)
+            .play();
+        }
+
         current?.fadeOut(
           0.18,
         );
+
+        for (const turn of turnActions.get(current) || []) {
+          turn.fadeOut(0.18);
+        }
 
         current = next;
       }
@@ -3592,6 +3691,51 @@ async function makeImported(
       current?.setEffectiveTimeScale(
         playbackRate,
       );
+
+      /**
+       * Lean into turns.
+       *
+       * The straight stride hands its weight to the turn clip on
+       * the side the character is turning to, in proportion to
+       * how hard. Weights are set beneath any fade still running,
+       * and the blend eases, so a flick of the stick does not
+       * snap the body round.
+       */
+      const turns =
+        turnActions.get(current);
+
+      turning =
+        THREE.MathUtils.damp(
+          turning,
+          turns &&
+            locomotion &&
+            Number.isFinite(turnRate)
+            ? THREE.MathUtils.clamp(
+                turnRate / fullTurnRate,
+                -1,
+                1,
+              )
+            : 0,
+          8,
+          dt,
+        );
+
+      if (turns) {
+        const [left, right] = turns;
+
+        current.weight = 1 - Math.abs(turning);
+        left.weight = Math.max(turning, 0);
+        right.weight = Math.max(-turning, 0);
+
+        // Each keeps step with the straight stride.
+        for (const turn of turns) {
+          turn.setEffectiveTimeScale(
+            playbackRate *
+              turn.getClip().duration /
+              current.getClip().duration,
+          );
+        }
+      }
 
       /**
        * Landing should be short and snappy.
@@ -3692,6 +3836,7 @@ async function makeImported(
       lean = 0;
       landing = 0;
       death = 0;
+      turning = 0;
 
       facing.rotation.x = 0;
       facing.rotation.z = 0;

@@ -95,6 +95,8 @@ export async function createGameplayWorld(scene, world, collision) {
   const saddle = createRidingAnchor(horseModel.group, back || horseModel.group, seat);
   saddle.name = 'Horse saddle';
   const mount = { group: horse, position: horse.position, mounted: false, saddle, seatHeight: seat.y };
+  // Last frame's heading, to tell how fast the rider is steering.
+  let heading = horse.rotation.y;
 
   const crates = [];
   for (let i = 0; i < 2; i++) {
@@ -156,7 +158,11 @@ export async function createGameplayWorld(scene, world, collision) {
       // Mounted walking is faster than the rig's automatic run threshold.
       // Choose the gait from the rider's controls and use speed only for cadence.
       const moving = ridingSpeed > .1;
-      horseModel.animate(dt, { speed: ridingSpeed, moving, state: moving ? (sprinting ? 'Sprint' : 'Walk') : 'Idle', time });
+      // A rising heading is a turn to the horse's left, which leans it into Walk_L or Gallop_L.
+      const turned = Math.atan2(Math.sin(horse.rotation.y - heading), Math.cos(horse.rotation.y - heading));
+      heading = horse.rotation.y;
+      const turnRate = moving && dt > 0 ? turned / dt : 0;
+      horseModel.animate(dt, { speed: ridingSpeed, moving, turnRate, state: moving ? (sprinting ? 'Sprint' : 'Walk') : 'Idle', time });
     },
     getStats() { return { mounted: mount.mounted, mount: { x: horse.position.x, y: horse.position.y, z: horse.position.z, model: horseModel.meta.model, height: horseModel.height, seatHeight: mount.seatHeight, animation: horseModel.diagnostics }, stations, climbables: [climbable], waterZones, crates: crates.map(c => ({ id: c.id, x: c.position.x, y: c.position.y, z: c.position.z })) }; },
     dispose() {
