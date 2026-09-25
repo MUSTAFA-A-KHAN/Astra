@@ -15,6 +15,9 @@ import * as THREE from 'three';
 //             part of the same mesh as the trunk that holds them up
 //   relative  measures those two from the ground beneath each face instead of
 //             from sea level, for a district whose ground is not one level
+//   sheer     its ground is one sculpted hillside: even the faces too steep
+//             to stand on are floor, for the controller to slide down, where
+//             they would otherwise be holes in the mountain to fall through
 // A mesh matching neither pattern is scenery: no footprint, no floor.
 export function createNavigation(districts, bounds, { cellSize = .75, openings = [], arrival }) {
   const minX = Math.floor(bounds.minX / cellSize) * cellSize;
@@ -85,7 +88,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     }
   }
   for (const district of districts) {
-    const { layout, ground = null, solid = null, standing = .75, reach = Infinity, clutter = null, walkable = Infinity, relative = false } = district;
+    const { layout, ground = null, solid = null, standing = .75, reach = Infinity, clutter = null, walkable = Infinity, relative = false, sheer = false } = district;
     readingLayered = district.layered === true; readingFloorLimit = district.floorLimit ?? Infinity;
     layout.updateMatrixWorld(true);
     layout.traverse(mesh => {
@@ -103,7 +106,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
         else if(floor && clutter && low<clutter[0] && high>clutter[1]) footprint(Math.ceil(Math.min(high,8)/2)*2);
         if(floor && high<walkable) {
           normal.crossVectors(ab.subVectors(b,a),ac.subVectors(c,a)).normalize();
-          if(normal.y>.45) addSurface();
+          if(normal.y>.45 || sheer && normal.y>0) addSurface();
         }
       });
     });

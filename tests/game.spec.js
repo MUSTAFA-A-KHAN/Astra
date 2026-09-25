@@ -43,9 +43,9 @@ test('all four districts load offline and the roster and menus remain usable', a
   // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
   expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
-  // The Nightwood is off until the player turns it on: neither its model nor its module is fetched.
+  // The Nightwood and the Red Mesa are off until the player turns them on: neither model nor module is fetched.
   expect(districtResponses.some(response => response.path.includes('/map/'))).toBe(false);
-  expect(requested.some(path => path.endsWith('/nightwood-world.js'))).toBe(false);
+  expect(requested.some(path => path.endsWith('/nightwood-world.js') || path.endsWith('/mesa-world.js') || path.endsWith('/bank.js'))).toBe(false);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
@@ -61,8 +61,9 @@ test('all four districts load offline and the roster and menus remain usable', a
   expect(terrain.plazaReachable).toBe(true);
   // And the yard's pier only if the south jetty does.
   expect(terrain.yardReachable).toBe(true);
-  // There is no north jetty, and no Nightwood to reach.
+  // There is no north jetty, and no Nightwood to reach; nor any mesa.
   expect(terrain.woodReachable).toBe(false);
+  expect(terrain.mesaReachable).toBe(false);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);

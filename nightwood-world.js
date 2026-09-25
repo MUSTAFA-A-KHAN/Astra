@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { chunkMeshes } from './streaming.js';
+import { bank } from './bank.js';
 
 // The fifth district: "a forest (3) with a road at night for game", by dasy444
 // (https://sketchfab.com/dasy444), used under CC-BY-4.0. A square of wooded
@@ -29,48 +30,6 @@ const ROLES = { 'Material.003':'nightwood-ground', 'Material.004':'nightwood-tru
 // The road's end at the model's northern edge, in the model's units: the jetty
 // lands here.
 const ROAD_END = { x:2.4, z:-3.9 };
-// How far below the surface the bank is carried, so no angle catches its foot
-// from across the water.
-const FOOTING_DEPTH = 1.35;
-
-// The model is a sheet of ground with nothing beneath it: moored in the
-// harbour, its edge would hang over the water like a rug. Carry that edge down
-// past the surface as a bank of bare earth. Built in world space, from the
-// ground as it stands.
-function bank(ground, waterline) {
-  const { position } = ground.geometry.attributes, index = ground.geometry.index;
-  const corner = i => index ? index.getX(i) : i;
-  const key = i => `${position.getX(i).toFixed(4)},${position.getY(i).toFixed(4)},${position.getZ(i).toFixed(4)}`;
-  // An edge that only one face uses is the rim of the model. Vertices are
-  // matched by where they stand, not their index: a seam in the texture
-  // splits a vertex without opening the ground.
-  const edges = new Map();
-  for (let t = 0; t < (index ? index.count : position.count); t += 3) {
-    for (const [p, q] of [[corner(t), corner(t+1)], [corner(t+1), corner(t+2)], [corner(t+2), corner(t)]]) {
-      const a = key(p), b = key(q), id = a < b ? `${a}|${b}` : `${b}|${a}`;
-      const edge = edges.get(id);
-      if (edge) edge.count++; else edges.set(id, { p, q, count:1 });
-    }
-  }
-  const depth = waterline - FOOTING_DEPTH, p = new THREE.Vector3(), q = new THREE.Vector3(), wall = [], shade = [];
-  // Dry earth under the turf, darkening to wet at the waterline.
-  const turf = new THREE.Color('#6b5946'), wet = new THREE.Color('#2a231d');
-  for (const edge of edges.values()) {
-    if (edge.count !== 1) continue;
-    p.fromBufferAttribute(position, edge.p).applyMatrix4(ground.matrixWorld);
-    q.fromBufferAttribute(position, edge.q).applyMatrix4(ground.matrixWorld);
-    wall.push(p.x,p.y,p.z, q.x,depth,q.z, q.x,q.y,q.z, p.x,p.y,p.z, p.x,depth,p.z, q.x,depth,q.z);
-    for (const top of [true, false, true, true, false, false]) shade.push(...(top ? turf : wet).toArray());
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(wall, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(shade, 3));
-  geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors:true, roughness:1, side:THREE.DoubleSide }));
-  mesh.name = 'nightwood-bank'; mesh.receiveShadow = true;
-  return mesh;
-}
-
 export async function loadNightwoodDistrict({ lowPower = false, waterline = 0 } = {}) {
   const assetURL = new URL(NIGHTWOOD_ASSET, import.meta.url);
   const layout = (await new GLTFLoader().loadAsync(assetURL.href)).scene;
@@ -109,7 +68,8 @@ export async function loadNightwoodDistrict({ lowPower = false, waterline = 0 } 
     if (material.map) material.map.anisotropy = lowPower ? 1 : 4;
   }
   for (const mesh of meshes) { mesh.receiveShadow = true; mesh.castShadow = mesh !== ground; }
-  const footing = bank(ground, waterline);
+  // Dry earth under the turf, darkening to wet at the waterline.
+  const footing = bank([ground], { waterline, turf:'#6b5946', wet:'#2a231d', name:'nightwood-bank' });
   // Where the road's end lies on the supplied ground, before that ground is
   // merged away.
   const landing = new THREE.Vector3(ROAD_END.x, 0, ROAD_END.z).applyMatrix4(layout.matrixWorld);
