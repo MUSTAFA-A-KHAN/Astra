@@ -29,6 +29,11 @@ window.__DISTRICT_TEST__ = {
     const { terrain, locomotion: stride } = window.__ASTRA_DEBUG__;
     return {distance:Math.hypot(x-position.x,z-position.z),y:position.y,ground:terrain.height,region:world.biomeAt(position.x,position.z),inWater:stride.inWater};
   },
+  // Where the Wanderer's Camp, its fire and its ledger stand.
+  camp() {
+    const where = p => ({ x: p.x, z: p.z, region: world.biomeAt(p.x, p.z) });
+    return { camp: where(camp), fire: where(activities.campfire.group.position), ledger: where(story.places.ledger), tent: where(story.places.tent) };
+  },
 };
 `;
 // What each district fetches, once it is on.
@@ -108,5 +113,10 @@ test('the Red Mesa is fetched only once turned on, and its gully climbs from the
     { region: 'mesa', from: z => z >= 125, tolerance: .6 });
   const summit = await page.evaluate(() => window.__ASTRA_DEBUG__.position.y);
   expect(summit).toBeGreaterThan(58);
+  // The Wanderer's Camp moves out onto the mesa's sands with it, fire, tent
+  // and ledger, and is walked to from the jetty along the plain.
+  const { camp, fire, ledger, tent } = await page.evaluate(() => window.__DISTRICT_TEST__.camp());
+  for (const place of [camp, fire, ledger, tent]) expect(place.region).toBe('mesa');
+  await walk(page, [-5, 125], [[40, 134], [camp.x, camp.z + 4]], { region: 'mesa', from: () => true });
   expect(errors).toEqual([]);
 });

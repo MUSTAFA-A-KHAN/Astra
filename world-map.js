@@ -93,7 +93,11 @@ export async function createWorld(scene, { lowPower = false, nightwood = false, 
 
   const landmarks = [
     { id:'shrine', name:'Moonwell Sanctuary', ...navigation.findWalkable(0,-50,4), color:'#83e6ee' },
-    { id:'camp', name:'Wanderer’s Camp', ...navigation.findWalkable(-45,25,3), color:'#ffc681' },
+    // The wanderers keep their fire out on the mesa's eastern sands, across the
+    // water from the yard, where the ground lies flattest near the jetty. With
+    // the mesa turned off, the camp stands in the city, west of the square: the
+    // story sends the player there either way.
+    { id:'camp', name:'Wanderer’s Camp', ...(mesaReachable ? navigation.findWalkable(90,142,3) : navigation.findWalkable(-45,25,3)), color:'#ffc681' },
     { id:'watch', name:'Sunstone Watch', ...navigation.findWalkable(50,-20,3), color:'#f1d087' },
     ...(forestReachable ? [{ id:'hollow', name:'The Loner’s Hollow', ...navigation.findWalkable(-118,4,2.2), color:'#9ad07a' }] : []),
     // Before the cathedral's great door, in the market square.

@@ -55,6 +55,14 @@ export const INTRO = 'An old light sleeps beneath the city. Its keeper is still 
 // A line is [speaker, text]. 'you' is the hero, by name; null is narration.
 const say = (who, text) => [who, text];
 
+// How to find the Wanderer's Camp, by the district it stands in: in the city,
+// or out on the Red Mesa when the player has turned that on. A line that
+// gives directions to the camp says `{camp}` where they go.
+export const CAMP_DIRECTIONS = {
+  city: 'west of the square',
+  mesa: 'out on the Red Mesa — take the jetty off the south quay and keep east along the sand',
+};
+
 // What each person says, by the step the story stands at. A step not listed
 // falls back to `default`. `sets` marks the flag a conversation earns once it
 // has been heard to the end, and `react` the emote it leaves the hero making.
@@ -98,11 +106,11 @@ export const CONVERSATIONS = {
       say('tobin', 'You’ve a cruel sense of humour, stranger. Or you’ve been drinking harbour water.'),
       say('tobin', 'Never mind. Those shards — I can see them glowing through your pack. So the old stories are true.'),
       say('tobin', 'The wisps came the morning after the Long Tide. One for every soul the sea took. They aren’t wicked. They’re lost, and lost things lash out.'),
-      say('tobin', 'Quiet three of them. Then go to the Wanderer’s Camp, west of the square. The wanderers dragged a book out of the flooded cistern, years back. Nobody’s had the stomach to read it.'),
+      say('tobin', 'Quiet three of them. Then go to the Wanderer’s Camp, {camp}. The wanderers dragged a book out of the flooded cistern, years back. Nobody’s had the stomach to read it.'),
       say('tobin', 'And if you see something big out in the harbour, glowing blue under the water — that’s the Tidewarden. It’s circled the bay since the well went dark. Leave it be.'),
     ] },
     wisps: { lines: [say('tobin', 'Three of them. They drift where they drowned — the lanes, the square, the old cistern steps.')] },
-    ledger: { lines: [say('tobin', 'The camp’s west of the square. Look for the fire; the wanderers never let it go out.')] },
+    ledger: { lines: [say('tobin', 'The camp’s {camp}. Look for the fire; the wanderers never let it go out.')] },
     restore: { lines: [say('tobin', 'You read it, then. I can see it on your face.'), say('tobin', 'Go on up to the well. Whatever’s waiting there, it’s waited long enough.')] },
     farewell: { sets: 'farewell', react: 'Wave', lines: [
       say('tobin', 'I saw it from the jetty. The whole harbour lit up silver, like the old days. Even the Tidewarden came up to look.'),
@@ -139,9 +147,13 @@ export const CONVERSATIONS = {
 };
 CONVERSATIONS.ledger.restore = CONVERSATIONS.ledger.farewell = CONVERSATIONS.ledger.complete = { lines: CONVERSATIONS.ledger.ledger.lines };
 
-export function conversation(person, step) {
+// `camp` is the district the Wanderer's Camp stands in, for the lines that
+// say how to find it.
+export function conversation(person, step, { camp = 'city' } = {}) {
   const table = CONVERSATIONS[person];
-  return table?.[step] || table?.default || null;
+  const entry = table?.[step] || table?.default || null;
+  const directions = CAMP_DIRECTIONS[camp] ?? CAMP_DIRECTIONS.city;
+  return entry && { ...entry, lines: entry.lines.map(([who, text]) => [who, text.replace('{camp}', directions)]) };
 }
 
 // What the drowned say as they are released: the first three in order, as the

@@ -356,7 +356,7 @@ function interact(){
  */
 let chat=null,finale=false,closed={person:null,at:0};
 function talk(person){
-  const entry=conversation(person,STEPS[storyStep(progress)].id);if(!entry)return;
+  const entry=conversation(person,STEPS[storyStep(progress)].id,{camp:world.biomeAt(camp.x,camp.z)});if(!entry)return;
   begin(person,entry.lines,()=>heard(entry));
 }
 function begin(person,lines,onEnd){

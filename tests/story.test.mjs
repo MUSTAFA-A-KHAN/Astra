@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STEPS, PEOPLE, CONVERSATIONS, storyStep, stepId, readStory, conversation, whisper, WHISPERS } from '../story-script.js';
+import { STEPS, PEOPLE, CONVERSATIONS, CAMP_DIRECTIONS, storyStep, stepId, readStory, conversation, whisper, WHISPERS } from '../story-script.js';
 
 const progress = (changes = {}) => ({ collected: new Set(), kills: 0, restored: false, story: readStory({}), ...changes });
 
@@ -55,6 +55,20 @@ test('conversations only name real speakers and set real flags', () => {
   // Each step that waits on a conversation has one that ends it.
   const sets = Object.values(CONVERSATIONS).flatMap(table => Object.values(table).map(entry => entry.sets));
   for (const flag of ['keeper', 'ferryman', 'ledger', 'restored', 'farewell']) assert.ok(sets.includes(flag), flag);
+});
+
+test('Tobin sends the player to the camp wherever it stands, and no line is left with a blank', () => {
+  const directions = (camp, step) => conversation('tobin', step, { camp }).lines.map(([, text]) => text).join(' ');
+  for (const step of ['ferryman', 'ledger']) {
+    assert.match(directions('city', step), /west of the square/);
+    assert.match(directions('mesa', step), /Red Mesa/);
+    assert.doesNotMatch(directions('mesa', step), /west of the square/);
+    // A district with no directions of its own, such as the plaza, falls back on the city's.
+    assert.match(directions('plaza', step), /west of the square/);
+  }
+  for (const camp of Object.keys(CAMP_DIRECTIONS)) for (const person of Object.keys(CONVERSATIONS)) for (const step of [...STEPS.map(s => s.id), 'finale']) {
+    for (const [, text] of conversation(person, step, { camp })?.lines ?? []) assert.doesNotMatch(text, /\{camp\}/, `${person} at ${step}`);
+  }
 });
 
 test('the first three wisps whisper in order, and any after at random', () => {
