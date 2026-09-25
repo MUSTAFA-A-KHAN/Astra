@@ -481,6 +481,9 @@ addEventListener('keydown',e=>{
   if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
+  // The Escape that opens the pause menu is spent: left alone, the browser
+  // would take it as a request to close the modal it just opened.
+  if(e.code==='Escape')e.preventDefault();
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
   if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();if(e.code==='KeyT')toggleFlashlight();
   if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);

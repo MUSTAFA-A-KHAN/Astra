@@ -37,8 +37,8 @@ test('sprinting spends stamina, an empty bar only jogs, and a rest restores it',
   const controller=actor(),sprint={x:1,z:0,sprint:true};
   advance(controller,3,sprint);
   assert.equal(controller.state,'Sprint');assert.ok(Math.abs(controller.speed-8.5)<.01);
-  assert.ok(controller.stamina>.65 && controller.stamina<.75,'three of ten seconds are spent');
-  advance(controller,7.5,sprint);
+  assert.ok(controller.stamina>.75 && controller.stamina<.85,'three of fifteen seconds are spent');
+  advance(controller,12.5,sprint);
   assert.equal(controller.exhausted,true);assert.equal(controller.sprinting,false);
   assert.equal(controller.state,'Run');assert.ok(Math.abs(controller.speed-4.7)<.01,'the shift key no longer sprints');
   advance(controller,1.5);
