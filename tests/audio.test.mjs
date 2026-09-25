@@ -123,3 +123,22 @@ test('each stride plays the walk of the ground underfoot, and the horse when rid
   for (let i = 1; i < heard.length; i++) assert.notEqual(heard[i].span, heard[i - 1].span);
   assert.ok(AUDIO_ASSETS.walkGrass.files.every(file => audio.buffers.has(file)));
 });
+
+test('breath is heard only as stamina runs out, not for every sprint or climb', async () => {
+  const audio = new GameAudio({ fetcher: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }) });
+  audio.setContext(fakeContext());
+  await Promise.all([...audio.pending.values()]);
+  const run = (seconds, locomotion) => {
+    for (let t = 0; t < seconds; t += 1 / 60) audio.update(1 / 60, { x: 0, y: 0, z: 0 }, 'city', { grounded: true, speed: 8.5, state: 'sprint', surface: 'city', ...locomotion });
+  };
+  run(2, { stamina: .8 });
+  assert.ok(audio.breathLevel < .01, 'a fresh sprint is quiet');
+  run(2, { stamina: 1, climbing: true, state: 'climb' });
+  assert.ok(audio.breathLevel < .01, 'and so is a climb');
+  run(2, { stamina: .2 });
+  assert.ok(audio.breathLevel > .6, 'an almost empty bar is heard');
+  run(2, { stamina: .1, exhausted: true, speed: 4.7, state: 'run' });
+  assert.ok(audio.breathLevel > .75, 'and keeps on while it refills');
+  run(20, { stamina: 1, speed: 0, state: 'idle' });
+  assert.ok(audio.breathLevel < .05, 'then fades once it is back');
+});

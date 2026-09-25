@@ -116,6 +116,9 @@ export class LocomotionController {
     this.coyote=.1; this.jumpBuffer=0; this.landTime=0; this.landingSpeed=0; this.distance=0;
     this.speed=0; this.slope=0; this.blocked=false; this.stateTime=0;
     this.inWater=false;this.swimming=false;this.waterDepth=0;this.climbing=null;this.events=[];this.pendingEvents=[];
+    // Seconds a full stamina bar sprints for, and seconds an empty one takes to refill.
+    this.sprintTime=options.sprintTime ?? 7;this.staminaRecovery=options.staminaRecovery ?? 4;
+    this.stamina=1;this.exhausted=false;this.sprinting=false;this.staminaRest=0;
   }
   requestJump() { this.jumpBuffer=.14; }
   waterAt(x,z) { return this.terrain.getWaterAt?.(x,z) ?? this.waterZones.find(zone=>contains(zone,x,z)) ?? null; }
@@ -145,6 +148,7 @@ export class LocomotionController {
     this.grounded=true;this.state='Idle';this.jumpBuffer=0;this.landTime=0;this.coyote=.1;
     this.climbing=null;this.inWater=false;this.swimming=false;this.waterDepth=0;
     this.events.length=0;this.pendingEvents.length=0;this.landingSpeed=0;this.speed=0;this.blocked=false;this.stateTime=0;
+    this.stamina=1;this.exhausted=false;this.sprinting=false;this.staminaRest=0;
   }
   update(dt, input = {}) {
     this.events.length=0;this.events.push(...this.pendingEvents);this.pendingEvents.length=0;
@@ -158,6 +162,7 @@ export class LocomotionController {
       this.stopClimb();this.velocity.x=this.velocity.y=this.velocity.z=this.verticalVelocity=0;
       this.speed=0;this.state='Dead';this.stateTime+=dt;return;
     }
+    this.updateStamina(dt,input,controls);
     if(input.climb && !this.climbing) this.startClimb(this.climbables.find(c=>Math.hypot(this.position.x-c.x,this.position.z-c.z)<(c.r ?? 2.2)));
     const steps=Math.ceil(dt/(1/120)),step=dt/steps;
     let travelled=0;
@@ -167,9 +172,20 @@ export class LocomotionController {
     }
     this.events.push(...this.pendingEvents);this.pendingEvents.length=0;
     this.speed=travelled/dt;this.distance+=travelled;
-    let next=this.climbing?'Climb':this.swimming?'Swim':this.grounded?(this.landTime>0?'Land':this.speed<.12?'Idle':this.inWater?'Wade':input.walk?'Walk':input.sprint?'Sprint':'Run'):(this.verticalVelocity>0?'Jump':'Fall');
+    let next=this.climbing?'Climb':this.swimming?'Swim':this.grounded?(this.landTime>0?'Land':this.speed<.12?'Idle':this.inWater?'Wade':input.walk?'Walk':this.sprinting?'Sprint':'Run'):(this.verticalVelocity>0?'Jump':'Fall');
     if(input.hurt)next='Hit';else if(input.attacking&&this.grounded)next='Attack';
     this.stateTime=next===this.state?this.stateTime+dt:0;this.state=next;
+  }
+  updateStamina(dt,input,controls) {
+    // Sprinting spends stamina and a short rest refills it. Run it dry and the
+    // legs only jog until it is partly back. A horse carries the effort.
+    this.sprinting=!!input.sprint && (input.mounted || !this.exhausted) && !this.climbing && controls.magnitude>.1;
+    if(this.sprinting && !input.mounted) {
+      this.stamina=Math.max(0,this.stamina-dt/this.sprintTime);this.staminaRest=.8;
+      if(this.stamina===0)this.exhausted=true;
+    } else if((this.staminaRest=Math.max(0,this.staminaRest-dt))===0) this.stamina=Math.min(1,this.stamina+dt/this.staminaRecovery);
+    if(this.exhausted && this.stamina>=.4)this.exhausted=false;
+    controls.sprint=this.sprinting;
   }
   step(dt,input) {
     const p=this.position, v=this.velocity, oldX=p.x, oldZ=p.z;
@@ -261,7 +277,7 @@ export class LocomotionController {
     this.inWater=wet;this.waterDepth=depth;
     this.swimming=wet && depth>this.height*.6 && this.position.y<zone.surface-.3;
   }
-  getStats() { return {state:this.state,grounded:this.grounded,speed:this.speed,verticalVelocity:this.verticalVelocity,groundHeight:this.groundHeight,slope:this.slope,blocked:this.blocked,inWater:this.inWater,swimming:this.swimming,waterDepth:this.waterDepth,climbing:!!this.climbing,landingSpeed:this.landingSpeed,velocity:{x:this.velocity.x,y:this.velocity.y,z:this.velocity.z}}; }
+  getStats() { return {state:this.state,grounded:this.grounded,speed:this.speed,verticalVelocity:this.verticalVelocity,groundHeight:this.groundHeight,slope:this.slope,blocked:this.blocked,inWater:this.inWater,swimming:this.swimming,waterDepth:this.waterDepth,climbing:!!this.climbing,landingSpeed:this.landingSpeed,stamina:this.stamina,exhausted:this.exhausted,sprinting:this.sprinting,velocity:{x:this.velocity.x,y:this.velocity.y,z:this.velocity.z}}; }
 }
 
 function contains(shape,x,z,padding=0) {

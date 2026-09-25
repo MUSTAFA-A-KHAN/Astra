@@ -283,8 +283,9 @@ export class GameAudio {
     } else this.stepDistance = 0;
     this.climbTimer -= dt;
     if (climbing && this.climbTimer <= 0) { this.play('climb', { volume: .65 }); this.climbTimer = .48; }
-    const exertion = !dead && (climbing || /sprint/.test(state) || locomotion.stamina < .3) ? .8 : 0;
-    this.breathLevel += (exertion - this.breathLevel) * (1 - Math.exp(-dt / (exertion ? 3 : 5)));
+    // Breath is heard only as stamina is about to run out, and until it comes back.
+    const exertion = !dead && (locomotion.exhausted || locomotion.stamina < .3) ? .8 : 0;
+    this.breathLevel += (exertion - this.breathLevel) * (1 - Math.exp(-dt / (exertion ? 1 : 5)));
     const levels = { wind: /forest/.test(biomeName) ? .35 : .55, birds: /forest|meadow|plains/.test(biomeName) ? .48 : .14,
       water: /water|lake|river/.test(biomeName) ? .7 : 0, fire: 0, market: 0 };
     for (const name of ['water', 'fire', 'market']) if (environment[name] != null) levels[name] = clamp(environment[name]);

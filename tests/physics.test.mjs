@@ -33,6 +33,26 @@ test('walking accelerates, respects analog magnitude, and coasts to rest',()=>{
   assert.ok(Math.abs(controller.speed-8.5*1.65)<.01,'diagonal mounted movement has normalized speed');
 });
 
+test('sprinting spends stamina, an empty bar only jogs, and a rest restores it',()=>{
+  const controller=actor(),sprint={x:1,z:0,sprint:true};
+  advance(controller,3,sprint);
+  assert.equal(controller.state,'Sprint');assert.ok(Math.abs(controller.speed-8.5)<.01);
+  assert.ok(controller.stamina>.5 && controller.stamina<.6,'three of seven seconds are spent');
+  advance(controller,4.5,sprint);
+  assert.equal(controller.exhausted,true);assert.equal(controller.sprinting,false);
+  assert.equal(controller.state,'Run');assert.ok(Math.abs(controller.speed-4.7)<.01,'the shift key no longer sprints');
+  advance(controller,1.5);
+  assert.equal(controller.exhausted,true,'a short breather is not enough');
+  advance(controller,3);
+  assert.equal(controller.stamina,1);assert.equal(controller.exhausted,false);
+  advance(controller,.5,sprint);
+  assert.equal(controller.state,'Sprint');
+
+  const rider=actor();
+  advance(rider,10,{...sprint,mounted:true});
+  assert.equal(rider.stamina,1,'the horse carries the effort');assert.equal(rider.state,'Sprint');
+});
+
 test('jump buffers trigger once, landing reports impact once, and ceilings stop upward motion',()=>{
   const controller=actor();
   controller.requestJump();

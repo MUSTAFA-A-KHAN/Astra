@@ -713,6 +713,15 @@ function respawnPlayer(){
   enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
   toast('The city shelters you. Your journey continues.');
 }
+// The stamina bar shows only while it is being spent or refilled.
+let shownStamina=-1,shownExhausted=false;
+function updateStamina(){
+  const stamina=Math.round(locomotion.stamina*100),exhausted=locomotion.exhausted;
+  if(stamina===shownStamina&&exhausted===shownExhausted)return;
+  const meter=$('stamina-meter');shownStamina=stamina;shownExhausted=exhausted;
+  $('stamina-fill').style.width=`${stamina}%`;meter.setAttribute('aria-valuenow',stamina);
+  meter.classList.toggle('active',stamina<100);meter.classList.toggle('exhausted',exhausted);
+}
 function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
@@ -721,8 +730,9 @@ function updatePlayer(dt){
   const movementYaw=lockTarget?followCamera.yaw:yaw;
   const wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z;
   locomotion.radius=mounted?.85:.52;
-  locomotion.update(dt,{x:wx,z:wz,magnitude:Math.min(1,length),walk:!run,sprint:run,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+  locomotion.update(dt,{x:wx,z:wz,magnitude:Math.min(1,length),walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
   const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
+  updateStamina();
   propPhysics.update(dt);
   for(const event of locomotion.events){
     if(event.type==='land'&&event.speed>13){health=Math.max(0,health-(event.speed-13)*4);hurtTimer=.8;audio.play('hit',{volume:.6});}
@@ -735,7 +745,7 @@ function updatePlayer(dt){
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
   if(locomotion.climbing)avatar.rotation.y=Math.PI;
   if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||!locomotion.grounded))emoting=null;
-  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:run,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,state:emoting||(mounted?'Ride':locomotion.state),time});
+  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:locomotion.sprinting,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,state:emoting||(mounted?'Ride':locomotion.state),time});
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);
   const interaction=nearbyInteraction();$('interaction-hint').hidden=!interaction;if(interaction)$('interaction-text').textContent=interaction.label;
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
