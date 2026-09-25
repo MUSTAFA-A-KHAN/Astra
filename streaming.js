@@ -140,6 +140,16 @@ export function createStreamer({ quality = 'high' } = {}) {
       items.push(item); apply(item);
       return object;
     },
+    /** Forget an unloaded object, releasing the streamer's reference to it. */
+    remove(object) {
+      for (let i = items.length - 1; i >= 0; i--) if (items[i].object === object) items.splice(i, 1);
+    },
+    /** Forget every registration belonging to an unloaded map or prop group. */
+    removeTree(root) {
+      const objects = new Set(); root.traverse(object => objects.add(object));
+      for (let i = items.length - 1; i >= 0; i--) if (objects.has(items[i].object)) items.splice(i, 1);
+    },
+    clear() { items.length = 0; placed = false; stale = true; last.set(Infinity, Infinity); },
     setQuality(level) { distance = DRAW_DISTANCE[level] ?? DRAW_DISTANCE.high; stale = true; },
     update(position) {
       if (!position) return;

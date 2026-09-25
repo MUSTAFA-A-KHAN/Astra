@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HARBOUR_LEVEL } from './world-map.js';
+import { disposeMapResources } from './map-resources.js';
 
 // The Last Keeper, stood up in the Reach: the Moonwell and its keeper in the
 // sanctuary, the ferryman on the west quay, the wanderers' camp and its
@@ -44,11 +45,14 @@ function shadows(object, cast = true) { for (const mesh of meshes(object)) { mes
 // Fades a model's own materials; they are cloned first so a fade never reaches
 // another model sharing them.
 function fader(object) {
-  const materials = [];
+  const materials = [], originals = new Set();
   for (const mesh of meshes(object)) {
-    mesh.material = [mesh.material].flat().map(material => { const copy = material.clone(); materials.push({ copy, opacity: copy.opacity, transparent: copy.transparent, depthWrite: copy.depthWrite }); return copy; });
+    mesh.material = [mesh.material].flat().map(material => { originals.add(material); const copy = material.clone(); materials.push({ copy, opacity: copy.opacity, transparent: copy.transparent, depthWrite: copy.depthWrite }); return copy; });
     if (mesh.material.length === 1) mesh.material = mesh.material[0];
   }
+  // The copies retain their textures. Release the replaced material objects,
+  // which otherwise escape the later traversal of this story's resources.
+  for (const material of originals) material.dispose();
   return k => {
     for (const { copy, opacity, transparent, depthWrite } of materials) {
       const blending = transparent || k < 1;
@@ -81,10 +85,12 @@ function footprints(object, height = .6, join = .9) {
 
 export function createStory({ world, activities, collision }) {
   const root = new THREE.Group(); root.name = 'The Last Keeper';
+  let disposed = false;
   const ground = (x, z) => world.getHeight(x, z);
-  const colliderIds = [];
-  const collide = (id, shape) => { colliderIds.push(id); collision.insert(id, shape); };
-  const uncollide = id => collision.remove(id);
+  const colliderIds = new Set(), reservations = new Set(), holders = new Set(), liveParts = new Set(), fireVisibility = new Map();
+  const collide = (id, shape) => { if (!disposed) { colliderIds.add(id); collision.insert(id, shape); } };
+  const uncollide = id => { if (!disposed) { colliderIds.delete(id); collision.remove(id); } };
+  const reserve = (...args) => { reservations.add(args[0]); return activities.reserve(...args); };
   const site = (point, facing = 0) => ({ x: point.x, y: point.y ?? ground(point.x, point.z), z: point.z, facing });
   const faceToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
 
@@ -103,18 +109,18 @@ export function createStory({ world, activities, collision }) {
   // The camp: the wanderers' fire, their tent, and the ledger on its stand,
   // which faces out from the fire so its reader stands clear of the camp.
   const fire = activities.campfire.group.position;
-  places.tent = site(activities.reserve('story-tent', fire.x - 8, fire.z - 6, 3.4));
+  places.tent = site(reserve('story-tent', fire.x - 8, fire.z - 6, 3.4));
   places.tent.facing = faceToward(places.tent, fire);
-  places.ledger = site(activities.reserve('story-ledger', fire.x + 3, fire.z - 6, 1));
+  places.ledger = site(reserve('story-ledger', fire.x + 3, fire.z - 6, 1));
   places.ledger.facing = faceToward(fire, places.ledger);
   // The notice board, a few strides from where every journey starts.
-  places.notice = site(activities.reserve('story-notice', world.spawn.x + 7, world.spawn.z - 7, 2.4));
+  places.notice = site(reserve('story-notice', world.spawn.x + 7, world.spawn.z - 7, 2.4));
   places.notice.facing = faceToward(places.notice, world.spawn);
   // The ferryman, where the west jetty leaves the quay.
-  places.tobin = site(activities.reserve('story-ferryman', -70.5, 16, 1));
+  places.tobin = site(reserve('story-ferryman', -70.5, 16, 1));
   places.tobin.facing = faceToward(places.tobin, { x: -60, z: 16 });
   // His boat is hauled up on the quay beside him: the ferry is closed.
-  places.boat = site(activities.reserve('story-boat', -70.8, 24.5, 1.4));
+  places.boat = site(reserve('story-boat', -70.8, 24.5, 1.4));
   // How tall each speaker stands, for the beacon over their head.
   places.maren.top = 1.62 * M; places.tobin.top = 1.78 * M; places.ledger.top = .9 * M;
   const along = (p, distance) => ({ x: p.x + Math.cos(p.facing) * distance, z: p.z - Math.sin(p.facing) * distance });
@@ -130,12 +136,13 @@ export function createStory({ world, activities, collision }) {
   // Each model stands in a holder of its own: the world shows and hides the
   // holder by the player's distance, and the story the model inside it.
   const add = (name, object, place, { kind = 'props', bounds } = {}) => {
+    if (disposed) return null;
     object.name = name; object.position.set(place.x, place.y, place.z); object.rotation.y = place.facing || 0;
     const holder = new THREE.Group(); holder.name = `${name} holder`; holder.add(object); root.add(holder);
-    world.streaming.add(holder, { kind, bounds });
+    world.streaming.add(holder, { kind, bounds }); holders.add(holder);
     loaded[name] = object; return object;
   };
-  const tween = (duration, step) => new Promise(resolve => tweens.push({ duration, t: 0, step, resolve }));
+  const tween = (duration, step) => disposed ? Promise.resolve() : new Promise(resolve => tweens.push({ duration, t: 0, step, resolve }));
   const ease = k => k * k * (3 - 2 * k);
 
   // The ledger's stand and the Moonwell's light are the story's own, so they
@@ -151,18 +158,29 @@ export function createStory({ world, activities, collision }) {
   const wellLight = new THREE.PointLight('#9fe3ff', 0, 22 * M, 1.6); wellLight.position.set(moonwell.x, moonwell.y + 2.2 * M, moonwell.z); root.add(wellLight);
 
   const parts = {};
+  function disposePart(part) {
+    if (!part || part.disposed) return;
+    part.disposed = true; liveParts.delete(part);
+    if (part.mixer) { part.mixer.stopAllAction(); part.mixer.uncacheRoot(part.gltf.scene); }
+    disposeMapResources(part.model);
+    part.mixer = null; part.gltf = null; part.clips = [];
+  }
   function load(file, size, measure, options = {}) {
     return loader.loadAsync(new URL(`${file}.glb`, ASSETS).href).then(gltf => {
+      if (disposed) { disposeMapResources(gltf.scene); return null; }
       if (options.hide) for (const mesh of meshes(gltf.scene, options.hide)) mesh.visible = false;
       const model = fit(gltf.scene, size, measure, options.measure);
       shadows(model, options.castShadow !== false);
       const mixer = gltf.animations.length ? new THREE.AnimationMixer(gltf.scene) : null;
-      return { model, gltf, mixer, clips: gltf.animations };
+      const part = { model, gltf, mixer, clips: gltf.animations };
+      liveParts.add(part);
+      return part;
     });
   }
   const loop = (part, clip = part.clips[0]) => part.mixer.clipAction(clip).play();
 
   async function stream({ prepare } = {}) {
+    if (disposed) return { loaded: 0, failed: 0 };
     // Every download starts at once, but the models are readied and shown one
     // at a time, in the order the story reaches them: building a model's
     // shaders and uploading its textures holds the page up, and fourteen at
@@ -197,6 +215,7 @@ export function createStory({ world, activities, collision }) {
       }),
       place('lantern', load('old-lantern', .55 * M, 'height'), ({ model }) => add('Maren’s lantern', model, places.lantern)),
       place('tobin', Promise.all([load('harbour-villager', 1.78 * M, 'height'), fetch(new URL('harbour-villager-clips.json', ASSETS)).then(r => r.json())]).then(([part, clips]) => {
+        if (!part || disposed || part.disposed) { disposePart(part); return null; }
         // His own clip is a single frame of T-pose; these replace it.
         part.clips = clips.map(clip => THREE.AnimationClip.parse(clip));
         part.mixer ??= new THREE.AnimationMixer(part.gltf.scene);
@@ -220,7 +239,7 @@ export function createStory({ world, activities, collision }) {
       // light and its crackle stay where they were.
       place('campfire', load('wanderers-campfire', 1.6 * M, 'length', { hide: m => /Ground|Grass/i.test([m.material].flat()[0].name) }), part => {
         add('Wanderers’ fire', part.model, site(fire)); loop(part);
-        for (const child of activities.campfire.group.children) if (child.isMesh) child.visible = false;
+        for (const child of activities.campfire.group.children) if (child.isMesh) { fireVisibility.set(child, child.visible); child.visible = false; }
       }),
       place('tidewarden', load('harbour-mythic-whale', 20 * M, 'length'), part => {
         // Streamed by the whole of the water it circles, as far out as the city.
@@ -228,23 +247,30 @@ export function createStory({ world, activities, collision }) {
         shadows(part.model, false);
       }),
     ];
-    let failed = 0;
+    let failed = 0, shown = 0;
     for (const { name, promise, then } of jobs) {
+      let part;
       try {
-        const part = await promise;
+        part = await promise;
+        if (!part || disposed || part.disposed) { disposePart(part); continue; }
         await prepare?.(part.model);
+        if (disposed || part.disposed) { disposePart(part); continue; }
         // Known to the story only once it stands in the world.
         parts[name] = part;
         await then(part);
+        if (disposed) { disposePart(part); continue; }
         // A model arriving late finds the story as it stands, unless the
         // finale is part-way through moving things itself.
         if (!tweens.length) applyState();
+        shown++;
       } catch (error) {
+        disposePart(part);
+        if (disposed) continue;
         failed++; console.warn(`The story's ${name} model did not load; the story goes on without it.`, error);
       }
       await new Promise(resolve => setTimeout(resolve, 16));
     }
-    return { loaded: jobs.length - failed, failed };
+    return { loaded: shown, failed };
   }
 
   // The shard model, for the game's collectibles: one geometry and material,
@@ -265,6 +291,7 @@ export function createStory({ world, activities, collision }) {
   // Puts every loaded model in the state the story is in, without ceremony:
   // what a saved game, or a model arriving late, should find.
   function applyState() {
+    if (disposed) return;
     const { maren, hart, chest, lantern, well } = parts;
     if (maren) maren.model.visible = !departed;
     if (hart) { hart.model.visible = restored; hart.fade(1); }
@@ -280,6 +307,7 @@ export function createStory({ world, activities, collision }) {
 
   // The Moonwell wakes: its light climbs, and the Hart steps out of it.
   async function awaken() {
+    if (disposed) return;
     restored = true;
     const { hart, well } = parts;
     if (well) for (const mist of well.mist) mist.visible = true;
@@ -291,6 +319,7 @@ export function createStory({ world, activities, collision }) {
   }
   // The keeper goes home with the Hart, leaving her lantern and her chest.
   async function depart() {
+    if (disposed) return;
     const { maren, chest, lantern } = parts;
     departed = true;
     await tween(2.6, k => {
@@ -298,6 +327,7 @@ export function createStory({ world, activities, collision }) {
       maren.fade(1 - ease(k)); maren.model.position.y = places.maren.y + ease(k) * .5 * M;
       maren.model.rotation.y = places.maren.facing + (faceToward(places.maren, places.hart) - places.maren.facing) * ease(Math.min(1, k * 2));
     });
+    if (disposed) return;
     if (maren) maren.model.visible = false;
     uncollide('story-maren');
     collide('story-chest', { x: places.chest.x, z: places.chest.z, r: .55 * M });
@@ -305,13 +335,15 @@ export function createStory({ world, activities, collision }) {
     if (chest) {
       chest.model.visible = true;
       await tween(.6, k => chest.model.scale.setScalar(ease(k)));
+      if (disposed) return;
       chest.open.reset().play();
     }
   }
-  function setState(state) { restored = state.restored; departed = state.restored; applyState(); }
+  function setState(state) { if (!disposed) { restored = state.restored; departed = state.restored; applyState(); } }
 
   // Who or what the player can speak to from here, at this point in the story.
   function nearby(position, step) {
+    if (disposed) return null;
     const candidates = [
       !departed && ['maren', places.maren, step === 'restore' ? 'Give Maren the light' : 'Speak with Maren'],
       ['tobin', places.tobin, 'Speak with Tobin'],
@@ -327,6 +359,7 @@ export function createStory({ world, activities, collision }) {
   }
   // Where the step at hand is waiting, for the map and the beacon.
   function objective(step) {
+    if (disposed) return null;
     const at = { keeper: places.maren, ferryman: places.tobin, ledger: places.ledger, restore: places.maren, farewell: places.tobin }[step];
     return at ? { x: at.x, y: at.y + (at.top || 0), z: at.z } : null;
   }
@@ -337,6 +370,7 @@ export function createStory({ world, activities, collision }) {
   const turn = (object, target, dt, rate = 5) => { object.rotation.y += Math.atan2(Math.sin(target - object.rotation.y), Math.cos(target - object.rotation.y)) * (1 - Math.exp(-rate * dt)); };
 
   function update(dt, time, player, step) {
+    if (disposed) return;
     // Nobody out of sight is animated: they pick up where they left off.
     for (const part of Object.values(parts)) if (part.mixer && part.model.parent?.visible) part.mixer.update(dt);
     for (let i = tweens.length - 1; i >= 0; i--) {
@@ -373,18 +407,31 @@ export function createStory({ world, activities, collision }) {
 
   return {
     root, places, stream, shard, nearby, objective, update, awaken, depart, setState,
-    get talking() { return talking; }, set talking(person) { talking = person; },
+    get talking() { return talking; }, set talking(person) { if (!disposed) talking = person; },
     get diagnostics() {
       return {
-        restored, departed, talking, loaded: Object.keys(loaded),
+        restored, departed, talking, disposed, loaded: Object.keys(loaded),
         places: Object.fromEntries(Object.entries(places).map(([name, p]) => [name, { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) }])),
       };
     },
     dispose() {
+      if (disposed) return;
+      disposed = true; talking = null;
       for (const id of colliderIds) collision.remove(id);
-      for (const part of Object.values(parts)) part.mixer?.stopAllAction();
-      root.traverse(object => { object.geometry?.dispose(); for (const material of [object.material].flat()) material?.dispose?.(); });
-      root.removeFromParent();
+      colliderIds.clear();
+      for (const holder of holders) world.streaming.remove(holder);
+      holders.clear();
+      for (const tween of tweens.splice(0)) tween.resolve();
+      for (const part of liveParts) disposePart(part);
+      for (const key of Object.keys(parts)) delete parts[key];
+      for (const key of Object.keys(loaded)) delete loaded[key];
+      for (const [child, visible] of fireVisibility) child.visible = visible;
+      fireVisibility.clear();
+      // Activities survive a crossing; free our reserved places so the next
+      // story instance returns its people to the same city locations.
+      for (let i = (activities.stations?.length ?? 0) - 1; i >= 0; i--) if (reservations.has(activities.stations[i].id)) activities.stations.splice(i, 1);
+      reservations.clear();
+      disposeMapResources(root);
     },
   };
 }

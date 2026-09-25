@@ -125,3 +125,18 @@ test('nothing that holds a light is streamed: hiding it would recompile every sh
   lamp.add(new THREE.PointLight());
   assert.throws(() => streamer.add(lamp), /holds a light/);
 });
+
+test('unloading terrain drops its registrations while keeping independently owned props', () => {
+  const streamer = createStreamer(), map = new THREE.Group(), nested = new THREE.Group();
+  const a = new THREE.Mesh(new THREE.BoxGeometry()), b = new THREE.Mesh(new THREE.BoxGeometry()), prop = new THREE.Mesh(new THREE.BoxGeometry());
+  nested.add(b); map.add(a, nested);
+  streamer.add(a); streamer.add(b); streamer.add(prop);
+  streamer.removeTree(map);
+  assert.equal(streamer.diagnostics.items, 1);
+  a.visible = false; b.visible = false;
+  streamer.update(new THREE.Vector3());
+  assert.equal(a.visible, false); assert.equal(b.visible, false);
+  assert.equal(prop.visible, true);
+  streamer.remove(prop); assert.equal(streamer.diagnostics.items, 0);
+  streamer.add(prop); streamer.clear(); assert.equal(streamer.diagnostics.items, 0);
+});

@@ -72,6 +72,21 @@ test('every story stage has readable dialogue with known speakers', () => {
   }
 });
 
+test('Tobin gives the physical keeper book and mission directions follow the portal route', () => {
+  const chart = chapterTwoConversation('chart', {}).lines.map(([, text]) => text).join(' ');
+  assert.match(chart, /places Maren's ledger in your hands/);
+  assert.match(chart, /Only this book can awaken them/);
+  assert.match(chart, /open it on the lectern, read the passage, then cast the spell/);
+  for (const [id, map] of [['roots', 'forest'], ['bells', 'yard'], ['homecoming', 'city']]) {
+    const step = CHAPTER_TWO_STEPS.find(entry => entry.id === id);
+    assert.equal(step.map, map);
+    assert.match(step.description, /book/);
+    assert.match(step.description, /portal/);
+    assert.match(step.description, /spell/);
+    assert.doesNotMatch(step.description, /bridge/);
+  }
+});
+
 test('the readable clues specify the exact playable rune and bell sequences', () => {
   const state = { accepted: true };
   for (const [person, order] of [['rootTablet', RUNE_ORDER], ['bellTablet', BELL_ORDER]]) {

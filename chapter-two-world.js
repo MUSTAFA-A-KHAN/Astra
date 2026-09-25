@@ -6,6 +6,8 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   const root = new THREE.Group(); root.name = 'The Drowned Meridian'; root.visible = false;
   const places = { chart: storyPlaces.tobin, seal: storyPlaces.maren };
   const props = {}, fighters = [];
+  const siteMaps = { chart: 'city', seal: 'city' };
+  const sites = [];
   let player = new THREE.Vector3(), runeIndex = 0, bellIndex = 0, valves = new Set(), valveTime = 0;
   let wave = 0, arena = null, waveDelay = 0, bossTime = 0, enabled = false;
   const base = new THREE.MeshStandardMaterial({ color: '#344950', roughness: .85 });
@@ -13,6 +15,10 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   const flatDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
   const clear = (a, b) => collision.cameraFraction(new THREE.Vector3(a.x, a.y + 1.8, a.z), new THREE.Vector3(b.x, b.y + 1.8, b.z), .1) > .98;
   function place(id, x, z, map, color, kind = 'stone') {
+    siteMaps[id] = map;
+    sites.push({ id, x, z, map, color, kind });
+  }
+  function buildSite({ id, x, z, map, color, kind }) {
     const available = p => world.biomeAt(p.x,p.z) === map && world.isWalkable(p.x,p.z,.85) && Object.values(places).every(other=>flatDistance(p,other)>4.5);
     let spot = world.findWalkable(x, z, .85);
     if(!available(spot)) {
@@ -51,13 +57,25 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   place('valve3', 176, 178, 'yard', '#f1a265', 'valve');
   place('beacon', 140, 182, 'yard', '#b6fff2');
   place('warden', 205, 206, 'yard', '#c5a5fc');
+  function syncMap() {
+    resetChallenge(); runeIndex = bellIndex = 0;
+    for (const [id, prop] of Object.entries(props)) {
+      world.streaming?.removeTree?.(prop.group);
+      prop.group.traverse(object => object.geometry?.dispose());
+      prop.material.dispose(); prop.group.removeFromParent();
+      delete props[id]; delete places[id];
+    }
+    for (const site of sites) if (!world.activeMap || site.map === world.activeMap) buildSite(site);
+  }
   const marker = new THREE.Mesh(new THREE.OctahedronGeometry(.45), glow('#ffe3a1')); root.add(marker);
   const warning = new THREE.Mesh(new THREE.RingGeometry(.1, 10, 64), new THREE.MeshBasicMaterial({ color: '#ff7255', transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false }));
   warning.rotation.x = -Math.PI / 2; warning.visible = false; root.add(warning);
   const fighterGeometry = new THREE.IcosahedronGeometry(1, 1);
+  syncMap();
   function checkpoint(flag, reward) { if (state[flag]) return; state[flag] = true; onChange({ flag, reward }); }
   const step = () => chapterTwoStep(state).id;
   function objective() {
+    if (world.activeMap && chapterTwoStep(state).map !== world.activeMap) return null;
     return ({ summons: places.chart, roots: places.rootTablet, bells: places.bellTablet,
       valves: valveTime > 0 ? places[['valve1','valve2','valve3'].find(id => !valves.has(id))] : places.valvePanel,
       vigil: places.beacon, warden: places.warden, homecoming: places.seal })[step()] || null;
@@ -77,7 +95,7 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   function nearby(position) {
     player.copy(position);
     if (!isUnlocked()) return null;
-    return candidates().map(([id,label]) => ({ type: 'chapterTwo', id, label, ...places[id] }))
+    return candidates().filter(([id]) => places[id] && (!world.activeMap || siteMaps[id] === world.activeMap)).map(([id,label]) => ({ type: 'chapterTwo', id, label, ...places[id] }))
       .filter(p => flatDistance(position,p) < 4.8 && Math.abs(position.y-p.y) < 3 && (['chart','seal'].includes(p.id)||clear(position,p)))
       .sort((a,b) => flatDistance(position,a)-flatDistance(position,b))[0] || null;
   }
@@ -108,7 +126,7 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
     onMessage(`Beacon vigil · wave ${wave} / 3. Stay within the square.`);
   }
   function interact(action) {
-    if (!isUnlocked() || !candidates().some(([id])=>id===action.id) || flatDistance(player,places[action.id])>=4.8 || Math.abs(player.y-places[action.id].y)>=3 || (!['chart','seal'].includes(action.id)&&!clear(player,places[action.id]))) return null;
+    if (!isUnlocked() || !places[action.id] || (world.activeMap && siteMaps[action.id] !== world.activeMap) || !candidates().some(([id])=>id===action.id) || flatDistance(player,places[action.id])>=4.8 || Math.abs(player.y-places[action.id].y)>=3 || (!['chart','seal'].includes(action.id)&&!clear(player,places[action.id]))) return null;
     const id = action.id;
     if (['chart','rootTablet','bellTablet','valvePanel','seal'].includes(id)) return { person: id };
     if (step() === 'roots' || step() === 'bells') {
@@ -186,8 +204,8 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
     if(arena==='warden')return `Hollow Warden ${Math.max(0,Math.ceil(fighters[0]?.hp||0))} / ${CHALLENGE_RULES.bossHP} · ${bossTime%7<3.4?'DODGE THE RED PULSE':'SHIELD DOWN · ATTACK'}`;
     return '';
   }
-  return { root,places,nearby,interact,update,attack,objective,resetChallenge,get status(){return status();},
-    get mapTargets(){return isUnlocked()?candidates().map(([id,label])=>({id,label,...places[id]})):[];},
+  return { root,places,nearby,interact,update,attack,objective,resetChallenge,syncMap,get status(){return status();},
+    get mapTargets(){return isUnlocked()?candidates().filter(([id]) => places[id] && (!world.activeMap || siteMaps[id] === world.activeMap)).map(([id,label])=>({id,label,...places[id]})):[];},
     get combatants(){return fighters;},
     get diagnostics(){return {step:step(),flags:{...state},places,arena,wave,runeIndex,bellIndex,valves:[...valves],valveTime,bossTime,status:status(),enemies:fighters.map(f=>({hp:f.hp,alive:f.alive,boss:f.boss,x:f.group.position.x,y:f.group.position.y,z:f.group.position.z}))};} };
 }

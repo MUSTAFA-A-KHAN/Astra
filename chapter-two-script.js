@@ -33,13 +33,13 @@ export const CHAPTER_TWO_STEPS = [
   {
     id: 'roots', map: 'forest', where: 'PINE ISLET',
     title: 'The memory beneath the roots',
-    description: 'Cross the west bridge to Pine Islet. Read the root tablet, then awaken its three runes in the remembered order.',
+    description: 'Read the keeper\'s book beside the city portal and cast its passage spell to reach Pine Islet. Read the root tablet, then awaken its three runes in the remembered order.',
     recap: 'The root lock remembered the living world and released its first note.',
   },
   {
     id: 'bells', map: 'yard', where: 'SKIBIDI YARD',
     title: 'Bells for a missing dawn',
-    description: 'Take the south bridge to Skibidi Yard, where the salvage crews stacked the drowned bells. Read the bell-ringer\'s verse by the landing and sound the three bells in order.',
+    description: 'With the root lock open, read the book at Pine Islet\'s portal and cast the next passage spell to Skibidi Yard. Read the bell-ringer\'s verse by the landing and sound the three bells in order.',
     recap: 'The bells carried a night across the water, returning the second note.',
   },
   {
@@ -63,7 +63,7 @@ export const CHAPTER_TWO_STEPS = [
   {
     id: 'homecoming', map: 'city', where: 'MOONWELL',
     title: 'A promise with no keeper',
-    description: 'Bring the Tidewarden\'s voice to the meridian seal beside the Moonwell. Let the Reach hear the promise it forgot.',
+    description: 'Read the book at the yard\'s portal and cast the homeward spell. Bring the Tidewarden\'s voice to the meridian seal beside the Moonwell. Let the Reach hear the promise it forgot.',
     recap: 'The three locks opened into one promise: no soul would have to keep the light alone again.',
   },
   {
@@ -99,6 +99,7 @@ export function chapterTwoConversation(person, state = {}) {
     if (state.complete) return { lines: [say('chart', 'Heard the bells from here this morning. First time in twenty years they sounded like a beginning. Fair winds, Keeper.')] };
     if (state.accepted) return { lines: [
       say('chart', 'Root, bell, iron. One lock on Pine Islet, two in the old pumping yard. Three locks on one stolen voice.'),
+      say('chart', 'Use Maren\'s book at each portal. Read its passage aloud, then cast the spell. The root lock opens the way to the yard; the Tidewarden\'s voice opens the way home.'),
       say('chart', state.warden ? 'Bring its voice to the seal beside the Moonwell. Let the whole harbour hear it.' : 'When all three locks open, kindle the meridian beacon among the yard\'s stacks. Then face the Hollow Warden at the yard\'s far end and free the Tidewarden\'s voice.'),
     ] };
     return { sets: 'accepted', lines: [
@@ -108,7 +109,10 @@ export function chapterTwoConversation(person, state = {}) {
       say('chart', 'The Long Tide stole its voice and sealed it in drowned iron. Three locks hold it: a memory under Pine Islet, then a song and a breath in the old pumping yard, where the salvage crews stacked the drowned bells.'),
       say('you', 'And if I open them?'),
       say('chart', 'Kindle the meridian beacon among the yard\'s stacks. It will reveal the Hollow Warden at the yard\'s far end: an iron shell with our guardian\'s voice trapped inside. Break that shell and bring the voice home.'),
-      say('chart', 'Begin across the west bridge, at the root tablet. Maren left you a light. This time you must carry it beyond the city.'),
+      say(null, 'Tobin places Maren\'s ledger in your hands. Pale ink shines between its last pages: spells for the old keeper portals.'),
+      say('chart', 'Only this book can awaken them. At each portal, open it on the lectern, read the passage, then cast the spell. Keep reading while the far shore takes shape.'),
+      say('chart', 'The city portal will take you to Pine Islet. Open its root lock to reveal the passage to the yard. Free the Tidewarden\'s voice there, and the book will show you the way home.'),
+      say('chart', 'Begin with the book beside the city portal, then find the root tablet on Pine Islet. Maren left you a light. This time you must carry it beyond the city.'),
     ] };
   }
 

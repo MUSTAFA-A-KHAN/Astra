@@ -1790,7 +1790,16 @@ function makeBuiltin(meta) {
         0.025 +
       stride * 0.07;
 
-    if (activeState === 'Climb') {
+    if (activeState === 'Read') {
+      body.rotation.x = .12;
+      shoulders[0].rotation.x = shoulders[1].rotation.x = -.65;
+      elbows[0].rotation.x = elbows[1].rotation.x = -.9;
+    } else if (activeState === 'Cast') {
+      shoulders[0].rotation.x = -1.4;
+      shoulders[1].rotation.x = -1.65 + Math.sin(time * 2) * .12;
+      elbows[0].rotation.x = -.8;
+      elbows[1].rotation.x = -.3;
+    } else if (activeState === 'Climb') {
       const reach = Math.sin(time * 5) * .45;
       shoulders[0].rotation.x = -2.5 + reach;
       shoulders[1].rotation.x = -2.5 - reach;
@@ -3579,6 +3588,8 @@ async function makeImported(
     // how the caller finds out.
     ...emoteClips,
     ...actionClips,
+
+    Cast: find([/cast|spell.*release|magic.*attack/i]) || actionClips.Interact || attack || idle,
 
     // The loop; its way in and out are in `sequences`.
     ...(reading.loop && {

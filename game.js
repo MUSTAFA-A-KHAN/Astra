@@ -12,6 +12,8 @@ import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
 import { createChapterTwo } from './chapter-two-world.js';
+import { createPortal } from './portal-world.js';
+import { portalRoute, portalConversation } from './portal-script.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -26,7 +28,8 @@ const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), resto
 progress.chapterTwo = readChapterTwo(saved);
 const chapterTwoUnlocked = () => progress.restored && progress.story.farewell;
 const currentChapter = () => chapterTwoUnlocked() ? CHAPTER_TWO : CHAPTER;
-const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE };
+const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, portalBook: { name: 'The keeper’s spellbook', color: '#bceee6', read: true } };
+let portalJourney = null;
 // Where the player has put each on-screen control, as a fraction of
 // the viewport: a phone that rotates, or a window that resizes, keeps
 // the thumb rest in the same corner instead of the same pixel. An
@@ -67,7 +70,7 @@ let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, vict
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, hero: heroMeta.id })); dirtySave = false; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, map: world.activeMap || 'city', hero: heroMeta.id })); dirtySave = false; }
   catch { /* Private browsing and full storage must never stop play. */ }
 }
 // A toast marked `after` waits for the one on screen instead of replacing it:
@@ -111,7 +114,7 @@ const flashlightModel = flashlight.load().catch(error => console.warn('The flash
 let world;
 try {
   $('load-message').textContent = 'Preparing the Verdant Reach…';
-  world = await createWorld(scene, { lowPower: touch, plaza: preferences.plaza, nightwood: preferences.nightwood, mesa: preferences.mesa });
+  world = await createWorld(scene, { portalTravel: true, lowPower: touch, plaza: preferences.plaza, nightwood: preferences.nightwood, mesa: preferences.mesa });
 } catch (error) {
   $('load-message').textContent = 'The Reach could not load. Check your connection and try again.';
   $('retry-button').hidden = false;
@@ -137,7 +140,7 @@ world.colliders.forEach((collider, index) => collision.insert(`city-${index}`, c
 const activities = await createGameplayWorld(scene, world, collision);
 // The Last Keeper's people and places. Their models stream in after the game
 // starts; who stands where is known already, so they can be spoken to at once.
-const story = createStory({ world, activities, collision });
+let story = createStory({ world, activities, collision });
 scene.add(story.root); story.setState({ restored: progress.restored });
 const currentStep = () => chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
 const questIndex = () => chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
@@ -147,6 +150,31 @@ const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterT
   onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
 });
 scene.add(chapterTwo.root);
+const portal = createPortal({ world }); scene.add(portal.root);
+const inCity = () => !world.activeMap || world.activeMap === 'city';
+const cityExtraColliders = new Map();
+function placePortal() {
+  const anchor = inCity() ? { x: -52, z: 32 } : world.spawn;
+  // Both the dais and its reader need clear ground. Search locally so the
+  // portal never asks the player to stand inside the imported scenery.
+  let chosen = null;
+  for (let r = 0; r <= 36 && !chosen; r += 3) for (let i = 0; i < 16 && !chosen; i++) {
+    const x = anchor.x + Math.cos(i * Math.PI / 8) * r, z = anchor.z + Math.sin(i * Math.PI / 8) * r;
+    if (!world.isWalkable(x, z, 2.4)) continue;
+    const point = { x, y: groundHeight(x,z), z };
+    for (let facing = 0; facing < Math.PI * 2; facing += Math.PI / 2) {
+      portal.place(point, facing);
+      const { book, reading } = portal.places;
+      if ([book, reading].every(p => world.isWalkable(p.x,p.z,.85) && Math.abs(groundHeight(p.x,p.z)-point.y)<.6)
+        && Object.values(chapterTwo.places).every(p => Math.hypot(p.x-book.x,p.z-book.z)>6)
+        && (!inCity() || Object.values(story.places).every(p => Math.hypot(p.x-book.x,p.z-book.z)>6))) { chosen = point; break; }
+    }
+  }
+  if (!chosen) portal.place(world.findWalkable(anchor.x,anchor.z,2.4));
+  portal.setPhase('dormant');
+}
+placePortal();
+const questObjective = () => chapterTwoUnlocked() ? (currentStep().map !== (world.activeMap || 'city') ? portal.places.book : chapterTwo.objective()) : story.objective(currentStep().id);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 // A ridden horse keeps its own heading and wheels round rather than turning on the spot.
 const reins = new MountSteering();
@@ -279,7 +307,7 @@ function updateHUD(){
   }
 }
 function attack(special=false){
-  if(screen!=='game'||dialog.open||chat||document.hidden||!hero||contextLost)return;
+  if(screen!=='game'||dialog.open||chat||portalJourney||document.hidden||!hero||contextLost)return;
   if(special?abilityTimer>0:attackTimer>0)return;
   if(special)abilityTimer=7;attackTimer=heroMeta.cooldown;
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
@@ -310,6 +338,9 @@ function attack(special=false){
   updateHUD();
 }
 function nearbyInteraction(){
+  if(portalJourney)return null;
+  const book = portal.nearby(position); if(book)return book;
+  if(!inCity())return chapterTwo.nearby(position);
   if(activities.mount.mounted)return {type:'mount',label:'Dismount'};
   if(locomotion.climbing)return {type:'climb',label:'Let go of ladder'};
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
@@ -320,8 +351,9 @@ function nearbyInteraction(){
   return null;
 }
 function interact(){
-  if(screen!=='game'||dialog.open||chat)return;
+  if(screen!=='game'||dialog.open||chat||portalJourney)return;
   const action=nearbyInteraction();if(!action)return;
+  if(action.type==='portal'){readPortalBook();return;}
   if(action.type==='chapterTwo'){
     if(action.id===closed.person&&performance.now()-closed.at<400)return;
     const result=chapterTwo.interact(action);
@@ -360,7 +392,7 @@ function talk(person){
   begin(person,entry.lines,()=>heard(entry));
 }
 function begin(person,lines,onEnd){
-  const place=chapterTwo.places[person]||story.places[person]||story.places.maren;
+  const place=person==='portalBook'?portal.places.book:chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
   avatar.rotation.y=Math.atan2(dx,dz);lockTarget=null;aiming=cinematic=false;resetInput();syncCameraControls();
@@ -430,6 +462,90 @@ $('conversation').addEventListener('click',advance);
 // Skipping still counts as hearing it all: the story never hangs on a line.
 function skipConversation(){if(chat){chat.index=chat.lines.length-1;chat.shown=Infinity;endConversation();}}
 
+// The next map downloads while the hero reads. Its prepared scene waits at
+// the gate until the spoken spell and the step into the portal have finished.
+async function prepareModel(object) {
+  object.traverse(mesh=>{for(const material of [mesh.material].flat())for(const value of Object.values(material||{}))if(value?.isTexture)renderer.initTexture(value);});
+  if(renderer.compileAsync)await renderer.compileAsync(object,camera,scene);
+}
+function portalStatus(text, covered=false) {
+  $('portal-status').hidden=!text; $('portal-status').textContent=text;
+  $('portal-veil').classList.toggle('visible',covered);
+}
+function readPortalBook() {
+  const route=portalRoute(progress,world.activeMap || 'city');
+  if(route.lockedReason){begin('portalBook',portalConversation(route).lines);return;}
+  if(!locomotion.grounded || activities.mount.mounted)return;
+  const reading=portal.places.reading;
+  position.set(reading.x,groundHeight(reading.x,reading.z),reading.z);avatar.position.copy(position);locomotion.reset();
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const journey=portalJourney={route,phase:'reading',elapsed:0,readFinished:false,ready:false,release};
+  portal.setPhase('reading');
+  begin('portalBook',portalConversation(route).lines,()=>{journey.readFinished=true;});
+  $('interaction-hint').hidden=true;
+  world.travelTo(route.destination,{prepare:async object=>{
+    await prepareModel(object);journey.ready=true;await gate;
+  }}).then(async arrival=>{
+    await arriveThroughPortal(arrival);
+    portalJourney=null;portalStatus('');resetInput();settling=.9;
+    save();updateHUD();toast(`${route.mapName} · The keeper’s spell carries you safely through.`);
+  }).catch(error=>{
+    console.warn('The portal passage could not open.',error);
+    if(chat?.person==='portalBook'){chat.onEnd=null;endConversation();}
+    journey.release();portalJourney=null;portal.setPhase('dormant');portalStatus('');resetInput();
+    toast('The passage faded. Your journey is safe. Read the book again to retry.');
+  });
+}
+function updatePortalJourney(dt) {
+  const j=portalJourney;if(!j)return;
+  j.elapsed+=dt;
+  if(j.phase==='reading') {
+    if(!chat)hero.animate(dt,{state:'Read',fidget:false,time});
+    if(j.readFinished && j.elapsed>=1.8){j.phase='casting';j.elapsed=0;portalStatus('Speaking the keeper’s spell…');}
+  } else if(j.phase==='casting') {
+    const p=portal.places.portal;avatar.rotation.y=Math.atan2(p.x-position.x,p.z-position.z);
+    hero.animate(dt,{state:'Cast',fidget:false,time});portal.setPhase('casting',Math.min(1,j.elapsed/3.4));
+    if(j.elapsed>=3.4){j.phase='ready';j.elapsed=0;portal.setPhase('ready');showPulse(p.x,p.z,8,'#9deee6');}
+  } else if(j.phase==='ready') {
+    hero.animate(dt,{state:'Read',fidget:false,time});
+    portalStatus(j.ready?'The passage is open.':'The spell holds. The far shore is taking shape…');
+    if(j.ready){j.phase='entering';j.elapsed=0;j.from=position.clone();portalStatus('Stepping between the tides…');}
+  } else if(j.phase==='entering') {
+    position.lerpVectors(j.from,portal.places.portal,Math.min(1,j.elapsed/1.2));avatar.position.copy(position);
+    hero.animate(dt,{state:'Walk',moving:true,speed:4,fidget:false,time});
+    if(j.elapsed>=1.2){j.phase='traveling';j.elapsed=0;portal.setPhase('traveling');portalStatus(`Crossing to ${j.route.mapName}…`,true);}
+  } else if(j.phase==='traveling' && j.elapsed>=.35) {
+    j.phase='arriving';j.release();
+  }
+}
+async function arriveThroughPortal(arrival) {
+  // City actors are separate from the map. Keep the reusable horse and small
+  // activity props, and release the chapter's imported scenery and people.
+  if(!inCity()) {
+    story.dispose();
+    for(const [id,entry] of collision.entries)if(!String(id).startsWith('city-'))cityExtraColliders.set(id,entry);
+  }
+  collision.clear();
+  world.colliders.forEach((shape,index)=>collision.insert(`city-${index}`,shape));
+  if(inCity()) {
+    for(const [id,shape] of cityExtraColliders)collision.insert(id,shape);
+    cityExtraColliders.clear();
+    for(let i=activities.stations.length-1;i>=0;i--)if(activities.stations[i].id.startsWith('story-'))activities.stations.splice(i,1);
+    story=createStory({world,activities,collision});scene.add(story.root);story.setState({restored:progress.restored});
+    chapterTwo.places.chart=story.places.tobin;chapterTwo.places.seal=story.places.maren;
+    story.stream({prepare:prepareModel}).catch(error=>console.warn('The story models did not load.',error));
+  }
+  chapterTwo.syncMap();placePortal();
+  spawn.set(arrival.x,arrival.y,arrival.z);position.copy(spawn);avatar.position.copy(position);stage.position.copy(spawn);
+  activities.mount.mounted=false;locomotion.waterZones=inCity()?activities.waterZones:[];locomotion.climbables=inCity()?activities.climbables:[];
+  locomotion.reset();lockTarget=null;aiming=cinematic=false;attackTimer=abilityTimer=hurtTimer=combatMemory=0;
+  for(const enemy of enemies)enemy.group.visible=inCity()&&enemy.alive;
+  shardMesh.visible=inCity();activities.root.visible=inCity();mapLayer=null;
+  world.setTime(preferences.time);world.setQuality(quality);renderer.renderLists.dispose();
+  followCamera.reset(position,yaw,currentView().pitch,currentView().radius);
+}
+
 const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dragX=0,dragY=0,dragDistance=0;
 let yaw=0,pitch=.48,radius=14;
 const cameraTarget=new THREE.Vector3(),cameraDesired=new THREE.Vector3();
@@ -491,6 +607,7 @@ addEventListener('keydown',e=>{
   if(dialog.open){if(e.code==='Escape'){e.preventDefault();closeDialog();}return;}
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
   if(screen!=='game')return;
+  if(portalJourney&&!chat){e.preventDefault();return;}
   // A conversation takes the keys it pages with; everything else waits.
   if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
   // An open emote picker is the first thing Escape closes.
@@ -728,11 +845,12 @@ addEventListener('resize', () => {
 applyLayout();
 
 function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the gold marker':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
-function enterLobby(){if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
+function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
 function openMenu(type){
+  if(portalJourney)return;
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${currentChapter().eyebrow} · ${currentChapter().title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
     content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><label class="setting-row"><span>Red Mesa<small>A wind-carved butte on a plain of red sand, across the water from the south quay. A 13 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="mesa-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
@@ -766,7 +884,7 @@ function respawnPlayer(){
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
   followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
   enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
-  toast('The city shelters you. Your journey continues.');
+  toast('The keeper?s light shelters you. Your journey continues.');
 }
 // The stamina bar shows only while it is being spent or refilled.
 let shownStamina=-1,shownExhausted=false;
@@ -794,7 +912,7 @@ function updatePlayer(dt){
   locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!run?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
   const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
   updateStamina();
-  propPhysics.update(dt);
+  if(inCity())propPhysics.update(dt);
   for(const event of locomotion.events){
     if(event.type==='land'&&event.speed>13){health=Math.max(0,health-(event.speed-13)*4);hurtTimer=.8;audio.play('hit',{volume:.6});}
   }
@@ -818,6 +936,7 @@ function updatePlayer(dt){
   $('ability-cooldown').style.height=`${abilityTimer/7*100}%`;
   let nearestThreat=Infinity;
   for(const e of enemies){
+    if(!inCity()){e.group.visible=false;continue;}
     if(!e.alive){
       if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig?.animate(dt,{state:'Dead',time});e.ragdoll.update(dt);if(e.dying===0)e.group.visible=false;}
       e.respawn=Math.max(0,e.respawn-dt);
@@ -852,6 +971,7 @@ function updateConversation(dt){
   hero.animate(dt,{speed:0,holding:flashlight.out,state:chat.pose,injured:health<=30,fidget:false,time});
 }
 function updateShards(){
+  shardMesh.visible=inCity();if(!inCity())return;
   for(let i=0;i<shardPositions.length;i++){
     if(!shardPositions[i]){dummy.scale.setScalar(0);dummy.updateMatrix();shardMesh.setMatrixAt(i,dummy.matrix);continue;}
     const [x,z]=shardPositions[i];
@@ -912,7 +1032,7 @@ function drawMap(){
   mapLayer??=drawMapLayer();
   map.drawImage(mapLayer,Math.round(px(bounds.minX)),Math.round(pz(bounds.minZ)));
   for(const l of world.landmarks){map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
-  const goal=chapterTwoUnlocked()?chapterTwo.objective():story.objective(currentStep().id);
+  const goal=questObjective();
   if(goal){
     let gx=px(goal.x)-90,gz=pz(goal.z)-90;const reach=Math.hypot(gx,gz);if(reach>80){gx*=80/reach;gz*=80/reach;}
     map.save();map.translate(90+gx,90+gz);map.rotate(Math.PI/4);map.fillStyle='#ffd98a';map.strokeStyle='#3b2b0d';map.lineWidth=1.5;map.fillRect(-4.5,-4.5,9,9);map.strokeRect(-4.5,-4.5,9,9);map.restore();
@@ -934,13 +1054,15 @@ function animate(now){
   const raw=Math.max(0,(now-lastFrame)/1000);lastFrame=now;const dt=Math.min(raw,.08);time+=dt;
   if(!dialog.open){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
-    if(screen==='game'&&hero){if(chat)updateConversation(dt);else{const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
+    if(screen==='game'&&hero){if(chat)updateConversation(dt);else if(!portalJourney){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
-    activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
+    if(screen==='game')updatePortalJourney(dt);
+    portal.root.visible=screen==='game';portal.update(dt,reducedMotion?0:time);
+    activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
-    story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id);
-    chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat});
+    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id);
+    chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
@@ -969,8 +1091,10 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics,journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
+  const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
+  if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
   if(!hero)await selectHero('warden');
   updateHUD();updateCamera(1);updateShards();$('performance-readout').hidden=!preferences.showFPS;
@@ -983,11 +1107,9 @@ try{
   // The plaza's model, when the plaza is on, streams in behind the game rather
   // than holding up its start. Its shaders and textures are made ready before
   // it is shown, so its arrival costs no dropped frames.
-  const prepare=async object=>{
-    object.traverse(mesh=>{for(const material of [mesh.material].flat())for(const value of Object.values(material||{}))if(value?.isTexture)renderer.initTexture(value);});
-    if(renderer.compileAsync)await renderer.compileAsync(object,camera,scene);
-  };
+  const prepare=prepareModel;
+  portal.load({prepare}).catch(error=>console.warn('The portal uses its carved stand-in.',error));
   world.stream({prepare}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
   // The story's people and props follow the same way, each ready before it is shown.
-  story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
+  if(inCity())story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
 }catch(error){console.error(error);$('load-message').textContent='This device could not start the 3D world. Try again with a WebGL-enabled browser.';$('retry-button').hidden=false;}

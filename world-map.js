@@ -38,7 +38,11 @@ const MESA_JETTY = { width: 5, quay: 88, pavement: .45, pitch: .35 };
 // heroes' flashlights, come on by.
 export const daylightAt = hour => THREE.MathUtils.clamp(Math.sin((hour-6)/12*Math.PI)*1.4,0,1);
 
-export async function createWorld(scene, { lowPower = false, plaza: plazaOn = false, nightwood = false, mesa = false } = {}) {
+export async function createWorld(scene, { lowPower = false, plaza: plazaOn = false, nightwood = false, mesa = false, portalTravel = false } = {}) {
+  if (portalTravel) {
+    const { createPortalWorld } = await import('./portal-map-world.js');
+    return createPortalWorld(scene, { lowPower });
+  }
   const [city, forest, yard, lantern, wood, butte] = await Promise.all([
     loadCityDistrict({ lowPower }), loadForestDistrict({ lowPower, waterline: HARBOUR_LEVEL }), loadYardDistrict({ lowPower }),
     // Until the player turns the plaza, the Nightwood or the mesa on, neither
