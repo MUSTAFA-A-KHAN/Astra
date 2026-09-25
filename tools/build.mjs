@@ -13,7 +13,7 @@ await prepareVendor();
 const runtimeExtensions = new Set(['.html', '.js', '.css', '.glb', '.svg', '.png', '.jpg', '.webp', '.ico']);
 // The diorama, plaza and yard folders also hold the supplied model and its
 // loose texture pages, which the game never fetches: ship the converted models alone.
-const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb', 'plaza-night-time/plaza-night.glb', 'plaza-night-time/plaza-night-footprint.glb', 'plaza-night-time/plaza-navigation.json', 'map-79-void/skibidi-toilet-79.glb'];
+const runtimeFiles = ['forest-loner-diorama/forest-loner-diorama.glb', 'plaza-night-time/plaza-night.glb', 'plaza-night-time/plaza-night-footprint.glb', 'plaza-night-time/plaza-navigation.json', 'map-79-void/skibidi-toilet-79.glb', 'map/a_forest_3_with_a_road_at_night_for_game.glb'];
 // Supplied models the game never fetches: tools/pack-flashlight.py packs the
 // flashlight the heroes carry into assets/props from this one.
 const sourceFiles = ['flashlight.glb'];

@@ -20,10 +20,12 @@ const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 test('all four districts load offline and the roster and menus remain usable', async ({ page }) => {
   const districtResponses = [];
   const districtFailures = [];
-  const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/', '/map-79-void/'].some(folder => url.includes(folder));
+  const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/', '/map-79-void/', '/map/'].some(folder => url.includes(folder));
+  const requested = [];
   page.on('response', response => {
     if (district(response.url())) districtResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
   });
+  page.on('request', request => requested.push(new URL(request.url()).pathname));
   page.on('requestfailed', request => {
     if (district(request.url())) districtFailures.push(request.url());
   });
@@ -41,6 +43,9 @@ test('all four districts load offline and the roster and menus remain usable', a
   // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
   expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
+  // The Nightwood is off until the player turns it on: neither its model nor its module is fetched.
+  expect(districtResponses.some(response => response.path.includes('/map/'))).toBe(false);
+  expect(requested.some(path => path.endsWith('/nightwood-world.js'))).toBe(false);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
@@ -56,6 +61,8 @@ test('all four districts load offline and the roster and menus remain usable', a
   expect(terrain.plazaReachable).toBe(true);
   // And the yard's pier only if the south jetty does.
   expect(terrain.yardReachable).toBe(true);
+  // There is no north jetty, and no Nightwood to reach.
+  expect(terrain.woodReachable).toBe(false);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);
