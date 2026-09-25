@@ -79,11 +79,12 @@ export function chapterTwoStep(state = {}) {
   return CHAPTER_TWO_STEPS[index < 0 ? CHAPTER_TWO_STEPS.length - 1 : index];
 }
 
+// `read`: an inscription the hero stops to read, as in story-script.js.
 export const CHAPTER_TWO_PEOPLE = {
   chart: { name: 'Tobin', title: 'Ferryman', color: '#e9c38b' },
-  rootTablet: { name: 'The root tablet', title: 'First lock', color: '#9ad07a' },
-  bellTablet: { name: 'The bell-ringer\'s verse', title: 'Second lock', color: '#ffb35c' },
-  valvePanel: { name: 'The pressure ledger', title: 'Third lock', color: '#ff9276' },
+  rootTablet: { name: 'The root tablet', title: 'First lock', color: '#9ad07a', read: true },
+  bellTablet: { name: 'The bell-ringer\'s verse', title: 'Second lock', color: '#ffb35c', read: true },
+  valvePanel: { name: 'The pressure ledger', title: 'Third lock', color: '#ff9276', read: true },
   beacon: { name: 'The meridian beacon', title: 'A vigil for the drowned', color: '#afeaff' },
   warden: { name: 'The Tidewarden', title: 'Guardian without a voice', color: '#8bdcff' },
   seal: { name: 'The meridian seal', title: 'The Moonwell', color: '#d9c5ff' },

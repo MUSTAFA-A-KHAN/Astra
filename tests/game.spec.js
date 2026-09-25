@@ -68,6 +68,8 @@ test('all four districts load offline and the roster and menus remain usable', a
   await expect(page.locator('#menu-dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Close menu' }).click();
   await start(page);
+  // A starter hero has no gestures, so there is no picker to open.
+  await expect(page.locator('#emote-button')).toBeHidden();
   await page.getByRole('button', { name: 'Open quest journal' }).click();
   await expect(page.locator('#dialog-content')).toContainText('The woman at the well');
   await page.getByRole('button', { name: 'Close menu' }).click();
@@ -167,6 +169,97 @@ test('Arthur plays his retargeted emotes in place with his feet on the ground', 
     expect.soft(band.lowest, `${state} sinks below the ground`).toBeGreaterThan(result.idle.lowest - result.height * 0.03);
     expect.soft(band.highest, `${state} floats off the ground`).toBeLessThan(result.idle.lowest + result.height * 0.03);
     expect.soft(band.drift, `${state} walks away from the player position`).toBeLessThan(0.001);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('Gwen reads, talks, limps and fidgets in place with her feet on the floor', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Detailed asset validation runs once on desktop Chromium.');
+  test.setTimeout(process.env.CI ? 480000 : 240000);
+  const errors = await boot(page);
+  const result = await page.evaluate(async () => {
+    const { createHero } = await import('/characters.js');
+    const THREE = await import('three');
+    const hero = await createHero('Spiderman');
+
+    const feet = [];
+    let hips = null;
+    hero.group.traverse(object => {
+      if (object.isBone && /Foot|Toe/i.test(object.name)) feet.push(object);
+      if (!hips && object.isBone && /hips/i.test(object.name)) hips = object;
+    });
+
+    const point = new THREE.Vector3();
+    let anchor = null;
+    // As Arthur's emotes are measured, but against the floor her walk
+    // lands on: the gaits play exactly as they were authored. Drift is
+    // the hips' own: her clips carry them, root motion and all.
+    const scan = (options, seconds) => {
+      const band = { lowest: Infinity, drift: 0, actions: new Set() };
+      for (let frame = 0; frame < Math.round(seconds * 30); frame++) {
+        hero.animate(1 / 30, { speed: 0, fidget: false, time: frame / 30, ...options });
+        hero.group.updateMatrixWorld(true);
+        for (const bone of feet) band.lowest = Math.min(band.lowest, bone.getWorldPosition(point).y);
+        hips.getWorldPosition(point);
+        anchor ??= point.clone();
+        band.drift = Math.max(band.drift, Math.hypot(point.x - anchor.x, point.z - anchor.z));
+        band.actions.add(hero.diagnostics.activeAction);
+      }
+      band.actions = [...band.actions];
+      return band;
+    };
+
+    const floor = scan({ state: 'Walk', moving: true, speed: 3 }, 3).lowest;
+    anchor = null;
+    const selected = hero.diagnostics.selectedAnimations;
+    const bands = { Idle: scan({ state: 'Idle' }, 3) };
+    for (const state of [...Object.keys(selected.emotes), ...Object.keys(selected.actions)]) {
+      bands[state] = scan({ state }, Math.min(hero.cue(state), 4));
+      scan({ state: 'Idle' }, 0.5);
+    }
+    bands.Read = scan({ state: 'Read' }, 6);
+    bands['Read, put away'] = scan({ state: 'Idle' }, 2.5);
+    bands.Injured = scan({ state: 'Idle', injured: true }, 3);
+    bands.Limp = scan({ state: 'Walk', injured: true, moving: true, speed: 2 }, 6);
+
+    // Left standing, she finds something to do with herself.
+    const fidgets = new Set();
+    for (let frame = 0; frame < 40 * 10; frame++) {
+      hero.animate(1 / 10, { state: 'Idle', time: frame / 10 });
+      if (hero.diagnostics.fidget) fidgets.add(hero.diagnostics.fidget);
+    }
+
+    const height = hero.height;
+    hero.dispose();
+    return { selected, bands, floor, height, fidgets: [...fidgets] };
+  });
+
+  const { selected } = result;
+  expect(Object.keys(selected.emotes)).toEqual(expect.arrayContaining(['Dance', 'Sad', 'Wave', 'Cheer', 'Point', 'Stomp', 'Salute', 'Sing']));
+  // A different dance each time.
+  expect(selected.emotes.Dance).toHaveLength(4);
+  expect(Object.keys(selected.actions).sort()).toEqual(['Interact', 'Kneel', 'Push', 'Talk']);
+  expect(selected.read.enter).toMatch(/Trans_SpellBook/);
+  expect(selected.read.loop).toMatch(/Read_Loop/);
+  expect(selected.read.exit).toMatch(/SpellBook_Trans_Stand/);
+  expect(selected.injured.idle).toBeTruthy();
+  expect(selected.injured.walk).toBeTruthy();
+  expect(result.fidgets.length).toBeGreaterThan(0);
+
+  // The book is opened, read, and closed again.
+  expect(result.bands.Read.actions).toEqual([selected.read.enter, selected.read.loop]);
+  expect(result.bands['Read, put away'].actions).toEqual([selected.read.exit, 'Idle']);
+  expect(result.bands.Limp.actions).toEqual([selected.injured.walk]);
+
+  for (const [state, band] of Object.entries(result.bands)) {
+    // Her clips come from three different rigs, each with its own idea
+    // of where the hips sit: an idle stood a hand's width in the air, a
+    // kneel with no hip track hung above the ground.
+    expect.soft(band.lowest, `${state} sinks below the floor`).toBeGreaterThan(result.floor - result.height * 0.03);
+    expect.soft(band.lowest, `${state} never reaches the floor`).toBeLessThan(result.floor + result.height * 0.03);
+    // Sway is allowed; travel is not. An in-place walk left with its
+    // root motion carries her metres off and snaps her back.
+    expect.soft(band.drift, `${state} walks away from the player position`).toBeLessThan(result.height * 0.05);
   }
   expect(errors).toEqual([]);
 });

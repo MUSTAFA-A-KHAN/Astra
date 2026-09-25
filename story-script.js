@@ -12,11 +12,13 @@
 
 export const CHAPTER = { eyebrow: 'CHAPTER ONE', title: 'The Last Keeper' };
 
+// `read` marks a thing read rather than a person spoken to: the hero
+// takes out a book for it, or leans in to the page.
 export const PEOPLE = {
   maren: { name: 'Maren', title: 'Keeper of the Moonwell', color: '#9fdcff' },
   tobin: { name: 'Tobin', title: 'Ferryman', color: '#e9c38b' },
-  notice: { name: 'Harbour notice board', color: '#d8c7a3' },
-  ledger: { name: 'The keeper’s ledger', color: '#d8c7a3' },
+  notice: { name: 'Harbour notice board', color: '#d8c7a3', read: true },
+  ledger: { name: 'The keeper’s ledger', color: '#d8c7a3', read: true },
 };
 
 // Each step is done once its test passes, and the story stands at the first
@@ -55,7 +57,7 @@ const say = (who, text) => [who, text];
 
 // What each person says, by the step the story stands at. A step not listed
 // falls back to `default`. `sets` marks the flag a conversation earns once it
-// has been heard to the end.
+// has been heard to the end, and `react` the emote it leaves the hero making.
 export const CONVERSATIONS = {
   maren: {
     keeper: { sets: 'keeper', lines: [
@@ -102,7 +104,7 @@ export const CONVERSATIONS = {
     wisps: { lines: [say('tobin', 'Three of them. They drift where they drowned — the lanes, the square, the old cistern steps.')] },
     ledger: { lines: [say('tobin', 'The camp’s west of the square. Look for the fire; the wanderers never let it go out.')] },
     restore: { lines: [say('tobin', 'You read it, then. I can see it on your face.'), say('tobin', 'Go on up to the well. Whatever’s waiting there, it’s waited long enough.')] },
-    farewell: { sets: 'farewell', lines: [
+    farewell: { sets: 'farewell', react: 'Wave', lines: [
       say('tobin', 'I saw it from the jetty. The whole harbour lit up silver, like the old days. Even the Tidewarden came up to look.'),
       say('you', 'Maren is at rest. She asked me to tell you it wasn’t your fault.'),
       say('tobin', '…'),
@@ -125,7 +127,7 @@ export const CONVERSATIONS = {
   },
   ledger: {
     default: { lines: [say(null, 'A water-stained book lies open by the fire. The wanderers have weighted its pages with a stone. It isn’t yours to read — not yet.')] },
-    ledger: { sets: 'ledger', lines: [
+    ledger: { sets: 'ledger', react: 'Sad', lines: [
       say(null, 'Page after page of tidy handwriting: oil for the lamps, the depth of the well, the name of every child who ever dropped a wish-coin into it.'),
       say(null, 'The last entry is written in a hurry. The ink has run.'),
       say(null, '“The tide is at the door. The well’s heart will drown if it stays in the sanctuary, so I am carrying it down to the cistern, where the stone is thick and the water can’t reach.”'),

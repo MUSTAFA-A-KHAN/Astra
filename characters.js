@@ -108,7 +108,7 @@ export const HEROES = [
     weapon: 'Spirit energy',
 
     imported: true,
-    size: '16 MB',
+    size: '24 MB',
     model: './gwen_stacy.glb',
 
     orientationYaw: 0,
@@ -119,6 +119,19 @@ export const HEROES = [
       walk: 1,
       run: 1,
       sprint: 1,
+    },
+
+    // She ships a whole songbook of dances; each press of Dance
+    // picks another. The hands-on-hips routines start from a pose
+    // of their own and the leg-kick one never lets its leg down,
+    // so only the ones that begin and end standing are here.
+    clips: {
+      Dance: [
+        /DanceGroovy_01_Loop/,
+        /DanceChickenWing/,
+        /DanceSprinkler/,
+        /^UAL1_Standard:Dance_Loop$/,
+      ],
     },
   },
   {
@@ -1861,6 +1874,7 @@ function makeBuiltin(meta) {
     // gesture clips. Reporting none keeps callers from having to
     // ask whether a character is imported.
     emotes: {},
+    cue: () => 0,
 
     get diagnostics() {
       return {
@@ -2158,6 +2172,15 @@ function loadCompanionClips(url) {
 }
 
 /**
+ * A bone whose position carries the character over the ground,
+ * when the rig's root bone does not. Some exporters number every
+ * node — `mixamorigHips_01` — and a hips bone is the hips either
+ * way.
+ */
+const ROOT_NAME =
+  /(hips|pelvis|root)$|hips(_\d+)+$/i;
+
+/**
  * How fast a locomotion clip's own root motion would carry the
  * character across the ground, in world units per second.
  *
@@ -2213,7 +2236,7 @@ function clipStrideSpeed(
     if (
       !rootBone &&
       node !== model &&
-      !/(hips|pelvis|root)$/i.test(
+      !ROOT_NAME.test(
         nodeName || '',
       )
     ) {
@@ -2326,7 +2349,7 @@ function inPlaceClip(
         if (
           !rootBone &&
           node !== model &&
-          !/(hips|pelvis|root)$/i.test(
+          !ROOT_NAME.test(
             nodeName || '',
           )
         ) {
@@ -2494,6 +2517,64 @@ function findAnimation(
   }
 
   return null;
+}
+
+/**
+ * The name of the clip a state plays — or of every clip, for a
+ * state that picks one of several.
+ */
+function clipNames(value) {
+  return Array.isArray(value)
+    ? value.map(clip => clip.name)
+    : value?.name ?? null;
+}
+
+/**
+ * Whether a clip was authored to repeat. Every baker says so in
+ * the name: `Dance_Loop`, `Read_Loop_01`.
+ */
+function looping(clip) {
+  return /loop/i.test(clip.name);
+}
+
+/**
+ * How long a gesture is held. A one-shot runs its length; a loop
+ * a second long would be over before anyone saw it, so it repeats
+ * for a few seconds.
+ */
+function holdFor(clip) {
+  return looping(clip)
+    ? clip.duration *
+        Math.max(
+          1,
+          Math.round(
+            6 / clip.duration,
+          ),
+        )
+    : clip.duration;
+}
+
+/**
+ * One of several clips at random, other than the one just played
+ * when there is a choice.
+ */
+function pickClip(
+  clips,
+  previous,
+) {
+  const fresh =
+    clips.length > 1
+      ? clips.filter(
+          clip => clip !== previous,
+        )
+      : clips;
+
+  return fresh[
+    Math.floor(
+      Math.random() *
+        fresh.length,
+    )
+  ];
 }
 
 /**
@@ -2744,6 +2825,146 @@ async function makeImported(
       : null;
 
   /**
+   * The soles, and where they rest on the floor.
+   *
+   * Measured on the mesh rather than the bones: where a foot bone
+   * sits inside the shoe depends on who rigged it, and a rest pose
+   * on tiptoe puts it a hand's width above a sole flat on the
+   * ground. What counts is the shoe. So these are the lowest of
+   * the mesh's vertices in the rest pose — the pose the model was
+   * fitted to the ground in, before any clip has moved a bone —
+   * and where they rest now is the floor.
+   *
+   * Only a character with feet: a wisp drifts, and is left to.
+   */
+  let footed = false;
+
+  model.traverse(node => {
+    if (
+      node.isBone &&
+      /(foot|toe)/i.test(node.name)
+    ) {
+      footed = true;
+    }
+  });
+
+  const soleAt =
+    new THREE.Vector3();
+
+  // World to the fitted model's space, as of the last `pose`.
+  const toFitted =
+    new THREE.Matrix4();
+
+  // Where one vertex of a skinned mesh is in the current pose, in
+  // the fitted model's space.
+  const heightOf = (mesh, index) => {
+    soleAt.fromBufferAttribute(
+      mesh.geometry.attributes.position,
+      index,
+    );
+
+    mesh.applyBoneTransform(
+      index,
+      soleAt,
+    );
+
+    return soleAt
+      .applyMatrix4(mesh.matrixWorld)
+      .applyMatrix4(toFitted).y;
+  };
+
+  /**
+   * [mesh, vertex] pairs: every vertex in the bottom tenth of the
+   * body in the rest pose, thinned to a few hundred. That is the
+   * feet and nothing else, and enough of them that a heel or a
+   * toe touching down is always among them.
+   */
+  const soles = [];
+
+  // `updateMatrixWorld`, not `updateWorldMatrix`: only the first
+  // refreshes a skinned mesh's bind inverse, and one left from
+  // before the model was fitted puts every vertex out by the fit.
+  const pose = () => {
+    fitted.updateWorldMatrix(
+      true,
+      false,
+    );
+
+    fitted.updateMatrixWorld(true);
+
+    toFitted
+      .copy(fitted.matrixWorld)
+      .invert();
+  };
+
+  if (footed && mixer) {
+    pose();
+
+    const low = [];
+    let floor = Infinity;
+
+    model.traverse(mesh => {
+      if (!mesh.isSkinnedMesh) {
+        return;
+      }
+
+      const count =
+        mesh.geometry.attributes.position.count;
+
+      // A sparse pass is plenty to find the feet, and a dense
+      // mesh is not worth skinning whole to do it.
+      const step =
+        Math.max(
+          1,
+          Math.ceil(count / 15000),
+        );
+
+      for (let i = 0; i < count; i += step) {
+        const y = heightOf(mesh, i);
+
+        floor = Math.min(floor, y);
+        low.push([mesh, i, y]);
+      }
+    });
+
+    const feet = low.filter(
+      ([, , y]) =>
+        y < floor + targetHeight * 0.1,
+    );
+
+    const every =
+      Math.max(
+        1,
+        Math.ceil(feet.length / 400),
+      );
+
+    for (let i = 0; i < feet.length; i += every) {
+      soles.push(feet[i]);
+    }
+  }
+
+  const lowestSole = () => {
+    // The mixer has moved the bones since they were last drawn.
+    pose();
+
+    let lowest = Infinity;
+
+    for (const [mesh, index] of soles) {
+      lowest = Math.min(
+        lowest,
+        heightOf(mesh, index),
+      );
+    }
+
+    return lowest;
+  };
+
+  const restSole =
+    soles.length
+      ? lowestSole()
+      : 0;
+
+  /**
    * Animation lookup helper.
    */
   const find = patterns =>
@@ -2896,24 +3117,51 @@ async function makeImported(
    * different names depending on who baked it — a Samba is
    * `Dance` out of `tools/retarget-emotes.py` and
    * `michelle:SambaDance` out of a web rigger.
+   *
+   * A character can name its own clips for a state instead, in
+   * its meta's `clips`. Every pattern there contributes one, so a
+   * state given several becomes a set to choose from: a character
+   * with a dozen dances does a different one each time.
    */
+  const pool = patterns => [
+    ...new Set(
+      patterns
+        .map(pattern => find([pattern]))
+        .filter(Boolean),
+    ),
+  ];
+
+  const lookup = (state, patterns) => {
+    const own = meta.clips?.[state];
+
+    if (!own) {
+      return find(patterns);
+    }
+
+    const chosen = pool(own);
+
+    return chosen.length > 1
+      ? chosen
+      : chosen[0] || null;
+  };
+
   const emoteClips = {
     Dance:
-      find([
+      lookup('Dance', [
         /^dance$/i,
         /samba/i,
         /dance/i,
       ]),
 
     Nod:
-      find([
+      lookup('Nod', [
         /^nod$/i,
         /agree/i,
         /^yes$/i,
       ]),
 
     Shake:
-      find([
+      lookup('Shake', [
         /^shake$/i,
         /head.?shake/i,
         /disagree/i,
@@ -2921,20 +3169,177 @@ async function makeImported(
       ]),
 
     Sad:
-      find([
+      lookup('Sad', [
         /^sad$/i,
         /sad/i,
         /defeat/i,
       ]),
+
+    Wave:
+      lookup('Wave', [
+        /^wave$/i,
+        /wave/i,
+      ]),
+
+    Cheer:
+      lookup('Cheer', [
+        /^cheer$/i,
+        /heel.?click/i,
+        /cheer/i,
+        /excited/i,
+        /celebrat/i,
+      ]),
+
+    Point:
+      lookup('Point', [
+        /^point$/i,
+        /point/i,
+      ]),
+
+    Stomp:
+      lookup('Stomp', [
+        /^stomp$/i,
+        /stomp/i,
+        /frustrat/i,
+      ]),
+
+    Salute:
+      lookup('Salute', [
+        /^salute$/i,
+        /salute/i,
+        /hat.?tip/i,
+      ]),
+
+    // Whole word only: `Sitting` is not a song.
+    Sing:
+      lookup('Sing', [
+        /^sing$/i,
+        /(^|[^a-z])sing([^a-z]|$)/i,
+      ]),
   };
 
-  for (const key of Object.keys(
+  /**
+   * ACTIONS
+   *
+   * What the character does to the world rather than how they
+   * feel about it: speaking up, pressing a rune, putting a
+   * shoulder to a crate, kneeling at a valve. The game asks for
+   * these by situation, never by key, and a character without one
+   * just stands through the moment.
+   */
+  const actionClips = {
+    Talk:
+      lookup('Talk', [
+        /^talk(ing)?$/i,
+        /idle.?talk/i,
+        /conv.*talk/i,
+      ]),
+
+    Interact:
+      lookup('Interact', [
+        /^interact$/i,
+        /interact/i,
+      ]),
+
+    Push:
+      lookup('Push', [
+        /^push$/i,
+        /push/i,
+      ]),
+
+    Kneel:
+      lookup('Kneel', [
+        /fixing/i,
+        /kneel/i,
+        /repair/i,
+      ]),
+  };
+
+  for (const table of [
     emoteClips,
-  )) {
-    if (!emoteClips[key]) {
-      delete emoteClips[key];
+    actionClips,
+  ]) {
+    for (const key of Object.keys(
+      table,
+    )) {
+      if (!table[key]) {
+        delete table[key];
+      }
     }
   }
+
+  /**
+   * READING
+   *
+   * A book is taken out, read, and put away again: an intro that
+   * plays once into the reading loop, and an outro on the way
+   * back to standing. Either end may be missing and the loop
+   * alone still reads; without a loop there is no reading at all.
+   */
+  const reading = {
+    enter:
+      find([
+        /stand.?trans.?(spell.?)?book/i,
+        /read.?start/i,
+      ]),
+
+    loop:
+      lookup('Read', [
+        /^read(ing)?$/i,
+        /read.*loop/i,
+        /reading/i,
+      ]),
+
+    exit:
+      find([
+        /(spell.?)?book.?trans.?stand/i,
+        /read.?stop/i,
+      ]),
+  };
+
+  const sequences =
+    reading.loop
+      ? { Read: reading }
+      : {};
+
+  /**
+   * INJURED
+   *
+   * Badly hurt, a character nurses the wound: standing hunched
+   * over it, walking with a limp. Only the stand and the walk
+   * change. A hero with a wound can still run for it.
+   */
+  const hurtIdle =
+    find([
+      /injur.*idle/i,
+      /wounded.*idle/i,
+      /hurt.*idle/i,
+    ]);
+
+  const hurtWalk =
+    find([
+      /injur.*walk/i,
+      /wounded.*walk/i,
+      /limp/i,
+    ]);
+
+  /**
+   * FIDGETS
+   *
+   * Left standing long enough, a character looks about, scratches
+   * an itch, sniffs at themselves. Each plays through once, from
+   * the idle and back to it.
+   */
+  const fidgets =
+    pool(
+      meta.clips?.Fidget || [
+        /stand.*idle.*look.?around/i,
+        /idle.*scratch/i,
+        /stinky.?pits/i,
+        /stinky.?bum/i,
+        /fidget/i,
+      ],
+    );
 
   console.group(
     `[${meta.name}] Selected Animations`,
@@ -2996,8 +3401,36 @@ async function makeImported(
       emoteClips,
     ).map(
       ([state, clip]) =>
-        `${state} -> ${clip.name}`,
+        `${state} -> ${clipNames(clip)}`,
     ),
+  );
+
+  console.log(
+    'Actions:',
+    Object.entries(
+      actionClips,
+    ).map(
+      ([state, clip]) =>
+        `${state} -> ${clipNames(clip)}`,
+    ),
+  );
+
+  console.log(
+    'Read:',
+    Object.values(reading).map(
+      clip => clip?.name || 'NONE',
+    ),
+  );
+
+  console.log(
+    'Injured:',
+    hurtIdle?.name || 'NONE',
+    hurtWalk?.name || 'NONE',
+  );
+
+  console.log(
+    'Fidgets:',
+    fidgets.map(clip => clip.name),
   );
 
   console.groupEnd();
@@ -3041,6 +3474,11 @@ async function makeImported(
     sprint:
       strideOf(sprint) ||
       targetHeight * 2.6,
+
+    // A limp covers less ground a step than a walk does.
+    hurt:
+      strideOf(hurtWalk) ||
+      targetHeight * 0.55,
   };
 
   // Gait selection assumes the band is ordered, whatever the
@@ -3140,6 +3578,12 @@ async function makeImported(
     // should not be requestable at all, which `emotes` below is
     // how the caller finds out.
     ...emoteClips,
+    ...actionClips,
+
+    // The loop; its way in and out are in `sequences`.
+    ...(reading.loop && {
+      Read: reading.loop,
+    }),
   };
 
   /**
@@ -3150,9 +3594,16 @@ async function makeImported(
 
   for (
     const clip of new Set(
-      Object.values(
-        stateClips,
-      ).filter(Boolean),
+      [
+        ...Object.values(
+          stateClips,
+        ).flat(),
+        reading.enter,
+        reading.exit,
+        hurtIdle,
+        hurtWalk,
+        ...fidgets,
+      ].filter(Boolean),
     )
   ) {
     actions.set(
@@ -3165,6 +3616,10 @@ async function makeImported(
 
   /**
    * One-shot animations.
+   *
+   * A gesture that is not a loop plays through once and holds its
+   * last frame, so the fade back to standing starts from where it
+   * ended rather than from a flash of its first frame.
    */
   for (
     const clip of [
@@ -3172,6 +3627,20 @@ async function makeImported(
       attack,
       hit,
       dead,
+      reading.enter,
+      reading.exit,
+      ...fidgets,
+      ...[
+        ...Object.values(emoteClips),
+        actionClips.Interact,
+        actionClips.Kneel,
+      ]
+        .flat()
+        .filter(
+          clip =>
+            clip &&
+            !looping(clip),
+        ),
     ].filter(Boolean)
   ) {
     actions
@@ -3234,6 +3703,134 @@ async function makeImported(
    * curve blends it part way.
    */
   const fullTurnRate = 1.5;
+
+  /**
+   * FEET ON THE FLOOR
+   *
+   * A character's clips come from wherever the clips came from,
+   * and they do not all agree on where the floor is. Every
+   * standing clip — the idle, if it carries the hips' height, and
+   * each gesture — is sampled once, here, before anything plays.
+   *
+   * Most only disagree by a constant: an idle retargeted from a
+   * taller rig stands a hand's width in the air all the way
+   * through. Those are moved to the floor once, by the lowest
+   * their feet go anywhere in the clip, so a jump for joy still
+   * leaves the ground.
+   *
+   * Some hold the hips at one height while the legs fold beneath
+   * them — a clip with no track for the hips, or one whose track
+   * never moves — and a kneel hangs in the air. Those are planted
+   * as they play: lowered, frame by frame, until the lowest foot
+   * rests on the floor.
+   *
+   * The gaits, jumps and falls are left exactly as they were.
+   */
+  const rooted =
+    new Set(
+      clips.filter(clip =>
+        clip.tracks.some(track =>
+          rootPositions.has(track.name),
+        ),
+      ),
+    );
+
+  let hips = null;
+
+  model.traverse(node => {
+    if (
+      !hips &&
+      node.isBone &&
+      /(hips|pelvis)(_\d+)*$/i.test(node.name)
+    ) {
+      hips = node;
+    }
+  });
+
+  const hipsAt =
+    new THREE.Vector3();
+
+  const standing = [
+    ...new Set(
+      [
+        rooted.has(idle) && idle,
+        hurtIdle,
+        ...Object.values(emoteClips),
+        ...Object.values(actionClips),
+        ...Object.values(reading),
+        ...fidgets,
+      ]
+        .flat()
+        .filter(Boolean),
+    ),
+  ];
+
+  // [action, how far it is moved], for the first kind.
+  const lifted = [];
+
+  // Actions of the second kind.
+  const planted = [];
+
+  if (soles.length) {
+    for (const clip of standing) {
+      const action =
+        actions.get(clip).play();
+
+      let lowest = Infinity;
+      let highest = -Infinity;
+      let hipsLow = Infinity;
+      let hipsHigh = -Infinity;
+
+      for (let i = 0; i <= 8; i++) {
+        action.time =
+          (clip.duration * i) / 8;
+
+        mixer.update(0);
+
+        const sole =
+          lowestSole();
+
+        lowest = Math.min(lowest, sole);
+        highest = Math.max(highest, sole);
+
+        if (hips) {
+          const y =
+            fitted.worldToLocal(
+              hips.getWorldPosition(
+                hipsAt,
+              ),
+            ).y;
+
+          hipsLow = Math.min(hipsLow, y);
+          hipsHigh = Math.max(hipsHigh, y);
+        }
+      }
+
+      action.stop();
+
+      // Without a hips bone to watch, feet that rise are enough.
+      const hipsStill =
+        !hips ||
+        hipsHigh - hipsLow <
+          targetHeight * 0.01;
+
+      const folds =
+        hipsStill &&
+        highest - lowest >
+          targetHeight * 0.03;
+
+      if (folds) {
+        planted.push(action);
+      } else {
+        lifted.push([
+          action,
+          restSole - lowest,
+        ]);
+      }
+    }
+  }
+
+  let grounding = 0;
 
   let current =
     idle
@@ -3350,6 +3947,42 @@ async function makeImported(
   let turning = 0;
 
   /**
+   * A clip played through once between two states — a book being
+   * opened on the way into reading, or closed on the way out.
+   */
+  let bridge = null;
+
+  /**
+   * For a state with several clips, the one it is playing; and the
+   * states the caller has already picked for with `cue`, so
+   * entering them does not pick again.
+   */
+  const picked = {};
+  const cued = new Set();
+
+  const clipOf = state => {
+    const options =
+      stateClips[state];
+
+    return Array.isArray(options)
+      ? (picked[state] ??= pickClip(options))
+      : options;
+  };
+
+  /**
+   * How long the character has stood idle, how long they will
+   * stand before fidgeting, and the fidget playing, if one is.
+   */
+  let idleFor = 0;
+  let restlessAfter = 9;
+  let fidgeting = null;
+  let lastFidget = null;
+
+  const finished = action =>
+    action.time >=
+    action.getClip().duration - 1e-4;
+
+  /**
    * Per-character trim on top of the measured gait, for models
    * whose clips read a little heavy or a little light. 1 means
    * "play it exactly as fast as the character is travelling".
@@ -3367,10 +4000,7 @@ async function makeImported(
   // Feet are the model origin, but a rider meets the saddle at the pelvis.
   // Measure in fitted space so imported sizes and sitting root offsets agree.
   mixer?.update(0);
-  let pelvis = null;
-  model.traverse(node => {
-    if (!pelvis && node.isBone && /(hips|pelvis)(_\d+)*$/i.test(node.name)) pelvis = node;
-  });
+  const pelvis = hips;
   const seatPoint = pelvis
     ? group.worldToLocal(pelvis.getWorldPosition(new THREE.Vector3()))
     : new THREE.Vector3(0, targetHeight * .5, 0);
@@ -3378,11 +4008,14 @@ async function makeImported(
   seatPoint.y -= targetHeight * .08;
   const ridingAnchor = createRidingAnchor(group, pelvis || group, seatPoint);
 
+
   /**
    * Emotes this character can actually play, and how long each
    * one runs. The caller drives them by passing the state name
    * back into `animate`, and needs the duration to know when to
-   * hand control back to movement.
+   * hand control back to movement. A state with several clips
+   * reports its first; `cue` says which is coming, and for how
+   * long.
    */
   const emotes =
     Object.fromEntries(
@@ -3391,7 +4024,9 @@ async function makeImported(
       ).map(
         ([state, clip]) => [
           state,
-          clip.duration,
+          holdFor(
+            [clip].flat()[0],
+          ),
         ],
       ),
     );
@@ -3404,6 +4039,42 @@ async function makeImported(
     emotes,
     flashlightMount,
     ridingAnchor,
+
+    /**
+     * Get a gesture or an action ready: choose which of its clips
+     * plays next, and say how many seconds it runs. The caller
+     * holds the state that long, then hands back to movement.
+     * Nothing to play is 0.
+     */
+    cue(state) {
+      const options =
+        stateClips[state];
+
+      if (
+        disposed ||
+        !options ||
+        state in sequences
+      ) {
+        return 0;
+      }
+
+      if (Array.isArray(options)) {
+        picked[state] =
+          pickClip(
+            options,
+            picked[state],
+          );
+
+        // Already in it, the new clip simply takes over.
+        if (state !== activeState) {
+          cued.add(state);
+        }
+      }
+
+      return holdFor(
+        clipOf(state),
+      );
+    },
 
     get diagnostics() {
       return {
@@ -3465,9 +4136,52 @@ async function makeImported(
                   clip,
                 ]) => [
                   state,
-                  clip.name,
+                  clipNames(clip),
                 ],
               ),
+            ),
+
+          actions:
+            Object.fromEntries(
+              Object.entries(
+                actionClips,
+              ).map(
+                ([
+                  state,
+                  clip,
+                ]) => [
+                  state,
+                  clipNames(clip),
+                ],
+              ),
+            ),
+
+          read:
+            reading.loop
+              ? {
+                  enter:
+                    reading.enter?.name ||
+                    null,
+                  loop:
+                    reading.loop.name,
+                  exit:
+                    reading.exit?.name ||
+                    null,
+                }
+              : null,
+
+          injured: {
+            idle:
+              hurtIdle?.name ||
+              null,
+            walk:
+              hurtWalk?.name ||
+              null,
+          },
+
+          fidgets:
+            fidgets.map(
+              clip => clip.name,
             ),
 
           // [left, right] turn clips, for the gaits that have them.
@@ -3498,6 +4212,9 @@ async function makeImported(
 
         turning,
 
+        // How far a hipless gesture has been lowered to the floor.
+        grounding,
+
         // The turn clip carrying most of the stride, if either is.
         turnAction:
           Math.abs(turning) > 0.5
@@ -3510,6 +4227,16 @@ async function makeImported(
 
         state:
           activeState,
+
+        // The idle fidget or the way into or out of a state,
+        // while one is playing.
+        fidget:
+          fidgeting?.name ||
+          null,
+
+        bridge:
+          bridge?.name ||
+          null,
 
         playbackRate,
 
@@ -3527,6 +4254,11 @@ async function makeImported(
       dt,
       {
         speed = 0,
+        // Badly hurt: stand hunched and walk with a limp.
+        injured = false,
+        // Whether standing still long enough may turn into a
+        // fidget. Off while listening to someone.
+        fidget = true,
         moving = false,
         sprinting = false,
         jumping = false,
@@ -3590,13 +4322,104 @@ async function makeImported(
         nextState === 'Attack';
 
       /**
+       * Ways in and out. A state with an intro plays it once before
+       * its loop, and one with an outro plays that on the way back
+       * to standing: a book is closed and put away, not dropped.
+       * Anything but standing still cuts the outro short.
+       */
+      if (nextState !== activeState) {
+        bridge =
+          sequences[nextState]?.enter ||
+          (
+            nextState === 'Idle'
+              ? sequences[activeState]?.exit
+              : null
+          ) ||
+          null;
+
+        // A state with several clips picks afresh each time it is
+        // entered, unless the caller has just picked with `cue`.
+        if (
+          Array.isArray(
+            stateClips[nextState],
+          ) &&
+          !cued.delete(nextState)
+        ) {
+          picked[nextState] =
+            pickClip(
+              stateClips[nextState],
+              picked[nextState],
+            );
+        }
+      }
+
+      if (
+        bridge &&
+        current?.getClip() === bridge &&
+        finished(current)
+      ) {
+        bridge = null;
+      }
+
+      /**
+       * Fidgets. Standing still long enough plays one through,
+       * then the idle takes back over and the wait starts again.
+       */
+      if (
+        nextState === 'Idle' &&
+        fidget &&
+        !injured &&
+        !bridge &&
+        fidgets.length
+      ) {
+        idleFor += dt;
+
+        if (
+          !fidgeting &&
+          idleFor > restlessAfter
+        ) {
+          fidgeting =
+            pickClip(
+              fidgets,
+              lastFidget,
+            );
+        }
+      } else {
+        idleFor = 0;
+        fidgeting = null;
+      }
+
+      if (
+        fidgeting &&
+        current?.getClip() === fidgeting &&
+        finished(current)
+      ) {
+        lastFidget = fidgeting;
+        fidgeting = null;
+        idleFor = 0;
+        restlessAfter =
+          8 + Math.random() * 10;
+      }
+
+      const limping =
+        injured &&
+        nextState === 'Walk' &&
+        !!hurtWalk;
+
+      /**
        * Get animation for state.
        */
       const next =
         actions.get(
-          stateClips[
-            nextState
-          ] ||
+          bridge ||
+          fidgeting ||
+          (
+            injured &&
+            nextState === 'Idle' &&
+            hurtIdle
+          ) ||
+          (limping && hurtWalk) ||
+          clipOf(nextState) ||
           idle,
         );
 
@@ -3656,11 +4479,13 @@ async function makeImported(
         Number.isFinite(speed)
       ) {
         const reference =
-          nextState === 'Walk'
-            ? stride.walk
-            : nextState === 'Sprint'
-              ? stride.sprint
-              : stride.run;
+          limping
+            ? stride.hurt
+            : nextState === 'Walk'
+              ? stride.walk
+              : nextState === 'Sprint'
+                ? stride.sprint
+                : stride.run;
 
         const trim =
           nextState === 'Walk'
@@ -3675,6 +4500,11 @@ async function makeImported(
             0.65,
             1.75,
           ) * (trim || 1);
+      }
+
+      // Opening a book should not keep the page waiting.
+      if (bridge) {
+        targetRate = 1.3;
       }
 
       /**
@@ -3761,6 +4591,34 @@ async function makeImported(
        */
       mixer?.update(dt);
 
+      // Each in proportion to how much of the pose it makes up, so
+      // the body settles through a crossfade instead of dropping
+      // at the end of it. An action that has never played still
+      // reports full weight, hence asking if it is scheduled.
+      grounding = 0;
+
+      for (const [action, by] of lifted) {
+        if (action.isScheduled()) {
+          grounding +=
+            action.getEffectiveWeight() * by;
+        }
+      }
+
+      let hipless = 0;
+
+      for (const action of planted) {
+        if (action.isScheduled()) {
+          hipless +=
+            action.getEffectiveWeight();
+        }
+      }
+
+      if (hipless > 0.001) {
+        grounding +=
+          Math.min(hipless, 1) *
+          (restSole - lowestSole());
+      }
+
       /**
        * Procedural fallback adjustments.
        */
@@ -3816,7 +4674,8 @@ async function makeImported(
 
       fitted.position.y =
         baseHeight -
-        landing;
+        landing +
+        grounding;
     },
 
     /**
@@ -3837,6 +4696,11 @@ async function makeImported(
       landing = 0;
       death = 0;
       turning = 0;
+      bridge = null;
+      fidgeting = null;
+      idleFor = 0;
+      grounding = 0;
+      cued.clear();
 
       facing.rotation.x = 0;
       facing.rotation.z = 0;

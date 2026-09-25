@@ -62,7 +62,7 @@ let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sess
 preferences.volumes = Object.fromEntries(['master','effects','ambience','music'].map(key => [key, finite(saved.volumes?.[key], key === 'music' ? .45 : .8, 0, 1)]));
 const audio = new GameAudio({ enabled: preferences.sound });
 audio.setVolumes(preferences.volumes);
-let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, emoting = null, emoteUntil = 0;
+let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, emoting = null, emoteUntil = 0, greetUntil = 0;
 let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, victoryTime = 0;
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
@@ -142,7 +142,7 @@ scene.add(story.root); story.setState({ restored: progress.restored });
 const currentStep = () => chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
 const questIndex = () => chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
 const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterTwo, storyPlaces: story.places, isUnlocked: chapterTwoUnlocked,
-  onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); if(flag==='warden'){victoryTime=10;audio.play('victory');} },
+  onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); react('Cheer'); if(flag==='warden'){victoryTime=10;audio.play('victory');} },
   onMessage: message => toast(message),
   onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
 });
@@ -202,7 +202,9 @@ async function selectHero(id) {
     // Moved across first: the old hero's disposal takes everything still in its rig.
     flashlight.attach(next);
     if(hero){avatar.remove(hero.group);hero.dispose();}
-    hero=next;heroMeta=meta;avatar.add(hero.group);previewYaw=.23;updateHeroUI();save();
+    hero=next;heroMeta=meta;avatar.add(hero.group);previewYaw=.23;updateHeroUI();syncEmotes();save();
+    // A new adventurer says hello from the pedestal, if they have a wave.
+    greetUntil=screen==='lobby'?time+hero.cue('Wave'):0;
   } catch (error) { console.warn('Character unavailable:',error); toast('That adventurer could not load. Your current hero is ready.'); }
   finally {switching=false;$('character-loading').hidden=true;$('play-button').disabled=!hero;}
 }
@@ -247,7 +249,7 @@ let pulseAge=2,pulseSize=5;
 const bolt=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,1,6),new THREE.MeshBasicMaterial({color:'#e3eec0',transparent:true,opacity:0,depthWrite:false}));effectGroup.add(bolt);let boltAge=1;
 const direction=new THREE.Vector3(),targetPoint=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 function showPulse(x,z,size,color) { pulse.position.set(x,groundHeight(x,z)+.3,z);pulse.material.color.set(color);pulseAge=0;pulseSize=size; }
-function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound();}updateHUD();}
+function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound();react('Cheer');}updateHUD();}
 $('quest-eyebrow').textContent=`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`;
 // The step the tracker last showed: when the story moves on, the new step is
 // announced once, and the tracker flashes to draw the eye to it.
@@ -296,7 +298,7 @@ function attack(special=false){
       e.ragdoll.start({x:dx/d*4,y:2,z:dz/d*4});
       if(lockTarget===e)lockTarget=null;
       progress.kills++;gainXP(35);toast(`${whisper(progress.kills)} · +35 experience`);
-      if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;}
+      if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;react('Cheer');}
     }
   }
   const trialHit=chapterTwo.attack({position,range,damage,special,target:nearest,lineOfSight:(a,b)=>collision.cameraFraction(new THREE.Vector3(a.x,a.y+1.8,a.z),new THREE.Vector3(b.x,b.y+1.8,b.z),.1)>.98});
@@ -323,6 +325,9 @@ function interact(){
     if(action.id===closed.person&&performance.now()-closed.at<400)return;
     const result=chapterTwo.interact(action);
     if(result?.person){const entry=chapterTwoConversation(result.person,progress.chapterTwo);if(entry)begin(result.person,entry.lines,()=>heardChapterTwo(entry));}
+    // Hands on the lock: a rune is touched and a bell struck standing,
+    // a valve wheel and the beacon's kindling are down at knee height.
+    else if(action.id!=='warden'){avatar.rotation.y=Math.atan2(action.x-position.x,action.z-position.z);perform(/^valve\d/.test(action.id)||action.id==='beacon'?'Kneel':'Interact');}
     sound();updateHUD();return;
   }
   // The press that closes a conversation is not also the one that opens it again.
@@ -335,7 +340,7 @@ function interact(){
     syncCameraControls();audio.play('interaction');return;
   }
   if(action.type==='climb'){if(locomotion.climbing)locomotion.stopClimb();else{locomotion.startClimb(action.ladder);cinematic=false;}return;}
-  if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});}
+  if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});perform('Push',1.4);}
 }
 
 /**
@@ -363,6 +368,10 @@ function begin(person,lines,onEnd){
 function showLine(){
   const [who,text]=chat.lines[chat.index],host=speakers[chat.person],reading=!host.title;
   const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?speakers[who]:reading?host:null;
+  // A notice, a ledger or an inscription is read from start to finish;
+  // with a person, the hero talks with their hands on their own lines
+  // and stands and listens to the rest.
+  chat.pose=host.read?'Read':who==='you'?'Talk':undefined;
   $('conversation').classList.toggle('narration',!who);
   $('conversation').style.setProperty('--speaker',speaker?.color||'var(--gold)');
   $('conversation-name').textContent=speaker?.name||'';$('conversation-title').textContent=speaker?.title||'';
@@ -391,13 +400,15 @@ function heard(entry){
     if(entry.sets==='farewell'){gainXP(100);victoryTime=8;audio.play('victory');}
     else if(entry.sets!=='notice')gainXP(40);
   }
+  // What the words leave the hero feeling, once the panel has gone.
+  if(entry.react)react(entry.react);
   updateHUD();
 }
 function heardChapterTwo(entry){
   if(!chapterTwoUnlocked()||!entry.sets||progress.chapterTwo[entry.sets])return;
   progress.chapterTwo[entry.sets]=true;
   gainXP(entry.sets==='complete'?300:50);save();
-  if(entry.sets==='complete'){victoryTime=12;audio.play('victory');showPulse(story.places.maren.x,story.places.maren.z,24,'#c6fff0');toast('The Drowned Meridian · Chapter complete · +300 experience');}
+  if(entry.sets==='complete'){victoryTime=12;audio.play('victory');react('Cheer');showPulse(story.places.maren.x,story.places.maren.z,24,'#c6fff0');toast('The Drowned Meridian · Chapter complete · +300 experience');}
   updateHUD();
 }
 // The chapter's end: the light goes into the well, the Hart comes, and the
@@ -408,6 +419,8 @@ async function awaken(){
   audio.play('victory');showPulse(story.places.maren.x,story.places.maren.z,22,'#b8f3e0');victoryTime=12;
   await story.awaken();
   begin('maren',conversation('maren','finale').lines,async()=>{
+    // Waved off as she walks into the light.
+    react('Wave',6);
     await story.depart();finale=false;
     toast('The Moonwell awakens · The Keeper is at rest · +150 experience');updateHUD();
   });
@@ -469,7 +482,7 @@ function toggleLock(){
   }
   aiming=cinematic=false;syncCameraControls();
 }
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;aiming=false;syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;aiming=false;closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
   // reaches the game, and Escape finishes the same as Done.
@@ -479,6 +492,8 @@ addEventListener('keydown',e=>{
   if(screen!=='game')return;
   // A conversation takes the keys it pages with; everything else waits.
   if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
+  // An open emote picker is the first thing Escape closes.
+  if(e.code==='Escape'&&!$('emote-panel').hidden){e.preventDefault();closeEmotes();return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
   // The Escape that opens the pause menu is spent: left alone, the browser
@@ -486,7 +501,7 @@ addEventListener('keydown',e=>{
   if(e.code==='Escape')e.preventDefault();
   if(e.code==='Space')jump();if(e.code==='KeyQ')attack();if(e.code==='KeyE')attack(true);if(e.code==='KeyF')interact();if(e.code==='KeyV')cycleView();if(e.code==='Escape'||e.code==='KeyP')openMenu('pause');if(e.code==='KeyJ')openMenu('journal');
   if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();if(e.code==='KeyT')toggleFlashlight();
-  if(EMOTE_KEYS[e.code])emote(EMOTE_KEYS[e.code]);
+  if(EMOTE_KEYS[e.code])perform(EMOTE_KEYS[e.code]);if(e.code==='KeyG')toggleEmotes();
 });
 addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
@@ -498,12 +513,33 @@ function jump(){if(screen==='game'&&!dialog.open&&!chat){locomotion.requestJump(
 // moment the character has somewhere else to be. `hero.emotes` only
 // lists gestures this character actually shipped with, so a key
 // pressed by someone playing a starter hero does nothing at all.
-const EMOTE_KEYS={Digit1:'Dance',Digit2:'Nod',Digit3:'Shake',Digit4:'Sad'};
-function emote(state){
-  if(screen!=='game'||dialog.open||chat)return;
-  const duration=hero?.emotes?.[state];if(!duration)return;
-  emoting=state;emoteUntil=time+duration;
+// In key order: 1 to 9, then 0.
+const EMOTES=[['Dance','Dance'],['Nod','Nod'],['Shake','Shake head'],['Sad','Sad'],['Wave','Wave'],['Cheer','Cheer'],['Point','Point'],['Stomp','Stomp'],['Salute','Salute'],['Sing','Sing']];
+const EMOTE_KEYS=Object.fromEntries(EMOTES.map(([state],i)=>[`Digit${(i+1)%10}`,state]));
+// Emotes and the gestures the world asks for — a rune pressed, a crate
+// pushed — play the same way. `limit` cuts a looping one short.
+function perform(state,limit=Infinity){
+  if(screen!=='game'||dialog.open||chat||!hero||activities.mount.mounted||locomotion.climbing||locomotion.swimming)return false;
+  const duration=Math.min(limit,hero.cue(state));if(!duration)return false;
+  emoting=state;emoteUntil=time+duration;closeEmotes();return true;
 }
+// A gesture the moment calls for, made as soon as the hero is free to:
+// a cheer waits for the killing blow to finish, and for the player to
+// stop running. Offered for a few seconds, then let go.
+let pendingEmote=null;
+function react(state,within=4){if(hero?.emotes?.[state])pendingEmote={state,until:time+within};}
+// The emote picker, for a hand with no number keys to press.
+function syncEmotes(){
+  const available=EMOTES.map(([state,label],i)=>({state,label,key:(i+1)%10})).filter(({state})=>hero?.emotes?.[state]);
+  $('emote-button').hidden=!available.length;
+  $('emote-panel').innerHTML=available.map(({state,label,key})=>`<button role="menuitem" data-emote="${state}"><kbd>${key}</kbd>${label}</button>`).join('');
+  if(!available.length)closeEmotes();
+}
+function toggleEmotes(open=$('emote-panel').hidden){
+  if(open&&(screen!=='game'||dialog.open||chat||$('emote-button').hidden))return;
+  $('emote-panel').hidden=!open;$('emote-button').setAttribute('aria-expanded',String(open));
+}
+function closeEmotes(){toggleEmotes(false);}
 renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==null)return;dragId=e.pointerId;dragX=e.clientX;dragY=e.clientY;dragDistance=0;renderer.domElement.setPointerCapture(e.pointerId);});
 renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
@@ -560,6 +596,16 @@ function actionButton(id,run){
 }
 actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
 actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);actionButton('flashlight-button',toggleFlashlight);
+actionButton('emote-button',()=>toggleEmotes());
+// The picker's buttons come and go with the hero, so they are answered
+// here, the same way `actionButton` answers the fixed ones.
+{
+  const panel=$('emote-panel');let touched=0;
+  panel.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-emote]');if(!b||e.pointerType==='mouse')return;if(e.cancelable)e.preventDefault();touched=performance.now();perform(b.dataset.emote);});
+  panel.addEventListener('click',e=>{const b=e.target.closest('[data-emote]');if(!b||(e.detail&&performance.now()-touched<700))return;perform(b.dataset.emote);});
+  // A press anywhere else puts it away.
+  addEventListener('pointerdown',e=>{if(!panel.hidden&&!e.target.closest('#emote-panel,#emote-button'))closeEmotes();},true);
+}
 
 /**
  * CONTROL LAYOUT
@@ -705,7 +751,7 @@ function openMenu(type){
       (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
       '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1 · 2 · 3 · 4</kbd><span>Emote · dance, nod, shake, sad · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1–9 · 0 · G</kbd><span>Emote · dance, wave, cheer and more, or pick one from the ☺ button · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   audio.setPaused(true);if(!dialog.open)dialog.showModal();
@@ -738,7 +784,11 @@ function updatePlayer(dt){
   // Mounted, the controls ask for a way to go and the horse swings round to it.
   if(mounted)({x:wx,z:wz,magnitude}=reins.update(dt,{x:wx,z:wz,speed:locomotion.speed}));
   locomotion.radius=mounted?.85:.52;
-  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:aiming?.65:1,attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+  // Badly hurt, the hero nurses the wound: hunched when standing, and
+  // limping at a walk. A limp covers less ground than a stride, so the
+  // walk slows to match it; a sprint can still get away.
+  const injured=health<=30&&!mounted;
+  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!run?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
   const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
   updateStamina();
   propPhysics.update(dt);
@@ -753,8 +803,11 @@ function updatePlayer(dt){
   else if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
   if(locomotion.climbing)avatar.rotation.y=Math.PI;
-  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||!locomotion.grounded))emoting=null;
-  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:locomotion.sprinting,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,state:emoting||(mounted?'Ride':locomotion.state),time});
+  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||hurtTimer>.9||!locomotion.grounded))emoting=null;
+  if(pendingEmote&&(time>pendingEmote.until||(!emoting&&length<=.08&&attackTimer<=0&&locomotion.grounded&&locomotion.speed<.5&&perform(pendingEmote.state))))pendingEmote=null;
+  // No idle fidgets with a fight on: a hero who has just been hit does
+  // not stop to scratch.
+  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:locomotion.sprinting,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,injured,fidget:!lockTarget&&!aiming&&combatMemory<=0,state:emoting||(mounted?'Ride':locomotion.state),time});
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);
   const interaction=nearbyInteraction();$('interaction-hint').hidden=!interaction;if(interaction)$('interaction-text').textContent=interaction.label;
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
@@ -793,7 +846,7 @@ function updateConversation(dt){
   if(chat.shown<chat.text.length){chat.shown=Math.min(chat.text.length,chat.shown+dt*60);$('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));}
   yaw+=Math.atan2(Math.sin(chat.yaw-yaw),Math.cos(chat.yaw-yaw))*(1-Math.exp(-3*dt));
   pitch=damp(pitch,.2,3,dt);radius=damp(radius,Math.min(radius,10),3,dt);
-  hero.animate(dt,{speed:0,holding:flashlight.out,time});
+  hero.animate(dt,{speed:0,holding:flashlight.out,state:chat.pose,injured:health<=30,fidget:false,time});
 }
 function updateShards(){
   for(let i=0;i<shardPositions.length;i++){
@@ -878,7 +931,7 @@ function animate(now){
   if(!dialog.open){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
     if(screen==='game'&&hero){if(chat)updateConversation(dt);else{const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
-    else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,time:reducedMotion?0:time});}
+    else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
     activities.root.visible=screen==='game';activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();

@@ -39,7 +39,7 @@ async function shoot(page, name) {
   await page.screenshot({ path: `${shots}/${test.info().project.name}-${name}.png` });
 }
 
-async function boot(page) {
+async function boot(page, hero) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/game.js', async route => {
@@ -48,6 +48,10 @@ async function boot(page) {
   });
   await page.goto('/');
   await page.waitForFunction(() => window.astraReady && window.__STORY_TEST__);
+  if (hero) {
+    await page.locator(`[data-hero="${hero}"]`).click();
+    await page.waitForFunction(id => window.__ASTRA_DEBUG__.hero === id && !window.__ASTRA_DEBUG__.switching, hero);
+  }
   await page.locator('#play-button').click();
   await page.waitForFunction(() => window.__ASTRA_DEBUG__.screen === 'game');
   return errors;
@@ -139,5 +143,44 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   const after = (await snapshot(page)).story;
   expect(after).toMatchObject({ step: 'complete', restored: true, departed: true });
   expect(Object.values(after.flags).every(Boolean)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// What is written is read from a book the hero takes out, and put away
+// after; a conversation is talked through with the hands. Checked on a
+// hero who has the clips for it.
+test('the hero reads the notice board, talks with Maren, and emotes from the picker', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The imported rig is checked once on desktop.');
+  test.setTimeout(process.env.CI ? 600000 : 240000);
+  const errors = await boot(page, 'Spiderman');
+  const hero = async () => (await snapshot(page)).heroRuntime;
+
+  await approach(page, 'notice', 'Read the notice board');
+  await expect.poll(async () => (await hero()).state).toBe('Read');
+  await expect.poll(async () => (await hero()).activeAction, { timeout: 30000 }).toMatch(/Read_Loop/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#conversation')).toBeHidden();
+  await expect.poll(async () => (await hero()).bridge).toMatch(/SpellBook_Trans_Stand/);
+  await expect.poll(async () => (await hero()).activeAction, { timeout: 30000 }).not.toMatch(/SpellBook/);
+
+  await approach(page, 'maren', 'Speak with Maren');
+  const name = await page.locator('#hud-name').textContent();
+  for (let presses = 0; presses < 40 && await page.locator('#conversation-name').textContent() !== name; presses++) {
+    await page.keyboard.press('f');
+    await page.waitForTimeout(40);
+  }
+  await expect(page.locator('#conversation-name')).toHaveText(name);
+  await expect.poll(async () => (await hero()).state).toBe('Talk');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#conversation')).toBeHidden();
+
+  // The picker offers what this hero has, and nothing she does not.
+  await page.keyboard.press('g');
+  await expect(page.locator('#emote-panel')).toBeVisible();
+  expect(await page.locator('#emote-panel [data-emote]').evaluateAll(buttons => buttons.map(button => button.dataset.emote)))
+    .toEqual(['Dance', 'Sad', 'Wave', 'Cheer', 'Point', 'Stomp', 'Salute', 'Sing']);
+  await page.locator('#emote-panel [data-emote="Wave"]').click();
+  await expect(page.locator('#emote-panel')).toBeHidden();
+  await expect.poll(async () => (await hero()).state).toBe('Wave');
   expect(errors).toEqual([]);
 });
