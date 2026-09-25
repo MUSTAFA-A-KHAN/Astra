@@ -29,6 +29,23 @@ window.__DISTRICT_TEST__ = {
     const { terrain, locomotion: stride } = window.__ASTRA_DEBUG__;
     return {distance:Math.hypot(x-position.x,z-position.z),y:position.y,ground:terrain.height,region:world.biomeAt(position.x,position.z),inWater:stride.inWater};
   },
+  // Stands the hero in front of one of the story's people or things, as the
+  // story's own test does, with the game still running.
+  stand(name, distance = 3.4) {
+    const at = story.places[name];
+    const x = at.x + Math.sin(at.facing) * distance, z = at.z + Math.cos(at.facing) * distance;
+    resetInput();
+    position.set(x, groundHeight(x, z), z);
+    locomotion.reset();
+    avatar.position.copy(position);
+    yaw = Math.atan2(x - at.x, z - at.z); pitch = .3; radius = 8;
+    followCamera.reset(position, yaw, pitch, radius);
+    updateCamera(1);
+    return world.biomeAt(x, z);
+  },
+  grant({ kills = 0 }) { progress.kills = Math.max(progress.kills, kills); updateHUD(); },
+  // What the open conversation says, line by line.
+  chatLines() { return chat ? chat.lines.map(([, text]) => text) : []; },
   // Where the Wanderer's Camp, its fire and its ledger stand.
   camp() {
     const where = p => ({ x: p.x, z: p.z, region: world.biomeAt(p.x, p.z) });
@@ -87,6 +104,18 @@ async function walk(page, start, route, { region, from, tolerance = .2 }) {
   }
 }
 
+// Pages through the open conversation with the interaction key, returning
+// every line of it.
+async function hear(page) {
+  const lines = await page.evaluate(() => window.__DISTRICT_TEST__.chatLines());
+  for (let presses = 0; presses < 80 && await page.locator('#conversation').isVisible(); presses++) {
+    await page.keyboard.press('f');
+    await page.waitForTimeout(40);
+  }
+  await expect(page.locator('#conversation')).toBeHidden();
+  return lines;
+}
+
 test('the Nightwood is fetched only once turned on, and its road is walked from the north quay', async ({ page }) => {
   test.setTimeout(240000);
   const errors = await turnOn(page, 'nightwood');
@@ -118,5 +147,48 @@ test('the Red Mesa is fetched only once turned on, and its gully climbs from the
   const { camp, fire, ledger, tent } = await page.evaluate(() => window.__DISTRICT_TEST__.camp());
   for (const place of [camp, fire, ledger, tent]) expect(place.region).toBe('mesa');
   await walk(page, [-5, 125], [[40, 134], [camp.x, camp.z + 4]], { region: 'mesa', from: () => true });
+  expect(errors).toEqual([]);
+});
+
+test('with the Red Mesa on, Tobin sends the player to the camp on the mesa, and its ledger is read there', async ({ page }) => {
+  test.setTimeout(240000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // A save with the mesa on, the keeper met and five shards gathered: the
+  // story stands at the ferryman.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ mesa: true, collected: [0, 1, 2, 3, 4], story: { keeper: true, notice: true } })));
+  await page.route('**/game.js', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: `${await response.text()}\n${probe}` });
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => window.astraReady && window.__DISTRICT_TEST__);
+  await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#play-button').click();
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__?.screen === 'game');
+  expect((await page.evaluate(() => window.__ASTRA_DEBUG__)).story.step).toBe('ferryman');
+
+  // Tobin tells the player where the camp is: out on the mesa.
+  await page.evaluate(() => window.__DISTRICT_TEST__.stand('tobin'));
+  await expect(page.locator('#interaction-text')).toHaveText('Speak with Tobin');
+  await page.keyboard.press('f');
+  await expect(page.locator('#conversation')).toBeVisible();
+  const tobin = (await hear(page)).join(' ');
+  expect(tobin).toContain('Wanderer’s Camp, out on the Red Mesa');
+  expect(tobin).not.toContain('west of the square');
+
+  // Three wisps later, the book lies open by the camp's fire, on the mesa.
+  await page.evaluate(() => window.__DISTRICT_TEST__.grant({ kills: 3 }));
+  expect((await page.evaluate(() => window.__ASTRA_DEBUG__)).story.step).toBe('ledger');
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.story.loaded.includes('Wanderers’ tent'), null, { timeout: 120000 });
+  expect(await page.evaluate(() => window.__DISTRICT_TEST__.stand('ledger'))).toBe('mesa');
+  await expect(page.locator('#interaction-text')).toHaveText('Read the keeper’s ledger');
+  await page.keyboard.press('f');
+  await expect(page.locator('#conversation')).toBeVisible();
+  const ledger = (await hear(page)).join(' ');
+  expect(ledger).toContain('Maren Ashdown has been dead for twenty years');
+  const { story } = await page.evaluate(() => window.__ASTRA_DEBUG__);
+  expect(story.flags.ledger).toBe(true);
+  expect(story.step).toBe('restore');
   expect(errors).toEqual([]);
 });
