@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createWorld, daylightAt } from './world-map.js';
 import { createAtmosphere } from './atmosphere.js';
 import { createFlashlight } from './flashlight.js';
-import { SpatialHash, LocomotionController, PropPhysics, RagdollController } from './physics.js';
+import { SpatialHash, LocomotionController, PropPhysics, RagdollController, stickSprint } from './physics.js';
 import { FollowCamera } from './camera.js';
 import { GameAudio } from './audio.js';
 import { createGameplayWorld } from './gameplay-world.js';
@@ -53,18 +53,27 @@ const VIEWS = [
   { id: 'wide', name: 'Wide', pitch: .4, radius: 23, fov: 52 },
   { id: 'overhead', name: 'Overhead', pitch: .88, radius: 21, fov: 55 },
 ];
+// How far the wheel can zoom: in as far as the closest view sits, so
+// zooming in from it never throws the camera back out.
+const ZOOM = { min: Math.min(...VIEWS.map(view => view.radius)), max: 25 };
 const readLayout = stored => Object.fromEntries(CONTROLS
   .map(control => [control, stored?.[control]])
   .filter(([, spot]) => Number.isFinite(spot?.x) && Number.isFinite(spot?.y))
   .map(([control, spot]) => [control, { x: clamp(spot.x, 0, 1), y: clamp(spot.y, 0, 1) }]));
-const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), flashlight: saved.flashlight !== false, layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : VIEWS[0].id, plaza: saved.plaza === true, nightwood: saved.nightwood === true };
+// Where a new player starts: as Spiderman, with the camera close behind.
+// A player who has chosen otherwise keeps their choice.
+const DEFAULT_HERO = 'Spiderman', DEFAULT_VIEW = 'close';
+// How big the joystick and the on-screen buttons are drawn, and how solid.
+const CONTROL_SCALE = { min: .7, max: 1.5 }, CONTROL_OPACITY = { min: .2, max: 1 };
+const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), flashlight: saved.flashlight !== false, layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : DEFAULT_VIEW, plaza: saved.plaza === true, nightwood: saved.nightwood === true,
+  controlScale: finite(saved.controlScale, 1, CONTROL_SCALE.min, CONTROL_SCALE.max), controlOpacity: finite(saved.controlOpacity, 1, CONTROL_OPACITY.min, CONTROL_OPACITY.max) };
 // One city day lasts twenty minutes of active play. Menus pause the clock.
 const DAY_LENGTH_SECONDS = 20 * 60;
 const formatTime = hour => {
   const minutes = Math.floor((((hour % 24) + 24) % 24) * 60);
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
-let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
+let hero = null, heroMeta = HEROES.find(h => h.id === DEFAULT_HERO) || HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
 const VOLUME_CHANNELS = ['master','effects','ambience','music','voice'];
 preferences.volumes = Object.fromEntries(VOLUME_CHANNELS.map(key => [key, finite(saved.volumes?.[key], key === 'music' ? .45 : key === 'voice' ? .9 : .8, 0, 1)]));
 const audio = new GameAudio({ enabled: preferences.sound });
@@ -686,7 +695,7 @@ async function arriveThroughPortal(arrival) {
   followCamera.reset(position,yaw,currentView().pitch,currentView().radius);
 }
 
-const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,dragId=null,dragX=0,dragY=0,dragDistance=0;
+const keys=new Set();let joyX=0,joyY=0,joyId=null,sprinting=false,stickSprinting=false,dragId=null,dragX=0,dragY=0,dragDistance=0;
 let yaw=0,pitch=.48,radius=14;
 const cameraTarget=new THREE.Vector3(),cameraDesired=new THREE.Vector3();
 const dialog=$('menu-dialog');
@@ -739,7 +748,7 @@ function toggleLock(){
   }
   aiming=cinematic=false;syncCameraControls();
 }
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;dragId=null;emoting=null;aiming=false;closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;stickSprinting=false;dragId=null;emoting=null;aiming=false;closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';$('joystick').classList.remove('held','sprinting');}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
   // reaches the game, and Escape finishes the same as Done.
@@ -802,7 +811,7 @@ renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==
 renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;followLight=0;}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
-renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,4,25);settling=0;e.preventDefault();}},{passive:false});
+renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,ZOOM.min,ZOOM.max);settling=0;e.preventDefault();}},{passive:false});
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 // Playing is a two-fingered thing: a thumb holding the stick and another
 // tapping the buttons. Safari reads that second finger arriving and leaving
@@ -819,10 +828,15 @@ for(const event of ['gesturestart','gesturechange','gestureend'])
 addEventListener('touchmove',e=>{if(e.touches.length>1&&playing()&&e.cancelable)e.preventDefault();},{passive:false});
 addEventListener('dblclick',e=>{if(playing())e.preventDefault();},{passive:false});
 const joystick=$('joystick');let joyCenterX=0,joyCenterY=0;
-function moveJoy(e){const max=joystick.clientWidth*.34,dx=e.clientX-joyCenterX,dy=e.clientY-joyCenterY,length=Math.hypot(dx,dy),scale=length>max?max/length:1;joyX=dx*scale/max;joyY=dy*scale/max;if(length<5)joyX=joyY=0;$('joystick-knob').style.transform=`translate(${dx*scale}px,${dy*scale}px)`;}
-joystick.addEventListener('pointerdown',e=>{if(joyId!==null||dialog.open)return;joyId=e.pointerId;const b=joystick.getBoundingClientRect();joyCenterX=b.left+b.width/2;joyCenterY=b.top+b.height/2;joystick.setPointerCapture(e.pointerId);moveJoy(e);e.preventDefault();});
+// The stick is drawn at the player's chosen size (a CSS zoom): the finger
+// moves in screen pixels, the knob inside the zoom in the stick's own.
+const joyZoom=()=>joystick.currentCSSZoom??(joystick.getBoundingClientRect().width/joystick.offsetWidth||1);
+function moveJoy(e){const zoom=joyZoom(),max=joystick.clientWidth*.34*zoom,dx=e.clientX-joyCenterX,dy=e.clientY-joyCenterY,length=Math.hypot(dx,dy),scale=length>max?max/length:1;joyX=dx*scale/max;joyY=dy*scale/max;if(length<5)joyX=joyY=0;$('joystick-knob').style.transform=`translate(${dx*scale/zoom}px,${dy*scale/zoom}px)`;
+  // Pushed most of the way out, the stick sprints by itself: no button to hold.
+  stickSprinting=stickSprint(stickSprinting,Math.hypot(joyX,joyY));joystick.classList.toggle('sprinting',stickSprinting);}
+joystick.addEventListener('pointerdown',e=>{if(joyId!==null||dialog.open)return;joyId=e.pointerId;const b=joystick.getBoundingClientRect();joyCenterX=b.left+b.width/2;joyCenterY=b.top+b.height/2;joystick.setPointerCapture(e.pointerId);joystick.classList.add('held');moveJoy(e);e.preventDefault();});
 joystick.addEventListener('pointermove',e=>{if(e.pointerId===joyId)moveJoy(e);});
-function endJoy(e){if(e.pointerId===joyId){joyId=null;joyX=joyY=0;$('joystick-knob').style.transform='';}}
+function endJoy(e){if(e.pointerId===joyId){joyId=null;joyX=joyY=0;stickSprinting=false;$('joystick-knob').style.transform='';joystick.classList.remove('held','sprinting');}}
 for(const event of ['pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(event,endJoy);
 const sprint=$('sprint-button');sprint.addEventListener('pointerdown',e=>{sprinting=true;sprint.setPointerCapture(e.pointerId);e.preventDefault();});for(const event of ['pointerup','pointercancel','lostpointercapture'])sprint.addEventListener(event,()=>sprinting=false);
 // A press that begins while another finger is already down never
@@ -901,8 +915,9 @@ const applyLayout = () => { for (const control of CONTROLS) placeControl(control
 // clamping runs again on resize so a rotation cannot strand one of
 // them off the side of a narrower screen.
 function clampSpot(element, x, y) {
-  const margin = 6;
-  const halfX = Math.min(element.offsetWidth / 2 + margin, innerWidth / 2), halfY = Math.min(element.offsetHeight / 2 + margin, innerHeight / 2);
+  // Measured as drawn, at the player's chosen button size.
+  const margin = 6, box = element.getBoundingClientRect();
+  const halfX = Math.min(box.width / 2 + margin, innerWidth / 2), halfY = Math.min(box.height / 2 + margin, innerHeight / 2);
   return { x: clamp(x, halfX / innerWidth, 1 - halfX / innerWidth), y: clamp(y, halfY / innerHeight, 1 - halfY / innerHeight) };
 }
 function pinCurrentLayout() {
@@ -975,16 +990,24 @@ for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) addEve
 });
 $('layout-done').addEventListener('click', () => editLayout(false));
 $('layout-reset').addEventListener('click', () => { preferences.layout = {}; applyLayout(); $('layout-message').textContent = 'Back where they started. Drag any control to move it.'; });
-addEventListener('resize', () => {
+function refitLayout() {
   for (const [control, spot] of Object.entries(preferences.layout)) {
     const element = controlEl(control);
     if (element) preferences.layout[control] = clampSpot(element, spot.x, spot.y);
   }
   applyLayout();
-});
-applyLayout();
+}
+addEventListener('resize', refitLayout);
+// The player's own size and see-through for the controls. A control
+// pinned near an edge is kept on the screen at its new size.
+function applyControlLook() {
+  $('game-hud').style.setProperty('--control-scale', preferences.controlScale);
+  $('game-hud').style.setProperty('--control-opacity', preferences.controlOpacity);
+  refitLayout();
+}
+applyControlLook();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='notice'?`A notice board glows by the square · Walk up to it and ${touch?'tap Interact':'press F'} to read`:step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='notice'?`A notice board glows by the square · Walk up to it and ${touch?'tap Interact':'press F'} to read`:step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
 function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
@@ -993,13 +1016,18 @@ function openMenu(type){
   if(portalJourney)return;
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${currentChapter().eyebrow} · ${currentChapter().title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${VOLUME_CHANNELS.map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${VOLUME_CHANNELS.map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><label class="setting-row"><span>Button size <output id="control-scale-value"></output><small>Makes the joystick and the on-screen buttons bigger or smaller.</small></span><input id="control-scale" type="range" min="${CONTROL_SCALE.min}" max="${CONTROL_SCALE.max}" step=".05" aria-label="Button size"></label><label class="setting-row"><span>Button transparency <output id="control-transparency-value"></output><small>Lets the world show through the joystick and the buttons. A button turns solid while you press it.</small></span><input id="control-transparency" type="range" min="0" max="${1-CONTROL_OPACITY.min}" step=".05" aria-label="Button transparency"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: twenty-six Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('audio-status').textContent=audioStatus();$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
     // The world is built once, with or without the plaza and the Nightwood: it takes a fresh one. The Red Mesa
     // has no switch: the Moonwell stands on it, so it always comes with the city.
     for(const district of ['plaza','nightwood']){$(district+'-setting').checked=preferences[district];$(district+'-setting').onchange=e=>{preferences[district]=e.target.checked;save();location.reload();};}
     for(const channel of VOLUME_CHANNELS)$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
+    // Shown as a size and a transparency, kept as a zoom and an opacity.
+    const showControlLook=()=>{$('control-scale-value').textContent=`${Math.round(preferences.controlScale*100)}%`;$('control-transparency-value').textContent=`${Math.round((1-preferences.controlOpacity)*100)}%`;};
+    $('control-scale').value=preferences.controlScale;$('control-transparency').value=1-preferences.controlOpacity;showControlLook();
+    $('control-scale').oninput=e=>{preferences.controlScale=clamp(Number(e.target.value),CONTROL_SCALE.min,CONTROL_SCALE.max);applyControlLook();showControlLook();save();};
+    $('control-transparency').oninput=e=>{preferences.controlOpacity=clamp(1-Number(e.target.value),CONTROL_OPACITY.min,CONTROL_OPACITY.max);applyControlLook();showControlLook();save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
     const second=chapterTwoUnlocked(),steps=second?CHAPTER_TWO_STEPS:STEPS,index=second?steps.indexOf(currentStep()):storyStep(progress);
@@ -1040,7 +1068,7 @@ function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
-  const run=sprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
+  const run=sprinting||stickSprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
   const movementYaw=lockTarget?followCamera.yaw:yaw;
   let wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z,magnitude=Math.min(1,length);
   // Mounted, the controls ask for a way to go and the horse swings round to it.
@@ -1050,7 +1078,7 @@ function updatePlayer(dt){
   // limping at a walk. A limp covers less ground than a stride, so the
   // walk slows to match it; a sprint can still get away.
   const injured=health<=30&&!mounted;
-  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!run?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!(run&&!locomotion.exhausted)?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
   const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
   updateStamina();
   if(inCity())propPhysics.update(dt);
@@ -1310,11 +1338,11 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
-  await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:'warden');
+  await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:DEFAULT_HERO);
   if(!hero)await selectHero('warden');
   updateHUD();updateCamera(1);updateShards();$('performance-readout').hidden=!preferences.showFPS;
   // In the hero's hand by now nearly always, so its shader is ready before dusk

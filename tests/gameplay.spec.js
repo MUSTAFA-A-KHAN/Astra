@@ -240,10 +240,15 @@ test('keyboard camera modes and zoom remain usable after a menu pause', async ({
   await expect.poll(async () => (await snapshot(page)).camera.mode).toBe('cinematic');
   await page.keyboard.press('KeyC');
   await expect.poll(async () => (await snapshot(page)).camera.mode).toBe('follow');
+  // A new player starts in the close view, as near as the wheel goes:
+  // zooming in holds there, and zooming out pulls back.
   const radius = (await snapshot(page)).camera.radius;
   await page.mouse.move(800, 400);
   await page.mouse.wheel(0, -200);
-  await expect.poll(async () => (await snapshot(page)).camera.radius).toBeLessThan(radius - 1);
+  await page.waitForTimeout(300);
+  expect((await snapshot(page)).camera.radius).toBeGreaterThanOrEqual(radius - .01);
+  await page.mouse.wheel(0, 200);
+  await expect.poll(async () => (await snapshot(page)).camera.radius).toBeGreaterThan(radius + 1);
   await page.keyboard.press('Escape');
   await expect(page.locator('#menu-dialog')).toBeVisible();
   await page.keyboard.press('KeyR');

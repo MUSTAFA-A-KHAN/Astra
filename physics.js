@@ -2,6 +2,15 @@
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const approach = (a, b, amount) => a < b ? Math.min(b, a + amount) : Math.max(b, a - amount);
 
+// A movement stick pushed most of the way out sprints, with no button to
+// hold. It starts past `start` of full tilt and only stops once it has
+// eased back under `stop`, so a thumb resting near the line does not
+// flicker between a run and a sprint.
+export const STICK_SPRINT = Object.freeze({ start: .75, stop: .65 });
+export function stickSprint(wasSprinting, tilt, { start, stop } = STICK_SPRINT) {
+  return tilt >= (wasSprinting ? stop : start);
+}
+
 export class SpatialHash {
   constructor(cellSize = 16) {
     this.cellSize = cellSize;
@@ -174,19 +183,21 @@ export class LocomotionController {
     }
     this.events.push(...this.pendingEvents);this.pendingEvents.length=0;
     this.speed=travelled/dt;this.distance+=travelled;
-    let next=this.climbing?'Climb':this.swimming?'Swim':this.grounded?(this.landTime>0?'Land':this.speed<.12?'Idle':this.inWater?'Wade':input.walk?'Walk':this.sprinting?'Sprint':'Run'):(this.verticalVelocity>0?'Jump':'Fall');
+    let next=this.climbing?'Climb':this.swimming?'Swim':this.grounded?(this.landTime>0?'Land':this.speed<.12?'Idle':this.inWater?'Wade':controls.walk?'Walk':this.sprinting?'Sprint':'Run'):(this.verticalVelocity>0?'Jump':'Fall');
     if(input.hurt)next='Hit';else if(input.attacking&&this.grounded)next='Attack';
     this.stateTime=next===this.state?this.stateTime+dt:0;this.state=next;
   }
   updateStamina(dt,input,controls) {
     // Sprinting spends stamina and a short rest refills it. Run it dry and the
-    // legs only jog until it is partly back. A horse carries the effort.
+    // hero walks, stride and pace, until it is partly back, rather than
+    // playing a run too slowly for its legs. A horse carries the effort.
     this.sprinting=!!input.sprint && (input.mounted || !this.exhausted) && !this.climbing && controls.magnitude>.1;
     if(this.sprinting && !input.mounted) {
       this.stamina=Math.max(0,this.stamina-dt/this.sprintTime);this.staminaRest=.8;
       if(this.stamina===0)this.exhausted=true;
     } else if((this.staminaRest=Math.max(0,this.staminaRest-dt))===0) this.stamina=Math.min(1,this.stamina+dt/this.staminaRecovery);
     if(this.exhausted && this.stamina>=.4)this.exhausted=false;
+    if(input.sprint && this.exhausted && !input.mounted)controls.walk=true;
     controls.sprint=this.sprinting;
   }
   step(dt,input) {

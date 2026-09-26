@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LocomotionController, SpatialHash, PropPhysics, RagdollController } from '../physics.js';
+import { LocomotionController, SpatialHash, PropPhysics, RagdollController, stickSprint, STICK_SPRINT } from '../physics.js';
 
 const flat = {
   getHeight: () => 0,
@@ -33,14 +33,15 @@ test('walking accelerates, respects analog magnitude, and coasts to rest',()=>{
   assert.ok(Math.abs(controller.speed-8.5*1.65)<.01,'diagonal mounted movement has normalized speed');
 });
 
-test('sprinting spends stamina, an empty bar only jogs, and a rest restores it',()=>{
+test('sprinting spends stamina, an empty bar walks, and a rest restores it',()=>{
   const controller=actor(),sprint={x:1,z:0,sprint:true};
   advance(controller,3,sprint);
   assert.equal(controller.state,'Sprint');assert.ok(Math.abs(controller.speed-8.5)<.01);
   assert.ok(controller.stamina>.75 && controller.stamina<.85,'three of fifteen seconds are spent');
   advance(controller,12.5,sprint);
   assert.equal(controller.exhausted,true);assert.equal(controller.sprinting,false);
-  assert.equal(controller.state,'Run');assert.ok(Math.abs(controller.speed-4.7)<.01,'the shift key no longer sprints');
+  // Out of breath, the hero walks: a walk's stride at a walk's pace, not a run slowed down.
+  assert.equal(controller.state,'Walk');assert.ok(Math.abs(controller.speed-3)<.01,'the shift key no longer sprints');
   advance(controller,1.5);
   assert.equal(controller.exhausted,true,'a short breather is not enough');
   advance(controller,3);
@@ -180,4 +181,21 @@ test('root-body ragdoll falls, collides, settles, and restores its pose on reset
   assert.equal(ragdoll.settled,true);assert.equal(position.y,0);
   assert.ok(position.x<1.33);assert.ok(rotation.x>1);
   ragdoll.reset();assert.equal(rotation.x,0);assert.equal(rotation.z,0);assert.equal(ragdoll.active,false);
+});
+
+test('the movement stick sprints past three quarters of its throw and holds it down to two thirds', () => {
+  assert.deepEqual(STICK_SPRINT, { start: .75, stop: .65 });
+  // Pushed out from rest: a run until the 75% line, a sprint from it.
+  let sprinting = false;
+  const push = tilt => (sprinting = stickSprint(sprinting, tilt));
+  for (const tilt of [0, .3, .6, .7, .74]) assert.equal(push(tilt), false, `no sprint at ${tilt}`);
+  assert.equal(push(.75), true);
+  // A thumb resting near the line does not flicker: the sprint holds
+  // until the stick eases back under 65%.
+  for (const tilt of [.8, .72, .7, .66, .65]) assert.equal(push(tilt), true, `still sprinting at ${tilt}`);
+  assert.equal(push(.64), false);
+  // And once dropped, it needs the full 75% again.
+  for (const tilt of [.66, .7, .74]) assert.equal(push(tilt), false, `not sprinting again at ${tilt}`);
+  assert.equal(push(1), true);
+  assert.equal(push(0), false, 'letting go stops it');
 });

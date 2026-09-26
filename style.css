@@ -50,3 +50,7 @@ body.conversation-cinematic #conversation{bottom:0;width:100%;min-height:11vh;di
 @media(max-height:500px){body.conversation-cinematic #conversation{padding-top:6px;padding-bottom:max(8px,env(safe-area-inset-bottom))}body.conversation-cinematic .conversation-speaker{margin-bottom:2px}body.conversation-cinematic .conversation-speaker strong{font-size:16px}body.conversation-cinematic #conversation-text{font-size:12px;line-height:1.45}}
 body.portal-cinematic #portal-status{bottom:max(3vh,env(safe-area-inset-bottom));padding:.4rem 1rem;background:none;border-color:transparent;font:italic 1.3rem/1.4 'Cormorant Garamond',Georgia,serif;letter-spacing:.04em;text-shadow:0 1px 10px #000}
 @media(prefers-reduced-motion:reduce){#portal-veil,#portal-veil.visible,#cinema-bars::before,#cinema-bars::after{transition:none}}
+/* The player's own size and see-through for the joystick and the buttons under their thumbs (World & settings). Zoom, not a transform, so a bigger button also takes up more room in the bar beside it. A button being pressed turns solid. */
+#game-hud [data-control],#game-hud .camera-tools{zoom:var(--control-scale,1)}#game-hud [data-control],#game-hud .camera-tools button{opacity:var(--control-opacity,1)}#game-hud [data-control]:active,#game-hud #joystick.held,#game-hud .camera-tools button:active{opacity:1}
+/* The stick sprints on its own when pushed most of the way out; its ring lights to say so. */
+#joystick.sprinting .joystick-ring{border-color:var(--gold);box-shadow:0 0 14px #d8c28b66}

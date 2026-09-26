@@ -497,25 +497,26 @@ test('the view button cycles camera perspectives and remembers the one you left 
   };
   const shape = view => `${view.pitch.toFixed(2)}/${view.radius.toFixed(1)}/${view.fov.toFixed(0)}`;
 
+  // A new player starts close behind the hero.
   const seen = [await settled()];
   for (let press = 0; press < 4; press++) {
     await page.locator('#view-button').click();
     seen.push(await settled());
   }
-  expect(seen.map(view => view.view)).toEqual(['follow', 'close', 'shoulder', 'wide', 'overhead']);
+  expect(seen.map(view => view.view)).toEqual(['close', 'shoulder', 'wide', 'overhead', 'follow']);
   // Five names are worth nothing if they are the same camera: each one
   // has to be a different pitch, distance and field of view.
   expect(new Set(seen.map(shape)).size).toBe(5);
   // And the close one has to be the closest, or it is not what it says.
   const distances = seen.map(view => view.radius);
-  expect(Math.min(...distances)).toBe(seen[1].radius);
-  expect(await page.locator('#view-label').textContent()).toBe('Overhead');
+  expect(Math.min(...distances)).toBe(seen[0].radius);
+  expect(await page.locator('#view-label').textContent()).toBe('Follow');
   await page.locator('#view-button').click();
-  expect((await settled()).view).toBe('follow');
+  expect((await settled()).view).toBe('close');
 
   // The key does what the button does.
   await page.keyboard.press('v');
-  expect((await settled()).view).toBe('close');
+  expect((await settled()).view).toBe('shoulder');
 
   // Dragging moves the camera off the perspective without choosing a
   // different one — a preset is a posture, not a mode to be locked in.
@@ -527,15 +528,15 @@ test('the view button cycles camera perspectives and remembers the one you left 
   await page.mouse.up();
   const dragged = (await snapshot(page)).camera;
   expect(dragged.pitch).toBeLessThan(posture.pitch - 0.05);
-  expect(dragged.view).toBe('close');
+  expect(dragged.view).toBe('shoulder');
 
   // And the choice outlives the session.
   await boot(page);
   await start(page);
   const remembered = await settled();
-  expect(remembered.view).toBe('close');
+  expect(remembered.view).toBe('shoulder');
   expect(shape(remembered)).toBe(shape(seen[1]));
-  expect(await page.locator('#view-label').textContent()).toBe('Close');
+  expect(await page.locator('#view-label').textContent()).toBe('Shoulder');
   expect(errors).toEqual([]);
 });
 
@@ -591,6 +592,73 @@ test('the layout editor moves buttons with a mouse and puts them all back', asyn
   expect(Math.hypot(restored.x - home.x, restored.y - home.y)).toBeLessThan(2);
   await page.locator('#layout-done').click();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('astra-journey-v1')).layout)).toEqual({});
+  expect(errors).toEqual([]);
+});
+
+test('a new player starts as Spiderman, close behind, and can resize the buttons and see through them', async ({ page }) => {
+  // Two boots, each fetching Spiderman's 24 MB model.
+  test.setTimeout(240000);
+  const errors = await boot(page);
+  expect((await snapshot(page)).hero).toBe('Spiderman');
+  await expect(page.locator('[data-hero="Spiderman"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#control-scale-value')).toHaveText('100%');
+  await expect(page.locator('#control-transparency-value')).toHaveText('0%');
+  await page.locator('#control-scale').fill('1.4');
+  await page.locator('#control-transparency').fill('0.5');
+  await expect(page.locator('#control-scale-value')).toHaveText('140%');
+  await expect(page.locator('#control-transparency-value')).toHaveText('50%');
+  await page.getByRole('button', { name: 'Close menu' }).click();
+  await start(page);
+  expect((await snapshot(page)).camera.view).toBe('close');
+
+  // Drawn at the chosen size and see-through, the joystick where a
+  // phone or tablet shows one, and the camera tools too.
+  const look = selector => page.locator(selector).evaluate(el => ({ scale: el.getBoundingClientRect().width / el.offsetWidth, opacity: Number(getComputedStyle(el).opacity) }));
+  const controls = ['#attack-button', '#ability-button', '#view-button', ...(await page.locator('#joystick').isVisible() ? ['#joystick', '#jump-button'] : [])];
+  for (const selector of controls) {
+    const { scale, opacity } = await look(selector);
+    expect(scale, selector).toBeCloseTo(1.4, 2);
+    expect(opacity, selector).toBeCloseTo(.5, 2);
+  }
+  expect((await look('#lock-button')).opacity).toBeCloseTo(.5, 2);
+
+  if (await page.locator('#joystick').isVisible()) {
+    // The stick still reaches full tilt at the edge of its bigger ring,
+    // with the knob under the thumb, and is solid while it is held.
+    const stick = await centre(page, '#joystick');
+    const reach = await page.locator('#joystick').evaluate(el => el.clientWidth * .34 * el.currentCSSZoom);
+    await page.mouse.move(stick.x, stick.y);
+    await page.mouse.down();
+    await page.mouse.move(stick.x + reach * .5, stick.y, { steps: 4 });
+    expect((await snapshot(page)).input.joyX).toBeCloseTo(.5, 1);
+    expect((await snapshot(page)).input.stickSprinting).toBe(false);
+    const knob = await centre(page, '#joystick-knob');
+    expect(Math.abs(knob.x - (stick.x + reach * .5))).toBeLessThan(3);
+    expect((await look('#joystick')).opacity).toBe(1);
+    await page.mouse.move(stick.x + reach * 2, stick.y, { steps: 4 });
+    expect((await snapshot(page)).input.joyX).toBeCloseTo(1, 2);
+
+    // Pushed most of the way out, the stick sprints with no button held,
+    // and keeps sprinting until it eases back under two thirds.
+    expect((await snapshot(page)).input.stickSprinting).toBe(true);
+    await expect(page.locator('#joystick')).toHaveClass(/sprinting/);
+    await expect.poll(async () => (await snapshot(page)).locomotion.sprinting).toBe(true);
+    await page.mouse.move(stick.x + reach * .7, stick.y, { steps: 2 });
+    expect((await snapshot(page)).input.stickSprinting).toBe(true);
+    await page.mouse.move(stick.x + reach * .6, stick.y, { steps: 2 });
+    expect((await snapshot(page)).input.stickSprinting).toBe(false);
+    await page.mouse.up();
+    expect((await look('#joystick')).opacity).toBeCloseTo(.5, 2);
+  }
+
+  // Both outlive the session.
+  await boot(page);
+  await start(page);
+  const remembered = await look('#attack-button');
+  expect(remembered.scale).toBeCloseTo(1.4, 2);
+  expect(remembered.opacity).toBeCloseTo(.5, 2);
   expect(errors).toEqual([]);
 });
 
