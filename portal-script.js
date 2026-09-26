@@ -45,6 +45,10 @@ export function portalRoute(progress = {}, activeMap = 'city') {
   return { ...PASSAGES[destination], lockedReason: null };
 }
 
+// The reading ends on the spell itself, so the gate answers the moment it is
+// said; what the words do then is shown over the gate as it stirs.
+export const SPELL_TAKES = 'The words leave the page as light. The portal stirs, drawing the far shore into focus.';
+
 export function portalConversation(route) {
   if (!route?.destination || route.lockedReason || !route.spell) {
     return { lines: [[null, route?.lockedReason || 'The keeper\'s book has not revealed a passage yet.']] };
@@ -53,6 +57,5 @@ export function portalConversation(route) {
     [null, 'You open the keeper\'s ledger on the portal lectern. Its ink gathers into a spell beneath your hands.'],
     [null, `A silver line leads toward ${route.mapName}. You read each word from the book before raising your hand to the sleeping gate.`],
     ['you', route.spell, 'incantation'],
-    [null, 'The words leave the page as light. The portal stirs, drawing the far shore into focus.'],
   ] };
 }

@@ -14,7 +14,7 @@ import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, cha
 import { createChapterTwo } from './chapter-two-world.js';
 import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
-import { portalRoute, portalConversation } from './portal-script.js';
+import { portalRoute, portalConversation, SPELL_TAKES } from './portal-script.js';
 import { VOICES } from './voice-manifest.js';
 
 const $ = id => document.getElementById(id);
@@ -591,7 +591,7 @@ function updatePortalJourney(dt) {
   if(j.phase==='reading') {
     if(!chat)hero.animate(dt,{state:'Read',fidget:false,time});
     if(j.readFinished && j.elapsed>=1.8){
-      j.phase='casting';j.elapsed=0;filmed.reach=1;filmed.boom=0;portalStatus('Speaking the keeper’s spell…');portalCinema(true);
+      j.phase='casting';j.elapsed=0;filmed.reach=1;filmed.boom=0;portalStatus(SPELL_TAKES);portalCinema(true);
       const gate=portal.places.portal,foot=portal.places.foot;
       j.rig={gate,aperture:portal.places.aperture,axis:foot.sub(gate).setY(0).normalize(),hero:position};
     }
@@ -1091,9 +1091,15 @@ function updatePlayer(dt){
 // The hero stands and listens, the line types itself out, and the camera
 // comes round over their shoulder to whoever is speaking.
 function updateConversation(dt){
-  // Sixty letters a second, or the pace of the voice once its recording is in.
-  const spoken=chat.voiced&&audio.duration(chat.voice),pace=spoken?clamp(chat.text.length/(spoken*.92),10,60):60;
-  if(chat.shown<chat.text.length){chat.shown=Math.min(chat.text.length,chat.shown+dt*pace);$('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));}
+  // A spoken line keeps up with the voice, by how far through it the voice
+  // is (the audio's clock, not the frames', so the words never fall behind
+  // it), all there a little before the last word; one waiting on its
+  // recording waits with it. Anything else types sixty letters a second.
+  const length=chat.text.length,said=chat.voiced?audio.progress(chat.voice):null;
+  if(chat.shown<length&&(said!==null||!(chat.voiced&&audio.saying(chat.voice)))){
+    chat.shown=said===null?Math.min(length,chat.shown+dt*60):Math.max(chat.shown,Math.min(length,length*said/.92));
+    $('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));
+  }
   yaw+=Math.atan2(Math.sin(chat.yaw-yaw),Math.cos(chat.yaw-yaw))*(1-Math.exp(-3*dt));
   pitch=damp(pitch,.2,3,dt);radius=damp(radius,Math.min(radius,10),3,dt);
   hero.animate(dt,{speed:0,holding:flashlight.out,state:chat.pose,injured:health<=30,fidget:false,time});

@@ -24,6 +24,14 @@ window.__VOICE_TEST__ = {
   // Opens a conversation of these lines with Maren, without the story's say.
   say(lines) { begin('maren', lines); },
   speaking: () => audio.getStats().speaking,
+  // Stands the hero at the keeper's book by the gate, and opens it.
+  toBook() {
+    const at = portal.places.reading;
+    resetInput(); position.set(at.x, groundHeight(at.x, at.z), at.z); locomotion.reset(); avatar.position.copy(position);
+  },
+  read() { if (!chat) readPortalBook(); return !!portalJourney; },
+  phase: () => portalJourney?.phase ?? null,
+  clock: () => time,
 };
 `;
 const audio = page => page.evaluate(() => window.__ASTRA_DEBUG__.audio);
@@ -115,5 +123,64 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   const shown = Date.now();
   await expect(page.locator('#conversation')).toBeHidden({ timeout: 10000 });
   expect(Date.now() - shown).toBeGreaterThan(300);
+  expect(errors).toEqual([]);
+});
+
+// A save with both chapters done, in the city: the book by the gate offers the
+// passage to Pine Islet.
+const done = ['accepted', 'roots', 'bells', 'valves', 'vigil', 'warden', 'complete'];
+const FINISHED = {
+  hero: 'Spiderman', map: 'city', restored: true, kills: 3, collected: [0, 1, 2, 3, 4],
+  story: { keeper: true, ferryman: true, ledger: true, farewell: true, notice: true },
+  chapterTwo: Object.fromEntries(done.map(flag => [flag, true])),
+};
+
+test('the gate answers as soon as the hero has said the spell', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'one browser is enough to hear her');
+  test.setTimeout(process.env.CI ? 600000 : 240000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(save => localStorage.setItem('astra-journey-v1', JSON.stringify(save)), FINISHED);
+  await page.route('**/game.js', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: `${await response.text()}
+${probe}` });
+  });
+  await page.goto('/');
+  await page.waitForFunction(() => window.astraReady && window.__VOICE_TEST__);
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.hero === 'Spiderman' && window.__ASTRA_DEBUG__.ready && !window.__ASTRA_DEBUG__.switching, null, { timeout: 120000 });
+  await page.locator('#play-button').click();
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.screen === 'game' && window.__ASTRA_DEBUG__.audio.state === 'running');
+
+  // Watched from inside the page: when her spell is heard, when she falls
+  // quiet, and when the gate starts to answer. Timed on the game's own clock:
+  // the next map is loading meanwhile, and a stalled frame only ever moves
+  // the game on by a fraction of the time it took.
+  await page.evaluate(() => {
+    const seen = window.__SPELL__ = {};
+    const watch = () => {
+      const now = window.__VOICE_TEST__.clock(), said = window.__VOICE_TEST__.speaking();
+      if (/by-marens-light/.test(said ?? '')) seen.spell ??= now;
+      if (seen.spell && !said) seen.quiet ??= now;
+      if (window.__VOICE_TEST__.phase() === 'casting') seen.casting ??= now;
+      if (!seen.casting) requestAnimationFrame(watch);
+    };
+    watch();
+  });
+  await page.evaluate(() => window.__VOICE_TEST__.toBook());
+  await page.waitForFunction(() => window.__VOICE_TEST__.read());
+  await expect(page.locator('#conversation-name')).toHaveText('The keeper’s spellbook');
+  // Page through the book's narration to the spell.
+  for (let presses = 0; presses < 12 && await page.locator('#conversation-title').textContent() !== 'You'; presses++) {
+    await page.keyboard.press('f'); await page.waitForTimeout(40);
+  }
+  await expect(page.locator('#conversation-text')).toContainText('wake the path the roots have heard', { timeout: 15000 });
+  // The spell is the last of it: once it has been said, a beat later, the gate stirs.
+  const seen = await (await page.waitForFunction(() => window.__SPELL__.casting && window.__SPELL__, null, { timeout: 30000 })).jsonValue();
+  expect(seen.spell, 'her spell was heard').toBeTruthy();
+  expect(seen.casting, 'the gate waited for her to finish').toBeGreaterThan(seen.quiet);
+  expect(seen.casting - seen.quiet, 'and no longer than a beat').toBeLessThan(.8);
+  await expect(page.locator('#conversation')).toBeHidden();
+  await expect(page.locator('#portal-status')).toHaveText(/The words leave the page as light/);
   expect(errors).toEqual([]);
 });

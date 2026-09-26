@@ -229,8 +229,16 @@ export class GameAudio {
   saying(file) { return !!file && this.speech?.file === file; }
   /** Whether this line is being spoken now. */
   speaking(file) { return this.saying(file) && !!this.speech.voice && !this.speech.voice.stopped; }
-  /** How long a downloaded recording runs, in seconds; null until it has downloaded. */
-  duration(file) { return this.buffers.get(file)?.duration ?? null; }
+  /**
+   * How far through this line the voice has got, from 0 to 1, by the audio
+   * clock, which keeps time even when frames stall; null unless it is being
+   * spoken now.
+   */
+  progress(file) {
+    if (!this.speaking(file)) return null;
+    const { voice } = this.speech;
+    return clamp((this.context.currentTime - voice.started) / voice.source.buffer.duration);
+  }
   createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false, span = null, onEnded = null }) {
     const context = this.context, source = context.createBufferSource(), gain = context.createGain();
     source.buffer = buffer; source.loop = loop; source.playbackRate.value = clamp(rate, .65, 1.5);
@@ -247,7 +255,7 @@ export class GameAudio {
       panner.refDistance = 4; panner.maxDistance = 65; panner.rolloffFactor = 1.5;
       this.setNodePosition(panner, position); gain.connect(panner); panner.connect(this.buses[bus]);
     } else gain.connect(this.buses[bus]);
-    const voice = { source, gain, panner, stopped: false, silentTime: 0, target: volume };
+    const voice = { source, gain, panner, stopped: false, silentTime: 0, target: volume, started: context.currentTime };
     this.voices.add(voice); this.played++;
     source.onended = () => { this.disconnectVoice(voice); onEnded?.(); };
     if (span) source.start(0, span.offset, span.duration);

@@ -83,12 +83,18 @@ test('a line is spoken on the voice bus, one at a time, with the music stepping 
 
   // A line not yet downloaded starts once it is.
   assert.ok(audio.speak('voice/hero/first.ogg'));
-  assert.equal(audio.duration('voice/hero/first.ogg'), null);
+  assert.equal(audio.progress('voice/hero/first.ogg'), null, 'not yet being spoken');
   await Promise.all([...audio.pending.values()]);
   const [first] = spoken(context, 'first');
   assert.ok(first?.started, 'the line is heard');
   assert.equal(first.to.to, voice, 'on the voice bus');
-  assert.equal(audio.duration('voice/hero/first.ogg'), 2.5);
+  // How far through it the voice is goes by the audio clock.
+  assert.equal(audio.progress('voice/hero/first.ogg'), 0);
+  context.currentTime = 1.25;
+  assert.equal(audio.progress('voice/hero/first.ogg'), .5);
+  context.currentTime = 9;
+  assert.equal(audio.progress('voice/hero/first.ogg'), 1);
+  context.currentTime = 0;
   assert.equal(audio.getStats().speaking, 'voice/hero/first.ogg');
   assert.ok(Math.abs(music.target - audio.volumes.music * .4) < 1e-9, 'the music steps back');
 
