@@ -2,8 +2,10 @@ import { test, expect } from '@playwright/test';
 
 // The story is heard aloud. Meeting Maren as Spiderman, Maren speaks, then
 // Gwen's question is heard in her own voice, its words typing out at the pace
-// she says it, and each falls quiet when the conversation moves on or is
-// skipped; Tobin, at the jetty, speaks too. As in story.spec.js, the
+// she says it; once she has said it the conversation moves on by itself, and
+// each falls quiet when it moves on or is skipped. Tobin, at the jetty, speaks
+// too, and a line no one speaks holds long enough to be read and then closes
+// the conversation. As in story.spec.js, the
 // hook exists only in this intercepted response: it stands the hero before
 // Maren, and opens a conversation of its own choosing.
 const probe = `
@@ -50,13 +52,21 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/ah-someone-who-can-still-see-\w+\.ogg$/);
 
   // Watched from inside the page, where a second-long line can't slip by
-  // between two of the test's looks: what is heard, and how long her line
-  // takes to type out.
+  // between two of the test's looks: what is heard, how long her line takes
+  // to type out, when she falls quiet and when Maren takes over.
   await page.evaluate(line => {
     const name = document.getElementById('conversation-name'), text = document.getElementById('conversation-text'), watch = { subtree: true, childList: true, characterData: true };
     const typing = window.__TYPING__ = { heard: null };
-    const listen = () => { typing.heard ??= window.__VOICE_TEST__.speaking(); if (!typing.end) requestAnimationFrame(listen); };
-    new MutationObserver(() => { if (name.textContent === 'Spiderman' && !typing.start) { typing.start = performance.now(); listen(); } }).observe(name, watch);
+    const listen = () => {
+      const now = window.__VOICE_TEST__.speaking();
+      typing.heard ??= now;
+      if (typing.heard && !now) typing.quiet ??= performance.now();
+      if (!typing.moved) requestAnimationFrame(listen);
+    };
+    new MutationObserver(() => {
+      if (name.textContent === 'Spiderman' && !typing.start) { typing.start = performance.now(); listen(); }
+      if (name.textContent === 'Maren' && typing.start) typing.moved ??= performance.now();
+    }).observe(name, watch);
     new MutationObserver(() => { if (typing.start && text.textContent === line) typing.end ??= performance.now(); }).observe(text, watch);
   }, 'How many do you need?');
   // Page on through her greeting to the hero's line.
@@ -69,10 +79,11 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   expect(typing.heard).toMatch(/^voice\/heroes\/spiderman\/how-many-do-you-need-\w+\.ogg$/);
   expect(typing.end - typing.start).toBeGreaterThan(700);
   expect((await audio(page)).failed).toEqual([]);
-  // She says it to the end by herself, and Maren answers.
-  await expect.poll(async () => (await audio(page)).speaking, { timeout: 5000 }).toBeNull();
-  await page.keyboard.press('f');
-  await expect(page.locator('#conversation-name')).toHaveText('Maren');
+  // She says it to the end, and with no press at all, a beat later, Maren answers.
+  const moved = await (await page.waitForFunction(() => window.__TYPING__.moved && window.__TYPING__, null, { timeout: 10000 })).jsonValue();
+  expect(moved.quiet, 'she finished before the conversation moved on').toBeLessThan(moved.moved);
+  expect(moved.moved - moved.quiet).toBeGreaterThan(200);
+  expect(moved.moved - moved.quiet).toBeLessThan(3000);
   await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/five-will-wake-it-\w/);
   // Skipping the rest quiets her.
   await page.keyboard.press('Escape');
@@ -100,7 +111,9 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await page.keyboard.press('f');
   await expect(page.locator('#conversation-text')).toHaveText('The well hums.');
   expect((await audio(page)).speaking).toBeNull();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#conversation')).toBeHidden();
+  // No one speaks the last line: it stays to be read, then closes the conversation.
+  const shown = Date.now();
+  await expect(page.locator('#conversation')).toBeHidden({ timeout: 10000 });
+  expect(Date.now() - shown).toBeGreaterThan(300);
   expect(errors).toEqual([]);
 });

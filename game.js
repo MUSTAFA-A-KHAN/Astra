@@ -413,20 +413,28 @@ function interact(){
  * CONVERSATIONS
  *
  * A conversation holds the hero still, turns them and the camera toward
- * whoever is speaking, and pages through the lines one press at a time. The
- * world keeps running behind it, but nothing in it can reach the player: the
- * wisps wait, and the clock only ticks. A line types itself out; a press
- * mid-line finishes it, the next press moves on, and Escape skips to the end,
- * which still counts as having heard it all.
+ * whoever is speaking, and plays through its lines. The world keeps running
+ * behind it, but nothing in it can reach the player: the wisps wait, and the
+ * clock only ticks. A line types itself out, and once it is all there, and
+ * heard to its end if it is spoken, it holds for a beat (or for as long as
+ * it takes to read, if it is not) and moves on by itself; the last one
+ * closes the conversation. A press mid-line finishes it, the next press
+ * moves on without waiting, and Escape skips to the end, which still counts
+ * as having heard it all.
  *
  * Whoever has a recorded voice (tools/generate-voice.py) speaks their
  * lines aloud: the people the hero meets, by the voice each speaker names,
- * and the hero too if theirs has been recorded. A spoken line types
- * itself out at the pace it is said. Every recording a conversation needs starts downloading as
- * it opens, so each is there by the time its line comes up.
+ * and the hero too if theirs has been recorded. A spoken line types itself
+ * out at the pace it is said. Every recording a conversation needs starts
+ * downloading as it opens, so each is there by the time its line comes up.
  */
 let chat=null,finale=false,closed={person:null,at:0};
 const voiceOf=(who,text)=>who==='you'?VOICES.heroes[heroMeta.id]?.[text]:who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
+// How long a line holds once it is all there: a short beat after a line that
+// was heard spoken, and time to finish reading one that was not (it typed
+// itself out at sixty letters a second meanwhile), a third of a second and a
+// fourteenth of one a word.
+const holdFor=chat=>chat.heard?.35:.3+chat.text.split(/\s+/).length*.07;
 function talk(person){
   const entry=conversation(person,STEPS[storyStep(progress)].id,{camp:world.biomeAt(camp.x,camp.z)});if(!entry)return;
   begin(person,entry.lines,()=>heard(entry));
@@ -452,13 +460,18 @@ function showLine(){
   $('conversation-name').textContent=speaker?.name||'';$('conversation-title').textContent=speaker?.title||'';
   chat.text=text;chat.shown=reducedMotion?text.length:0;$('conversation-text').textContent=reducedMotion?text:'';
   chat.voice=voiceOf(who,text);chat.voiced=chat.voice?audio.speak(chat.voice):(audio.hush(),false);
+  chat.held=0;chat.heard=false;$('conversation-next').style.setProperty('--wait',0);
   $('conversation-next-label').textContent=chat.index<chat.lines.length-1?'Continue':'Done';
 }
 function advance(){
   if(!chat)return;
   if(chat.shown<chat.text.length){chat.shown=chat.text.length;$('conversation-text').textContent=chat.text;return;}
-  if(++chat.index<chat.lines.length){sound();showLine();return;}
-  endConversation();
+  nextLine(true);
+}
+// On to the next line, or the end. Only a press is answered with a click.
+function nextLine(pressed=false){
+  if(++chat.index<chat.lines.length){if(pressed)sound();showLine();}
+  else endConversation();
 }
 function endConversation(){
   if(!chat)return;
@@ -1084,6 +1097,13 @@ function updateConversation(dt){
   yaw+=Math.atan2(Math.sin(chat.yaw-yaw),Math.cos(chat.yaw-yaw))*(1-Math.exp(-3*dt));
   pitch=damp(pitch,.2,3,dt);radius=damp(radius,Math.min(radius,10),3,dt);
   hero.animate(dt,{speed:0,holding:flashlight.out,state:chat.pose,injured:health<=30,fidget:false,time});
+  // All there, and heard out: it holds, the button's line filling as it
+  // does, then moves on by itself.
+  if(chat.voiced&&audio.speaking(chat.voice))chat.heard=true;
+  if(chat.shown<chat.text.length||chat.voiced&&audio.saying(chat.voice))return;
+  const hold=holdFor(chat);chat.held+=dt;
+  $('conversation-next').style.setProperty('--wait',Math.min(1,chat.held/hold).toFixed(3));
+  if(chat.held>=hold)nextLine();
 }
 function updateShards(){
   shardMesh.visible=inCity();if(!inCity())return;

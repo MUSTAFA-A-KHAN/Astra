@@ -136,6 +136,25 @@ test('a line about to be spoken never waits on the music', async () => {
   assert.ok(spoken(context, 'line')[0]?.started, 'and is heard');
 });
 
+test('a line is still being said while it downloads and plays, and over once it ends or cannot be had', async () => {
+  const context = voiceContext();
+  const audio = new GameAudio({ fetcher: async url => String(url).includes('missing') ? { ok: false, status: 404 } : { ok: true, arrayBuffer: async () => ({ url: String(url) }) } });
+  audio.setContext(context);
+  await Promise.all([...audio.pending.values()]);
+  audio.speak('voice/hero/line.ogg');
+  assert.ok(audio.saying('voice/hero/line.ogg'), 'downloading');
+  assert.ok(!audio.speaking('voice/hero/line.ogg'));
+  await Promise.all([...audio.pending.values()]);
+  assert.ok(audio.saying('voice/hero/line.ogg') && audio.speaking('voice/hero/line.ogg'), 'playing');
+  assert.ok(!audio.saying('voice/hero/other.ogg'));
+  spoken(context, 'line')[0].onended();
+  assert.ok(!audio.saying('voice/hero/line.ogg'), 'heard out');
+  // A conversation waiting on a recording that never comes would wait forever.
+  audio.speak('voice/hero/missing.ogg');
+  await Promise.all([...audio.pending.values()]);
+  assert.ok(!audio.saying('voice/hero/missing.ogg'));
+});
+
 test('the voice has its own volume, and nothing is spoken with sound off', async () => {
   const context = voiceContext();
   const audio = new GameAudio({ enabled: false, fetcher: async url => ({ ok: true, arrayBuffer: async () => ({ url: String(url) }) }) });

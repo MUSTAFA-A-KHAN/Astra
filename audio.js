@@ -212,7 +212,9 @@ export class GameAudio {
     if (!file || !this.enabled || !this.context || this.disposed) return false;
     const request = this.speech = { file, voice: null };
     const start = buffer => {
-      if (this.speech !== request || !buffer || !this.active) return;
+      if (this.speech !== request) return;
+      // A line that could not be downloaded, or with the sound paused, is over before it began.
+      if (!buffer || !this.active) { this.speech = null; return; }
       request.voice = this.createVoice(buffer, { bus: 'voice', volume: 1, onEnded: () => { if (this.speech === request) { this.speech = null; this.refreshVolume(); } } });
       this.refreshVolume();
     };
@@ -223,6 +225,10 @@ export class GameAudio {
     const speech = this.speech; this.speech = null;
     if (speech?.voice) { this.stopVoice(speech.voice); this.refreshVolume(); }
   }
+  /** Whether this line is still to be heard out: downloading, or being spoken. */
+  saying(file) { return !!file && this.speech?.file === file; }
+  /** Whether this line is being spoken now. */
+  speaking(file) { return this.saying(file) && !!this.speech.voice && !this.speech.voice.stopped; }
   /** How long a downloaded recording runs, in seconds; null until it has downloaded. */
   duration(file) { return this.buffers.get(file)?.duration ?? null; }
   createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false, span = null, onEnded = null }) {
@@ -355,7 +361,7 @@ export class GameAudio {
   getStats() {
     return { enabled: this.enabled, paused: this.paused, state: this.context?.state || 'locked', format: this.format, loaded: this.buffers.size,
       loading: this.pending.size, failed: [...this.failed], voices: this.voices.size, loops: this.loops.size,
-      musicState: this.musicState, played: this.played, speaking: this.speech?.voice && !this.speech.voice.stopped ? this.speech.file : null, volumes: { ...this.volumes } };
+      musicState: this.musicState, played: this.played, speaking: this.speaking(this.speech?.file) ? this.speech.file : null, volumes: { ...this.volumes } };
   }
   stopAll() { for (const voice of this.voices) this.stopVoice(voice); this.loops.clear(); this.speech = null; }
   release() {
