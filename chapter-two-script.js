@@ -81,7 +81,8 @@ export function chapterTwoStep(state = {}) {
 
 // `read`: an inscription the hero stops to read, as in story-script.js.
 export const CHAPTER_TWO_PEOPLE = {
-  chart: { name: 'Tobin', title: 'Ferryman', color: '#e9c38b' },
+  // The tide chart is Tobin's, and so is the voice that reads it out.
+  chart: { name: 'Tobin', title: 'Ferryman', color: '#e9c38b', voice: 'tobin' },
   rootTablet: { name: 'The root tablet', title: 'First lock', color: '#9ad07a', read: true },
   bellTablet: { name: 'The bell-ringer\'s verse', title: 'Second lock', color: '#ffb35c', read: true },
   valvePanel: { name: 'The pressure ledger', title: 'Third lock', color: '#ff9276', read: true },
@@ -90,29 +91,30 @@ export const CHAPTER_TWO_PEOPLE = {
   seal: { name: 'The meridian seal', title: 'The Moonwell', color: '#d9c5ff' },
 };
 
-const say = (speaker, text) => [speaker, text];
+// A line spoken aloud carries a feeling, as in story-script.js.
+const say = (speaker, text, feeling) => feeling ? [speaker, text, feeling] : [speaker, text];
 const narration = (...lines) => ({ lines: lines.map(text => say(null, text)) });
 
 export function chapterTwoConversation(person, state = {}) {
   if (!Object.hasOwn(CHAPTER_TWO_PEOPLE, person)) return null;
   if (person === 'chart') {
-    if (state.complete) return { lines: [say('chart', 'Heard the bells from here this morning. First time in twenty years they sounded like a beginning. Fair winds, Keeper.')] };
+    if (state.complete) return { lines: [say('chart', 'Heard the bells from here this morning. First time in twenty years they sounded like a beginning. Fair winds, Keeper.', 'warm')] };
     if (state.accepted) return { lines: [
-      say('chart', 'Root, bell, iron. One lock on Pine Islet, two in the old pumping yard. Three locks on one stolen voice.'),
-      say('chart', 'Use Maren\'s book at each portal. Read its passage aloud, then cast the spell. The root lock opens the way to the yard; the Tidewarden\'s voice opens the way home.'),
-      say('chart', state.warden ? 'Bring its voice to the seal beside the Moonwell. Let the whole harbour hear it.' : 'When all three locks open, kindle the meridian beacon among the yard\'s stacks. Then face the Hollow Warden at the yard\'s far end and free the Tidewarden\'s voice.'),
+      say('chart', 'Root, bell, iron. One lock on Pine Islet, two in the old pumping yard. Three locks on one stolen voice.', 'earnest'),
+      say('chart', 'Use Maren\'s book at each portal. Read its passage aloud, then cast the spell. The root lock opens the way to the yard; the Tidewarden\'s voice opens the way home.', 'earnest'),
+      state.warden ? say('chart', 'Bring its voice to the seal beside the Moonwell. Let the whole harbour hear it.', 'hopeful') : say('chart', 'When all three locks open, kindle the meridian beacon among the yard\'s stacks. Then face the Hollow Warden at the yard\'s far end and free the Tidewarden\'s voice.', 'earnest'),
     ] };
     return { sets: 'accepted', lines: [
-      say('chart', 'Keeper. I slept, just as I said I would. Then the tide knocked on my door. From the inside.'),
+      say('chart', 'Keeper. I slept, just as I said I would. Then the tide knocked on my door. From the inside.', 'mysterious'),
       say(null, 'On Tobin\'s chart, ink creeps upstream. Three black circles tighten around a silver line.'),
-      say('chart', 'Maren woke the Moonwell, but its light found a promise left unfinished. The Tidewarden, that great whale in the harbour, is still trying to speak.'),
-      say('chart', 'The Long Tide stole its voice and sealed it in drowned iron. Three locks hold it: a memory under Pine Islet, then a song and a breath in the old pumping yard, where the salvage crews stacked the drowned bells.'),
-      say('you', 'And if I open them?'),
-      say('chart', 'Kindle the meridian beacon among the yard\'s stacks. It will reveal the Hollow Warden at the yard\'s far end: an iron shell with our guardian\'s voice trapped inside. Break that shell and bring the voice home.'),
+      say('chart', 'Maren woke the Moonwell, but its light found a promise left unfinished. The Tidewarden, that great whale in the harbour, is still trying to speak.', 'mysterious'),
+      say('chart', 'The Long Tide stole its voice and sealed it in drowned iron. Three locks hold it: a memory under Pine Islet, then a song and a breath in the old pumping yard, where the salvage crews stacked the drowned bells.', 'earnest'),
+      say('you', 'And if I open them?', 'resolute'),
+      say('chart', 'Kindle the meridian beacon among the yard\'s stacks. It will reveal the Hollow Warden at the yard\'s far end: an iron shell with our guardian\'s voice trapped inside. Break that shell and bring the voice home.', 'resolute'),
       say(null, 'Tobin places Maren\'s ledger in your hands. Pale ink shines between its last pages: spells for the old keeper portals.'),
-      say('chart', 'Only this book can awaken them. At each portal, open it on the lectern, read the passage, then cast the spell. Keep reading while the far shore takes shape.'),
-      say('chart', 'The city portal will take you to Pine Islet. Open its root lock to reveal the passage to the yard. Free the Tidewarden\'s voice there, and the book will show you the way home.'),
-      say('chart', 'Begin with the book beside the city portal, then find the root tablet on Pine Islet. Maren left you a light. This time you must carry it beyond the city.'),
+      say('chart', 'Only this book can awaken them. At each portal, open it on the lectern, read the passage, then cast the spell. Keep reading while the far shore takes shape.', 'earnest'),
+      say('chart', 'The city portal will take you to Pine Islet. Open its root lock to reveal the passage to the yard. Free the Tidewarden\'s voice there, and the book will show you the way home.', 'earnest'),
+      say('chart', 'Begin with the book beside the city portal, then find the root tablet on Pine Islet. Maren left you a light. This time you must carry it beyond the city.', 'warm'),
     ] };
   }
 
@@ -156,7 +158,7 @@ export function chapterTwoConversation(person, state = {}) {
     say(null, 'You place your hand on the seal. The Tidewarden\'s voice moves through the stone, deep as an oar striking still water.'),
     say('warden', 'I remember the promise. I guard the passage. You keep the light. Neither of us carries the lost alone.'),
     say(null, 'Across Pine Islet, the roots shine silver. In the yard, the salvaged bells ring for dawn, and the old pumps breathe with the tide instead of against it.'),
-    say('you', 'Then let this be the first night we keep it together.'),
+    say('you', 'Then let this be the first night we keep it together.', 'hopeful'),
     say(null, 'A wish-coin turns once at the bottom of the Moonwell. For a moment, you could swear you hear Maren laughing.'),
   ] };
 }

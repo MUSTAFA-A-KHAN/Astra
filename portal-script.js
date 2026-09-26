@@ -52,7 +52,7 @@ export function portalConversation(route) {
   return { lines: [
     [null, 'You open the keeper\'s ledger on the portal lectern. Its ink gathers into a spell beneath your hands.'],
     [null, `A silver line leads toward ${route.mapName}. You read each word from the book before raising your hand to the sleeping gate.`],
-    ['you', route.spell],
+    ['you', route.spell, 'incantation'],
     [null, 'The words leave the page as light. The portal stirs, drawing the far shore into focus.'],
   ] };
 }

@@ -15,6 +15,7 @@ import { createChapterTwo } from './chapter-two-world.js';
 import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
 import { portalRoute, portalConversation } from './portal-script.js';
+import { HERO_VOICES } from './voice-manifest.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -63,7 +64,8 @@ const formatTime = hour => {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 let hero = null, heroMeta = HEROES[0], screen = 'lobby', switching = false, sessionStarted = false, contextLost = false;
-preferences.volumes = Object.fromEntries(['master','effects','ambience','music'].map(key => [key, finite(saved.volumes?.[key], key === 'music' ? .45 : .8, 0, 1)]));
+const VOLUME_CHANNELS = ['master','effects','ambience','music','voice'];
+preferences.volumes = Object.fromEntries(VOLUME_CHANNELS.map(key => [key, finite(saved.volumes?.[key], key === 'music' ? .45 : key === 'voice' ? .9 : .8, 0, 1)]));
 const audio = new GameAudio({ enabled: preferences.sound });
 audio.setVolumes(preferences.volumes);
 let toastTimeout, audioContext, time = 0, health = 100, attackTimer = 0, abilityTimer = 0, hurtTimer = 0, emoting = null, emoteUntil = 0, greetUntil = 0;
@@ -416,8 +418,14 @@ function interact(){
  * wisps wait, and the clock only ticks. A line types itself out; a press
  * mid-line finishes it, the next press moves on, and Escape skips to the end,
  * which still counts as having heard it all.
+ *
+ * A hero whose voice has been recorded speaks their own lines aloud
+ * (tools/generate-voice.py), and the line types itself out at the pace
+ * they say it. Every recording a conversation needs starts downloading as
+ * it opens, so each is there by the time its line comes up.
  */
 let chat=null,finale=false,closed={person:null,at:0};
+const voiceOf=(who,text)=>who==='you'?HERO_VOICES[heroMeta.id]?.[text]:undefined;
 function talk(person){
   const entry=conversation(person,STEPS[storyStep(progress)].id,{camp:world.biomeAt(camp.x,camp.z)});if(!entry)return;
   begin(person,entry.lines,()=>heard(entry));
@@ -426,6 +434,8 @@ function begin(person,lines,onEnd){
   const place=person==='portalBook'?portal.places.book:chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
+  // Last line first: each goes to the head of the downloads, so the first spoken ends up first.
+  for(const [who,text] of [...lines].reverse()){const file=voiceOf(who,text);if(file)audio.load(file,true);}
   avatar.rotation.y=Math.atan2(dx,dz);lockTarget=null;aiming=cinematic=false;resetInput();syncCameraControls();
   story.talking=person;document.body.classList.add('conversing');$('conversation').hidden=false;sound();showLine();
 }
@@ -440,6 +450,7 @@ function showLine(){
   $('conversation').style.setProperty('--speaker',speaker?.color||'var(--gold)');
   $('conversation-name').textContent=speaker?.name||'';$('conversation-title').textContent=speaker?.title||'';
   chat.text=text;chat.shown=reducedMotion?text.length:0;$('conversation-text').textContent=reducedMotion?text:'';
+  chat.voice=voiceOf(who,text);chat.voiced=chat.voice?audio.speak(chat.voice):(audio.hush(),false);
   $('conversation-next-label').textContent=chat.index<chat.lines.length-1?'Continue':'Done';
 }
 function advance(){
@@ -450,7 +461,7 @@ function advance(){
 }
 function endConversation(){
   if(!chat)return;
-  const {onEnd,person}=chat;chat=null;closed={person,at:performance.now()};story.talking=null;
+  const {onEnd,person}=chat;chat=null;closed={person,at:performance.now()};story.talking=null;audio.hush();
   $('conversation').hidden=true;document.body.classList.remove('conversing');
   // Back to the view the player had chosen, eased rather than cut.
   settling=.9;resetInput();onEnd?.();
@@ -953,13 +964,13 @@ function openMenu(type){
   if(portalJourney)return;
   resetInput();const content=$('dialog-content');$('dialog-eyebrow').textContent=type==='settings'?'MAKE IT YOURS':type==='journal'?`${currentChapter().eyebrow} · ${currentChapter().title.toUpperCase()}`:'TAKE A BREATH';$('dialog-title').textContent=type==='settings'?'World & settings':type==='journal'?'Your journal':'A moment of quiet';
   if(type==='settings'){
-    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${["master","effects","ambience","music"].map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
+    content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${VOLUME_CHANNELS.map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: sixteen Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('audio-status').textContent=audioStatus();$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
     // The world is built once, with or without the plaza and the Nightwood: it takes a fresh one. The Red Mesa
     // has no switch: the Moonwell stands on it, so it always comes with the city.
     for(const district of ['plaza','nightwood']){$(district+'-setting').checked=preferences[district];$(district+'-setting').onchange=e=>{preferences[district]=e.target.checked;save();location.reload();};}
-    for(const channel of ['master','effects','ambience','music'])$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
+    for(const channel of VOLUME_CHANNELS)$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
     const second=chapterTwoUnlocked(),steps=second?CHAPTER_TWO_STEPS:STEPS,index=second?steps.indexOf(currentStep()):storyStep(progress);
@@ -1066,7 +1077,9 @@ function updatePlayer(dt){
 // The hero stands and listens, the line types itself out, and the camera
 // comes round over their shoulder to whoever is speaking.
 function updateConversation(dt){
-  if(chat.shown<chat.text.length){chat.shown=Math.min(chat.text.length,chat.shown+dt*60);$('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));}
+  // Sixty letters a second, or the pace of the voice once its recording is in.
+  const spoken=chat.voiced&&audio.duration(chat.voice),pace=spoken?clamp(chat.text.length/(spoken*.92),10,60):60;
+  if(chat.shown<chat.text.length){chat.shown=Math.min(chat.text.length,chat.shown+dt*pace);$('conversation-text').textContent=chat.text.slice(0,Math.floor(chat.shown));}
   yaw+=Math.atan2(Math.sin(chat.yaw-yaw),Math.cos(chat.yaw-yaw))*(1-Math.exp(-3*dt));
   pitch=damp(pitch,.2,3,dt);radius=damp(radius,Math.min(radius,10),3,dt);
   hero.animate(dt,{speed:0,holding:flashlight.out,state:chat.pose,injured:health<=30,fidget:false,time});

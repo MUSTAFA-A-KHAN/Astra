@@ -1,6 +1,6 @@
 # Audio credits
 
-Every sound in this folder comes from OpenGameArt.org, except the walking recordings in walks/, which come from Pixabay. Recordings under CC0 need no attribution, but they are listed here anyway. CC-BY 3.0 recordings are used under the terms of that licence.
+Every sound in this folder comes from OpenGameArt.org, except the walking recordings in walks/, which come from Pixabay, and the spoken lines in voice/, which are synthesised (see Voices below). Recordings under CC0 need no attribution, but they are listed here anyway. CC-BY 3.0 recordings are used under the terms of that licence.
 
 Every sound ships as Ogg Vorbis plus an AAC copy (.m4a) for Safari versions that cannot decode Vorbis, both at 44.1 kHz. One-shot effects were mixed down to mono, had leading silence trimmed and were peak-normalised. Loops were given an equal-power crossfade from tail to head so that they repeat seamlessly. Other edits are listed per file.
 
@@ -41,3 +41,13 @@ Recordings of someone walking, supplied as MP3 and converted like the rest: mono
 | walks/alex_jauk-walking-in-water-199418.ogg | [Walking in water](https://pixabay.com/sound-effects/walking-in-water-199418/) | alex_jauk | [Pixabay Content License](https://pixabay.com/service/license-summary/) | Mono |
 | walks/universfield-horse-walking-123782.ogg | [Horse walking](https://pixabay.com/sound-effects/horse-walking-123782/) | universfield | [Pixabay Content License](https://pixabay.com/service/license-summary/) | Mono |
 | walks/yodguard-horse-walking-sound-4-450266.ogg | [Horse walking sound 4](https://pixabay.com/sound-effects/horse-walking-sound-4-450266/) | yodguard | [Pixabay Content License](https://pixabay.com/service/license-summary/) | Mono |
+
+## Voices
+
+The heroes' spoken lines are synthesised with Microsoft's neural text-to-speech by `tools/generate-voice.py`, from the lines and feelings in `tools/voice-direction.mjs`. Each line is spoken a sentence at a time (a spell, a clause at a time) at the rate, pitch and volume of its feeling, and the pieces are joined with timed pauses. Every line is then high-passed at 85 Hz, lightly compressed and loudness-normalised to −18 LUFS, and the spells are given an echo.
+
+| Folder | Hero | Voice | Service |
+| --- | --- | --- | --- |
+| voice/spiderman/ | Spiderman (Gwen Stacy) | en-US-AvaMultilingualNeural, Microsoft | Microsoft Edge read-aloud |
+
+Microsoft offers the Edge read-aloud service for use within Edge. Before the game is released commercially, re-record the lines through Azure Speech, whose terms cover distributing the audio it synthesises: set `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` and run the generator again.

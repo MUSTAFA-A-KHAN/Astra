@@ -9,6 +9,8 @@ const CORE = [...WALKS, 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction
 // How loud a step is brought to, whatever level it was recorded at: the RMS
 // of its loudest hundredth of a second.
 const STEP_LEVEL = .05;
+// While a line is spoken, the music and the world around it step back this far.
+const DUCK = { music: .4, ambience: .6 };
 
 /** Which walk a stride plays: the horse's when riding, otherwise the ground's, dirt by default. */
 export function footstepSurface(surface = '', mounted = false) {
@@ -64,14 +66,14 @@ export class GameAudio {
   constructor({ context = null, enabled = true, fetcher = globalThis.fetch?.bind(globalThis), random = Math.random, format = preferredFormat() } = {}) {
     this.context = null; this.enabled = enabled; this.paused = false; this.disposed = false;
     this.fetcher = fetcher; this.random = random; this.master = null; this.buses = {};
-    this.volumes = { master: .75, effects: .8, ambience: .5, music: .3 };
+    this.volumes = { master: .75, effects: .8, ambience: .5, music: .3, voice: .9 };
     this.buffers = new Map(); this.pending = new Map(); this.failed = new Set(); this.slices = new WeakMap();
     this.voices = new Set(); this.loops = new Map(); this.lastVariant = new Map(); this.lastEvent = new Map();
     this.generation = 0; this.abort = null; this.queue = []; this.downloads = 0; this.format = format;
     this.musicState = 'exploration'; this.victoryRemaining = 0; this.combatRemaining = 0;
     this.stepDistance = 0; this.wasGrounded = true; this.initializedMotion = false;
     this.climbTimer = 0; this.breathLevel = 0; this.smithTimer = .4; this.animalTimer = 9;
-    this.listenerPosition = { x: 0, y: 0, z: 0 }; this.played = 0;
+    this.listenerPosition = { x: 0, y: 0, z: 0 }; this.played = 0; this.speech = null; this.ducked = false;
     if (context) this.setContext(context);
   }
 
@@ -79,7 +81,7 @@ export class GameAudio {
     if (!context || this.context === context || this.disposed) return;
     this.release(); this.context = context; this.abort = new AbortController();
     this.master = context.createGain(); this.master.gain.value = 0; this.master.connect(context.destination);
-    for (const bus of ['effects', 'ambience', 'music']) {
+    for (const bus of ['effects', 'ambience', 'music', 'voice']) {
       const gain = context.createGain(); gain.gain.value = this.volumes[bus]; gain.connect(this.master); this.buses[bus] = gain;
     }
     this.refreshVolume();
@@ -108,17 +110,24 @@ export class GameAudio {
     if (!this.master || this.context?.state === 'closed') return;
     const now = this.context.currentTime;
     this.master.gain.setTargetAtTime(this.enabled && !this.paused ? this.volumes.master : 0, now, .06);
-    for (const [name, bus] of Object.entries(this.buses)) bus.gain.setTargetAtTime(this.volumes[name], now, .08);
+    // Ducked quickly as a line starts, and eased back up once it has ended.
+    const ducked = !!this.speech?.voice && !this.speech.voice.stopped, ease = ducked ? .15 : this.ducked ? .5 : .08;
+    this.ducked = ducked;
+    for (const [name, bus] of Object.entries(this.buses)) bus.gain.setTargetAtTime(this.volumes[name] * (ducked ? DUCK[name] ?? 1 : 1), now, ease);
   }
   get active() { return !this.disposed && this.enabled && !this.paused && this.context?.state === 'running'; }
 
-  /** Three concurrent local fetches keep decoding from flooding the render thread. */
-  load(file) {
+  /**
+   * Three concurrent local fetches keep decoding from flooding the render
+   * thread. An urgent file, a line about to be spoken, goes ahead of the
+   * queue rather than waiting on the music.
+   */
+  load(file, urgent = false) {
     if (this.buffers.has(file)) return Promise.resolve(this.buffers.get(file));
     if (this.pending.has(file)) return this.pending.get(file);
     if (!this.context || !this.fetcher || this.failed.has(file) || this.disposed) return Promise.resolve(null);
     const generation = this.generation, context = this.context, signal = this.abort.signal;
-    const promise = new Promise(resolve => this.queue.push({ file, generation, context, signal, resolve }));
+    const promise = new Promise(resolve => this.queue[urgent ? 'unshift' : 'push']({ file, generation, context, signal, resolve }));
     this.pending.set(file, promise); this.pump(); return promise;
   }
   pump() {
@@ -192,7 +201,30 @@ export class GameAudio {
     this.createVoice(buffer, { bus: definition.bus || 'effects', volume: clamp(volume, 0, 2) * (definition.volume ?? 1) * (span?.gain ?? 1), rate, position, span });
     return true;
   }
-  createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false, span = null }) {
+  /**
+   * A spoken line, on the voice bus: one at a time, each cutting off the one
+   * before. A line not yet downloaded starts as soon as it lands, unless
+   * another has been asked for, or quiet, in the meantime.
+   */
+  speak(file) {
+    this.hush();
+    if (!file || !this.enabled || !this.context || this.disposed) return false;
+    const request = this.speech = { file, voice: null };
+    const start = buffer => {
+      if (this.speech !== request || !buffer || !this.active) return;
+      request.voice = this.createVoice(buffer, { bus: 'voice', volume: 1, onEnded: () => { if (this.speech === request) { this.speech = null; this.refreshVolume(); } } });
+      this.refreshVolume();
+    };
+    if (this.buffers.has(file)) start(this.buffers.get(file)); else this.load(file, true).then(start);
+    return true;
+  }
+  hush() {
+    const speech = this.speech; this.speech = null;
+    if (speech?.voice) { this.stopVoice(speech.voice); this.refreshVolume(); }
+  }
+  /** How long a downloaded recording runs, in seconds; null until it has downloaded. */
+  duration(file) { return this.buffers.get(file)?.duration ?? null; }
+  createVoice(buffer, { bus, volume, rate = 1, position = null, loop = false, span = null, onEnded = null }) {
     const context = this.context, source = context.createBufferSource(), gain = context.createGain();
     source.buffer = buffer; source.loop = loop; source.playbackRate.value = clamp(rate, .65, 1.5);
     gain.gain.value = volume; source.connect(gain);
@@ -210,7 +242,7 @@ export class GameAudio {
     } else gain.connect(this.buses[bus]);
     const voice = { source, gain, panner, stopped: false, silentTime: 0, target: volume };
     this.voices.add(voice); this.played++;
-    source.onended = () => this.disconnectVoice(voice);
+    source.onended = () => { this.disconnectVoice(voice); onEnded?.(); };
     if (span) source.start(0, span.offset, span.duration);
     else source.start(0, loop && bus !== 'music' ? this.random() * buffer.duration : 0);
     return voice;
@@ -322,9 +354,9 @@ export class GameAudio {
   getStats() {
     return { enabled: this.enabled, paused: this.paused, state: this.context?.state || 'locked', format: this.format, loaded: this.buffers.size,
       loading: this.pending.size, failed: [...this.failed], voices: this.voices.size, loops: this.loops.size,
-      musicState: this.musicState, played: this.played, volumes: { ...this.volumes } };
+      musicState: this.musicState, played: this.played, speaking: this.speech?.voice && !this.speech.voice.stopped ? this.speech.file : null, volumes: { ...this.volumes } };
   }
-  stopAll() { for (const voice of this.voices) this.stopVoice(voice); this.loops.clear(); }
+  stopAll() { for (const voice of this.voices) this.stopVoice(voice); this.loops.clear(); this.speech = null; }
   release() {
     this.generation++; this.abort?.abort();
     for (const task of this.queue) task.resolve(null);
