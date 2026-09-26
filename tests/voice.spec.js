@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-// Gwen speaks her own lines: meeting Maren as Spiderman, her question is
-// heard aloud, its words type out at the pace she says them, and she falls
-// quiet when the conversation moves on or is skipped. As in story.spec.js, the
+// The story is heard aloud. Meeting Maren as Spiderman, Maren speaks, then
+// Gwen's question is heard in her own voice, its words typing out at the pace
+// she says it, and each falls quiet when the conversation moves on or is
+// skipped; Tobin, at the jetty, speaks too. As in story.spec.js, the
 // hook exists only in this intercepted response: it stands the hero before
 // Maren, and opens a conversation of its own choosing.
 const probe = `
@@ -25,7 +26,7 @@ window.__VOICE_TEST__ = {
 `;
 const audio = page => page.evaluate(() => window.__ASTRA_DEBUG__.audio);
 
-test('Gwen speaks her own lines to Maren', async ({ page }, info) => {
+test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'one browser is enough to hear her');
   test.setTimeout(process.env.CI ? 600000 : 240000);
   const errors = [];
@@ -45,6 +46,8 @@ test('Gwen speaks her own lines to Maren', async ({ page }, info) => {
   await expect(page.locator('#interaction-text')).toHaveText('Speak with Maren');
   await page.keyboard.press('f');
   await expect(page.locator('#conversation')).toBeVisible();
+  // Maren greets the traveller in her own voice.
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/ah-someone-who-can-still-see-\w+\.ogg$/);
 
   // Watched from inside the page, where a second-long line can't slip by
   // between two of the test's looks: what is heard, and how long her line
@@ -56,21 +59,32 @@ test('Gwen speaks her own lines to Maren', async ({ page }, info) => {
     new MutationObserver(() => { if (name.textContent === 'Spiderman' && !typing.start) { typing.start = performance.now(); listen(); } }).observe(name, watch);
     new MutationObserver(() => { if (typing.start && text.textContent === line) typing.end ??= performance.now(); }).observe(text, watch);
   }, 'How many do you need?');
-  // Maren's lines are unvoiced; page on to the hero's.
+  // Page on through her greeting to the hero's line.
   for (let presses = 0; presses < 20 && await page.locator('#conversation-title').textContent() !== 'You'; presses++) {
     await page.keyboard.press('f'); await page.waitForTimeout(40);
   }
   await expect(page.locator('#conversation-name')).toHaveText('Spiderman');
   // Typed at her pace, a little over a second, where unvoiced text takes a third of one.
   const typing = await (await page.waitForFunction(() => window.__TYPING__.end && window.__TYPING__)).jsonValue();
-  expect(typing.heard).toMatch(/^voice\/spiderman\/how-many-do-you-need-\w+\.ogg$/);
+  expect(typing.heard).toMatch(/^voice\/heroes\/spiderman\/how-many-do-you-need-\w+\.ogg$/);
   expect(typing.end - typing.start).toBeGreaterThan(700);
   expect((await audio(page)).failed).toEqual([]);
-  // She says it to the end by herself, and Maren's reply has no voice of its own.
+  // She says it to the end by herself, and Maren answers.
   await expect.poll(async () => (await audio(page)).speaking, { timeout: 5000 }).toBeNull();
   await page.keyboard.press('f');
   await expect(page.locator('#conversation-name')).toHaveText('Maren');
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/five-will-wake-it-\w/);
+  // Skipping the rest quiets her.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#conversation')).toBeHidden();
   expect((await audio(page)).speaking).toBeNull();
+
+  // Tobin, with the ferry closed, says so in his own voice.
+  await page.evaluate(() => window.__VOICE_TEST__.place('tobin'));
+  await expect(page.locator('#interaction-text')).toHaveText('Speak with Tobin');
+  await page.keyboard.press('f');
+  await expect(page.locator('#conversation-name')).toHaveText('Tobin');
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/tobin\/ferrys-closed-tides-wrong-\w/);
   await page.keyboard.press('Escape');
   await expect(page.locator('#conversation')).toBeHidden();
 
@@ -79,10 +93,10 @@ test('Gwen speaks her own lines to Maren', async ({ page }, info) => {
   // off mid-word.
   const spell = "By Maren's light and keeper's word, wake the path the roots have heard.";
   await page.evaluate(spell => window.__VOICE_TEST__.say([['you', spell], [null, 'The well hums.']]), spell);
-  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/spiderman\/by-marens-light-\w/);
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/heroes\/spiderman\/by-marens-light-\w/);
   await page.keyboard.press('f');
   await expect(page.locator('#conversation-text')).toHaveText(spell);
-  expect((await audio(page)).speaking).toMatch(/^voice\/spiderman\/by-marens-light-\w/);
+  expect((await audio(page)).speaking).toMatch(/^voice\/heroes\/spiderman\/by-marens-light-\w/);
   await page.keyboard.press('f');
   await expect(page.locator('#conversation-text')).toHaveText('The well hums.');
   expect((await audio(page)).speaking).toBeNull();

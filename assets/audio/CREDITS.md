@@ -44,10 +44,12 @@ Recordings of someone walking, supplied as MP3 and converted like the rest: mono
 
 ## Voices
 
-The heroes' spoken lines are synthesised with Microsoft's neural text-to-speech by `tools/generate-voice.py`, from the lines and feelings in `tools/voice-direction.mjs`. Each line is spoken a sentence at a time (a spell, a clause at a time) at the rate, pitch and volume of its feeling, and the pieces are joined with timed pauses. Every line is then high-passed at 85 Hz, lightly compressed and loudness-normalised to −18 LUFS, and the spells are given an echo.
+The spoken lines are synthesised with Microsoft's neural text-to-speech by `tools/generate-voice.py`, from the lines and feelings in `tools/voice-direction.mjs`. Each line is spoken a sentence at a time (a spell, a clause at a time) at the rate, pitch and volume of its feeling and its speaker, and the pieces are joined with timed pauses. Every line is then high-passed at 85 Hz, lightly compressed and loudness-normalised to −18 LUFS. The spells are given a ringing echo, and everything Maren says a faint one.
 
-| Folder | Hero | Voice | Service |
+| Folder | Speaker | Voice | Service |
 | --- | --- | --- | --- |
-| voice/spiderman/ | Spiderman (Gwen Stacy) | en-US-AvaMultilingualNeural, Microsoft | Microsoft Edge read-aloud |
+| voice/heroes/spiderman/ | Spiderman (Gwen Stacy), the hero | en-US-AvaMultilingualNeural, Microsoft | Microsoft Edge read-aloud |
+| voice/people/maren/ | Maren, Keeper of the Moonwell | en-GB-SoniaNeural, Microsoft | Microsoft Edge read-aloud |
+| voice/people/tobin/ | Tobin, the ferryman, and his tide chart | en-GB-RyanNeural, Microsoft | Microsoft Edge read-aloud |
 
 Microsoft offers the Edge read-aloud service for use within Edge. Before the game is released commercially, re-record the lines through Azure Speech, whose terms cover distributing the audio it synthesises: set `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` and run the generator again.

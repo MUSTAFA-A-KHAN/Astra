@@ -119,19 +119,20 @@ export class GameAudio {
 
   /**
    * Three concurrent local fetches keep decoding from flooding the render
-   * thread. An urgent file, a line about to be spoken, goes ahead of the
-   * queue rather than waiting on the music.
+   * thread. An urgent file, a line about to be spoken, goes to the head of
+   * the queue and may start beside three downloads already under way, so it
+   * never waits on the music.
    */
   load(file, urgent = false) {
     if (this.buffers.has(file)) return Promise.resolve(this.buffers.get(file));
     if (this.pending.has(file)) return this.pending.get(file);
     if (!this.context || !this.fetcher || this.failed.has(file) || this.disposed) return Promise.resolve(null);
     const generation = this.generation, context = this.context, signal = this.abort.signal;
-    const promise = new Promise(resolve => this.queue[urgent ? 'unshift' : 'push']({ file, generation, context, signal, resolve }));
+    const promise = new Promise(resolve => this.queue[urgent ? 'unshift' : 'push']({ file, generation, context, signal, resolve, urgent }));
     this.pending.set(file, promise); this.pump(); return promise;
   }
   pump() {
-    while (this.downloads < 3 && this.queue.length) {
+    while (this.queue.length && this.downloads < (this.queue[0].urgent ? 6 : 3)) {
       const task = this.queue.shift(); this.downloads++;
       Promise.resolve().then(async () => {
         let buffer;

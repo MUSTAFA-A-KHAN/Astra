@@ -3,29 +3,47 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { GameAudio } from '../audio.js';
 import { HEROES } from '../characters.js';
-import { HERO_VOICES } from '../voice-manifest.js';
-import { CAST, FEELINGS, voicedLines } from '../tools/voice-direction.mjs';
+import { PEOPLE, CAMP_DIRECTIONS } from '../story-script.js';
+import { VOICES } from '../voice-manifest.js';
+import { CAST, FEELINGS, scripts, spokenLines, voiceOf } from '../tools/voice-direction.mjs';
 
 const audioDirectory = new URL('../assets/audio/', import.meta.url);
+const cast = [...Object.keys(CAST.heroes).map(id => ['heroes', id]), ...Object.keys(CAST.people).map(id => ['people', id])];
 
-test('every line a hero speaks has a feeling the recording knows', () => {
-  const lines = voicedLines();
-  assert.ok(lines.length >= 9);
-  for (const { text, feeling } of lines) assert.ok(FEELINGS[feeling], `“${text}” is felt as ${feeling}, which tools/voice-direction.mjs does not know`);
-  // The spells are among them, one for each of the book's passages.
-  assert.equal(lines.filter(line => line.feeling === 'incantation').length, 3);
+test('every line the cast speaks has a feeling the recording knows', () => {
+  const voiced = new Set(['you', ...Object.keys(CAST.people)]);
+  const lines = spokenLines().filter(line => voiced.has(line.voice));
+  for (const { voice, text, feeling } of lines) assert.ok(FEELINGS[feeling], `${voice}'s “${text}” is felt as ${feeling}, which tools/voice-direction.mjs does not know`);
+  const { heroes, people } = scripts();
+  // The hero's spells are among theirs, one for each of the book's passages.
+  assert.equal(heroes.Spiderman.filter(line => line.feeling === 'incantation').length, 3);
+  // Maren and Tobin say every line they have that has words in it.
+  assert.equal(people.maren.length, 18);
+  assert.ok(people.tobin.every(line => /\p{L}/u.test(line.text)));
 });
 
-test('each hero cast has every line of the story recorded, as Ogg and AAC, and credited', async () => {
+test('Tobin reads out his own tide chart, and gives the way to the camp wherever it stands', () => {
+  assert.equal(voiceOf('chart'), 'tobin');
+  assert.equal(voiceOf('tobin'), 'tobin');
+  assert.equal(voiceOf('you'), 'you');
+  const tobin = Object.keys(VOICES.people.tobin);
+  assert.ok(tobin.some(text => text.startsWith('Keeper. I slept, just as I said I would.')), 'the chart is his to read');
+  for (const directions of Object.values(CAMP_DIRECTIONS)) assert.ok(tobin.some(text => text.includes(directions)), `the way to the camp, ${directions}`);
+  assert.ok(!tobin.some(text => text.includes('{camp}')));
+  assert.equal(PEOPLE.tobin.voice, undefined, 'he speaks in his own name everywhere else');
+});
+
+test('each member of the cast has every one of their lines recorded, as Ogg and AAC, and credited', async () => {
   const credits = await readFile(new URL('CREDITS.md', audioDirectory), 'utf8');
-  const lines = voicedLines().map(line => line.text).sort();
-  for (const hero of Object.keys(CAST)) {
-    assert.ok(HEROES.some(h => h.id === hero), `${hero} is a hero`);
-    const rerecord = `run python tools/generate-voice.py ${hero}`;
-    assert.ok(HERO_VOICES[hero], `${hero} has no recordings: ${rerecord}`);
+  const lines = scripts();
+  for (const [kind, id] of cast) {
+    if (kind === 'heroes') assert.ok(HEROES.some(h => h.id === id), `${id} is a hero`);
+    const rerecord = `run python tools/generate-voice.py ${id}`, recorded = VOICES[kind][id];
+    assert.ok(recorded, `${id} has no recordings: ${rerecord}`);
     // A line reworded in the story is a recording out of date.
-    assert.deepEqual(Object.keys(HERO_VOICES[hero]).sort(), lines, `${hero}'s recordings are not of the story's lines: ${rerecord}`);
-    for (const file of Object.values(HERO_VOICES[hero])) {
+    assert.deepEqual(Object.keys(recorded).sort(), lines[kind][id].map(line => line.text).sort(), `${id}'s recordings are not of the story's lines: ${rerecord}`);
+    for (const file of Object.values(recorded)) {
+      assert.ok(file.startsWith(`voice/${kind}/${id.toLowerCase()}/`), file);
       const bytes = await readFile(new URL(file, audioDirectory)).catch(() => null);
       assert.ok(bytes, `assets/audio/${file} is missing`);
       assert.equal(bytes.subarray(0, 4).toString('latin1'), 'OggS', `${file} is not an Ogg stream`);
@@ -33,7 +51,7 @@ test('each hero cast has every line of the story recorded, as Ogg and AAC, and c
       assert.ok(twin, `the AAC twin of ${file} is missing`);
       assert.equal(twin.subarray(4, 8).toString('latin1'), 'ftyp', `the twin of ${file} is not an MP4 file`);
     }
-    assert.ok(credits.includes(`voice/${hero.toLowerCase()}/`), `${hero}'s voice is not credited`);
+    assert.ok(credits.includes(`voice/${kind}/${id.toLowerCase()}/`), `${id}'s voice is not credited`);
   }
 });
 
@@ -100,16 +118,22 @@ test('a line is spoken on the voice bus, one at a time, with the music stepping 
   assert.equal(spoken(context, 'late').length, 0);
 });
 
-test('a line about to be spoken downloads ahead of the music', async () => {
+test('a line about to be spoken never waits on the music', async () => {
+  // Every start-up download hangs, as a long recording can while the game is busy.
   const requested = [];
-  const audio = new GameAudio({ fetcher: async url => { requested.push(String(url)); return { ok: true, arrayBuffer: async () => ({ url: String(url) }) }; } });
-  audio.setContext(voiceContext());
-  // The start-up downloads are all queued, three at a time, when the line is asked for.
+  const audio = new GameAudio({ fetcher: url => {
+    requested.push(String(url));
+    return String(url).includes('voice/') ? Promise.resolve({ ok: true, arrayBuffer: async () => ({ url: String(url) }) }) : new Promise(() => {});
+  } });
+  const context = voiceContext();
+  audio.setContext(context);
+  await new Promise(resolve => setTimeout(resolve));
+  assert.equal(audio.downloads, 3, 'three downloads are under way, and the rest queue behind them');
   assert.ok(audio.queue.length > 3);
   audio.speak('voice/hero/line.ogg');
-  await Promise.all([...audio.pending.values()]);
-  const line = requested.findIndex(url => url.includes('voice/hero/line'));
-  assert.ok(line >= 0 && line <= 3, `the line was the ${line + 1}th download`);
+  await new Promise(resolve => setTimeout(resolve));
+  assert.equal(requested.filter(url => url.includes('voice/hero/line')).length, 1, 'the line starts downloading at once');
+  assert.ok(spoken(context, 'line')[0]?.started, 'and is heard');
 });
 
 test('the voice has its own volume, and nothing is spoken with sound off', async () => {

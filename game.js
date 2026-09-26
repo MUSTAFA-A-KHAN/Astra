@@ -15,7 +15,7 @@ import { createChapterTwo } from './chapter-two-world.js';
 import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
 import { portalRoute, portalConversation } from './portal-script.js';
-import { HERO_VOICES } from './voice-manifest.js';
+import { VOICES } from './voice-manifest.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -419,13 +419,14 @@ function interact(){
  * mid-line finishes it, the next press moves on, and Escape skips to the end,
  * which still counts as having heard it all.
  *
- * A hero whose voice has been recorded speaks their own lines aloud
- * (tools/generate-voice.py), and the line types itself out at the pace
- * they say it. Every recording a conversation needs starts downloading as
+ * Whoever has a recorded voice (tools/generate-voice.py) speaks their
+ * lines aloud: the people the hero meets, by the voice each speaker names,
+ * and the hero too if theirs has been recorded. A spoken line types
+ * itself out at the pace it is said. Every recording a conversation needs starts downloading as
  * it opens, so each is there by the time its line comes up.
  */
 let chat=null,finale=false,closed={person:null,at:0};
-const voiceOf=(who,text)=>who==='you'?HERO_VOICES[heroMeta.id]?.[text]:undefined;
+const voiceOf=(who,text)=>who==='you'?VOICES.heroes[heroMeta.id]?.[text]:who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
 function talk(person){
   const entry=conversation(person,STEPS[storyStep(progress)].id,{camp:world.biomeAt(camp.x,camp.z)});if(!entry)return;
   begin(person,entry.lines,()=>heard(entry));
