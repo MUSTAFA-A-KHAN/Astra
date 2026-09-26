@@ -193,8 +193,8 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
   const bounds = new THREE.Box3(), local = new THREE.Vector3(), tangent = new THREE.Vector3(), foot = new THREE.Vector3();
   // The traveller's way in the world, and clip-time samples at which the
   // arch's footing stones stand across it.
-  let way = [], laneBlocked = null;
-  const bookSpot = new THREE.Vector3();
+  let way = [], laneBlocked = null, viewpoint = null;
+  const bookSpot = new THREE.Vector3(), eye = new THREE.Vector3();
   const pose = { position: new THREE.Vector3(), yaw: 0, speed: 0, stage: 'walk', veil: false, done: false };
 
   const worldPosition = object => object.getWorldPosition(new THREE.Vector3());
@@ -237,6 +237,7 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
   }
   function setPhase(next, amount = 0) {
     if (!PHASES.has(next)) throw new Error(`Unknown portal phase: ${next}`);
+    settleStones();
     // A new spell always starts the gate's own animation from its first frame.
     if (AWAKE.has(next) && !AWAKE.has(phase)) { mixer?.setTime(0); erupted = 0; }
     phase = next; progress = THREE.MathUtils.clamp(Number.isFinite(amount) ? amount : 0, 0, 1);
@@ -258,13 +259,19 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
   }
   // The clip owns each stone's place in the gate; a buried stone is the same
   // place pushed straight down, so it rises into the animation already moving.
+  // The mixer only writes a property whose clip value has changed, so each
+  // stone's last push is taken back before the clip is applied again.
+  function settleStones() {
+    for (const stone of stones) { stone.node.position.addScaledVector(stone.up, -stone.shift); stone.shift = 0; }
+  }
+  function shiftStone(stone, metres) { stone.node.position.addScaledVector(stone.up, metres); stone.shift += metres; }
   function raiseStones(dt = 0) {
-    mixer?.update(dt);
+    settleStones(); mixer?.update(dt);
     for (let i = 0; i < stones.length; i++) {
       const stone = stones[i], rise = stoneRise(phase, progress, stone.order, stones.length);
       stone.node.visible = AWAKE.has(phase);
       stone.rise = reducedMotion ? (rise > 0 ? 1 : 0) : rise;
-      stone.node.position.addScaledVector(stone.up, -(1 - easeOutBack(stone.rise)) * STONE_DEPTH);
+      shiftStone(stone, -(1 - easeOutBack(stone.rise)) * STONE_DEPTH);
       if (stone.node.visible) partStone(stone);
     }
   }
@@ -280,17 +287,22 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
   // The stones make way for the keeper. One whose orbit crosses the reading
   // spot, the lectern or the walk in dips under the ground as it passes, or,
   // when it is floating high already, lifts clear over the traveller's head.
+  // They dip out of the way of a watching camera too, rather than fill its lens.
   function partStone(stone) {
     stone.mesh.updateWorldMatrix(true, false);
     bounds.copy(stone.mesh.geometry.boundingBox).applyMatrix4(stone.mesh.matrixWorld); bounds.getCenter(probe);
     const half = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) * .4;
-    const weight = way.length ? 1 - smoothstep(0, 2, distanceToWay(probe) - half - .7) : 0;
+    const onWay = way.length ? 1 - smoothstep(0, 2, distanceToWay(probe) - half - .7) : 0;
+    const inView = viewpoint ? 1 - smoothstep(0, 2, Math.hypot(probe.x - viewpoint.x, probe.z - viewpoint.z) - half - 3) : 0;
+    const weight = Math.max(onWay, inView);
     if (weight <= 0) { stone.dodge = null; return; }
     const ground = root.position.y;
-    stone.dodge ??= bounds.min.y > ground + .8 ? 'lift' : 'sink';
+    stone.dodge ??= onWay > 0 && bounds.min.y > ground + .8 ? 'lift' : 'sink';
     const shift = stone.dodge === 'lift' ? Math.max(0, ground + 2.7 - bounds.min.y) : -Math.max(0, bounds.max.y - ground + .3);
-    stone.node.position.addScaledVector(stone.up, shift * weight);
+    shiftStone(stone, shift * weight);
   }
+  // Where a cinematic camera is watching from, or null when none is.
+  function watch(point) { viewpoint = point ? eye.copy(point) : null; }
   function groundAt(point) {
     const height = world?.getHeight?.(point.x, point.z);
     return Number.isFinite(height) ? height : root.position.y;
@@ -323,7 +335,7 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
       const base = groundAt(root.localToWorld(foot.copy(FOOT))), top = root.position.y + aperture.position.y - 1.2;
       pose.position.y = base + (Math.max(base, top) - base) * lift;
     } else pose.position.y = groundAt(pose.position);
-    pose.yaw = Math.atan2(tangent.x, tangent.z) + root.rotation.y;
+    const yaw = Math.atan2(tangent.x, tangent.z) + root.rotation.y; pose.yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     pose.veil = drawn >= PORTAL_ENTRY.veil; pose.done = drawn >= 1;
     return pose;
   }
@@ -444,7 +456,7 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
           const centre = stoneMesh.geometry.boundingBox.getCenter(new THREE.Vector3()), at = stoneMesh.localToWorld(centre.clone());
           const turn = Math.atan2(at.x, at.z) - far;
           toParent.setFromMatrix4(node.parent.matrixWorld).invert();
-          found.push({ node, mesh: stoneMesh, centre, up: new THREE.Vector3(0, 1, 0).applyMatrix3(toParent), rise: 0, order: 0,
+          found.push({ node, mesh: stoneMesh, centre, up: new THREE.Vector3(0, 1, 0).applyMatrix3(toParent), rise: 0, order: 0, shift: 0,
             turn: Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn))) });
         }
         found.sort((a, b) => a.turn - b.turn).forEach((stone, index) => { stone.order = index; });
@@ -508,5 +520,5 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
     burst.userData.age = 0; burst.visible = false; bursts.push(burst);
   }
   refreshEffects();
-  return { root, places, place, nearby, setPhase, update, entryPose, entryClear, load, diagnostics, dispose };
+  return { root, places, place, nearby, setPhase, update, entryPose, entryClear, watch, load, diagnostics, dispose };
 }

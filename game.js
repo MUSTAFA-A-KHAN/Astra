@@ -492,6 +492,7 @@ function readPortalBook() {
   }}).then(async arrival=>{
     await arriveThroughPortal(arrival);
     // The light clears over the far shore and the camera comes down to the hero.
+    yaw=openYaw();followCamera.reset(position,yaw,pitch,radius);
     journey.phase='landing';journey.elapsed=0;portalStatus('');
     showPulse(position.x,position.z,5,'#9deee6');audio.play('interaction',{volume:.6,rate:.8});
     save();updateHUD();toast(`${route.mapName} · The keeper’s spell carries you safely through.`);
@@ -505,6 +506,20 @@ function readPortalBook() {
   });
 }
 const turnTo=(from,to,rate,dt)=>from+Math.atan2(Math.sin(to-from),Math.cos(to-from))*(1-Math.exp(-rate*dt));
+// The far shore may put a wall or a cart where the old view looked from.
+// Keep the player's heading if its view is clear, else the nearest one that is.
+function openYaw(){
+  const view=currentView(),lift=Math.max(.08,pitch),anchor=new THREE.Vector3(position.x,position.y+(view.height||1.9),position.z),to=new THREE.Vector3();
+  let best=yaw,clearest=-1;
+  for(let i=0;i<16;i++){
+    const angle=yaw+Math.ceil(i/2)*(i%2?1:-1)*Math.PI/8;
+    to.set(anchor.x+Math.sin(angle)*Math.cos(lift)*radius,anchor.y+Math.sin(lift)*radius,anchor.z+Math.cos(angle)*Math.cos(lift)*radius);
+    const fraction=followCamera.safeFraction(anchor,to);
+    if(fraction>clearest+.05){best=angle;clearest=fraction;}
+    if(fraction>=.99)break;
+  }
+  return best;
+}
 /**
  * THE CROSSING
  *
@@ -521,7 +536,7 @@ function updatePortalJourney(dt) {
   if(j.phase==='reading') {
     if(!chat)hero.animate(dt,{state:'Read',fidget:false,time});
     if(j.readFinished && j.elapsed>=1.8){
-      j.phase='casting';j.elapsed=0;filmed.reach=1;portalStatus('Speaking the keeper’s spell…');portalCinema(true);
+      j.phase='casting';j.elapsed=0;filmed.reach=1;filmed.boom=0;portalStatus('Speaking the keeper’s spell…');portalCinema(true);
       const gate=portal.places.portal,foot=portal.places.foot;
       j.rig={gate,aperture:portal.places.aperture,axis:foot.sub(gate).setY(0).normalize(),hero:position};
     }
@@ -560,14 +575,16 @@ function updatePortalJourney(dt) {
 // Where the cinematic camera wants to be this frame. The arrival is shot
 // round the hero; everything before it round the gate.
 function directPortalShot(j,dt) {
-  j.weight=cinematicWeight(j.phase,j.elapsed);
+  // With reduced motion the camera cuts between still shots and hands back at once.
+  j.weight=reducedMotion?(j.phase==='reading'||j.phase==='landing'?0:1):cinematicWeight(j.phase,j.elapsed);
   if(j.weight<=0||j.phase==='arriving')return;
   if(j.phase==='landing'){
     const view=currentView();
     j.pose=landingPose(j.elapsed,{hero:position,yaw,pitch,distance:radius,height:view.height||1.9,fov:view.fov},j.pose||undefined);
     return;
   }
-  const phase=j.phase==='traveling'?'entering':j.phase,t=phase==='entering'?j.entered:j.elapsed;
+  const phase=j.phase==='traveling'?'entering':j.phase;
+  const t=reducedMotion?{casting:PORTAL_TIMING.cast,ready:0,entering:PORTAL_ENTRY.walk}[phase]:phase==='entering'?j.entered:j.elapsed;
   portalShot(phase,t,{entry:PORTAL_ENTRY,from:j.from},j.shot);
   j.pose=shotPose(j.shot,j.rig,j.pose||undefined);
   j.shake=Math.max(0,(j.shake||0)*Math.exp(-4*dt));
@@ -1069,14 +1086,24 @@ function updateCamera(dt){
 // The portal crossing's camera. Buildings and hills draw it in toward its
 // subject rather than letting it look through them, and it only eases back out.
 const heldCamera={active:false,position:new THREE.Vector3(),quaternion:new THREE.Quaternion(),fov:55};
-const filmed={position:new THREE.Vector3(),target:new THREE.Vector3(),quaternion:new THREE.Quaternion(),matrix:new THREE.Matrix4(),reach:1};
+const filmed={position:new THREE.Vector3(),target:new THREE.Vector3(),quaternion:new THREE.Quaternion(),matrix:new THREE.Matrix4(),desired:new THREE.Vector3(),reach:1,boom:0};
 function filmPortal(shot,weight,dt){
   const f=filmed,shake=reducedMotion?0:(portalJourney?.shake||0)*.16;
   f.target.copy(shot.target);
   if(shake>0){f.target.x+=Math.sin(time*47)*shake;f.target.y+=Math.sin(time*39+1)*shake*.7;f.target.z+=Math.sin(time*43+2)*shake;}
-  const fraction=followCamera.safeFraction(shot.target,shot.position);
+  // A blocked shot first rises over what is in the way, so the camera stays
+  // outside the ring the stones fly in, and only then draws in toward its subject.
+  let boom=0,fraction=0;
+  for(const rise of [0,3,6,10]){
+    const clear=followCamera.safeFraction(shot.target,f.desired.copy(shot.position).setY(shot.position.y+rise));
+    if(clear>fraction+.02){boom=rise;fraction=clear;}
+    if(clear>=.97)break;
+  }
+  f.boom=reducedMotion?boom:damp(f.boom,boom,2.5,dt);
+  f.desired.copy(shot.position).setY(shot.position.y+f.boom);
+  fraction=followCamera.safeFraction(shot.target,f.desired);
   f.reach=fraction<f.reach?fraction:damp(f.reach,fraction,2.5,dt);
-  f.position.lerpVectors(shot.target,shot.position,f.reach);
+  f.position.lerpVectors(shot.target,f.desired,f.reach);
   f.position.y=Math.max(f.position.y,followCamera.floorHeight(f.position.x,f.position.z));
   f.matrix.lookAt(f.position,f.target,camera.up);f.quaternion.setFromRotationMatrix(f.matrix);
   if(weight<1){
@@ -1135,7 +1162,7 @@ function animate(now){
     if(screen==='game'&&hero){if(chat)updateConversation(dt);else if(!portalJourney){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
     if(screen==='game')updatePortalJourney(dt);
-    portal.root.visible=screen==='game';
+    portal.root.visible=screen==='game';portal.watch(portalJourney?.weight>0?camera.position:null);
     // Each stone that breaks the ground lands a thud and a jolt of the camera.
     for(const event of portal.update(dt,reducedMotion?0:time))if(event.type==='stone'){audio.play('landing',{volume:.55,rate:.66});if(portalJourney)portalJourney.shake=Math.min(1,(portalJourney.shake||0)+.35);}
     activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);

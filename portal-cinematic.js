@@ -61,13 +61,14 @@ export function portalShot(phase, t, { entry, from } = {}, out = {}) {
   if (phase === 'casting') return sampleKeys(CAST, t, out);
   const settled = CAST[CAST.length - 1][1];
   if (phase === 'ready' || !entry) {
-    return Object.assign(out, settled, { angle: settled.angle + t * .07, height: settled.height + Math.sin(t * .4) * .5 });
+    // A slow sway round the open gate for as long as the far shore takes.
+    return Object.assign(out, settled, { angle: settled.angle + Math.sin(t * .2) * .35, height: settled.height + Math.sin(t * .4) * .5 });
   }
   const start = { ...(from ?? settled) }, walk = entry.walk, inside = entry.walk + entry.pause;
   const keys = [
     [0, start],
     // Behind the traveller as they walk round to the dais…
-    [walk * .55, { angle: -.3, radius: 14.2, height: 2.4, look: .35, fov: 46 }],
+    [walk * .8, { angle: -.28, radius: 14.2, height: 2.4, look: .35, fov: 46 }],
     [walk, { angle: -.1, radius: 13.6, height: 2.1, look: .45, fov: 42 }],
     // …a breath at its foot, then a slow push into the light with them.
     [inside, { angle: -.06, radius: 13.4, height: 2.4, look: .6, fov: 38 }],
