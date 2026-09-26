@@ -41,9 +41,11 @@ test('the three standing districts load offline and the roster and menus remain 
   // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
   expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
-  // The plaza, the Nightwood and the Red Mesa are off until the player turns them on: no model, footprint or module of theirs is fetched.
-  expect(districtResponses.some(response => response.path.includes('/map/') || response.path.includes('/plaza-night-time/'))).toBe(false);
-  expect(requested.some(path => /\/(plaza-world|plaza-lighting|plaza-light-sources|nightwood-world|mesa-world|bank)\.js$/.test(path))).toBe(false);
+  // The plaza and the Nightwood are off until the player turns them on: no model, footprint or module of theirs is fetched.
+  expect(districtResponses.some(response => response.path.includes('/map/a_forest_3') || response.path.includes('/plaza-night-time/'))).toBe(false);
+  expect(requested.some(path => /\/(plaza-world|plaza-lighting|plaza-light-sources|nightwood-world)\.js$/.test(path))).toBe(false);
+  // The Red Mesa always comes with the city: the Moonwell stands on it.
+  expect(districtResponses.some(response => response.path.endsWith('/map/worldmachine_terrain.glb'))).toBe(true);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
@@ -57,10 +59,11 @@ test('the three standing districts load offline and the roster and menus remain 
   expect(terrain.forestReachable).toBe(true);
   // And the yard's pier only if the south jetty does.
   expect(terrain.yardReachable).toBe(true);
-  // There is no east jetty and no plaza to reach, no north jetty and no Nightwood; nor any mesa.
+  // There is no east jetty and no plaza to reach, no north jetty and no Nightwood.
   expect(terrain.plazaReachable).toBe(false);
   expect(terrain.woodReachable).toBe(false);
-  expect(terrain.mesaReachable).toBe(false);
+  // The mesa is only a place if its jetty reaches it from the street.
+  expect(terrain.mesaReachable).toBe(true);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);

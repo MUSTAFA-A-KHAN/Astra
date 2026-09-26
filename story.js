@@ -63,15 +63,17 @@ function fader(object) {
   };
 }
 // Round footprints for whatever stands on the ground of a model: the pillars
-// of the stone circle are found as clusters of its lowest vertices.
+// of the stone circle are found as clusters of its lowest vertices, measured
+// up from the model's own foot, however high the ground it stands on.
 function footprints(object, height = .6, join = .9) {
   object.updateMatrixWorld(true);
   const points = [], vertex = new THREE.Vector3();
+  const foot = vertex.setFromMatrixPosition(object.matrixWorld).y;
   for (const mesh of meshes(object)) {
     const position = mesh.geometry.attributes.position;
     for (let i = 0; i < position.count; i++) {
       vertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
-      if (vertex.y < height) points.push([vertex.x, vertex.z]);
+      if (vertex.y < foot + height) points.push([vertex.x, vertex.z]);
     }
   }
   const clusters = [];
@@ -97,11 +99,15 @@ export function createStory({ world, activities, collision }) {
   // The sanctuary, round the shrine's own marker: the well at its heart and
   // the stone circle round it. The keeper waits at its threshold, on the way
   // in from the city, so whoever speaks with her sees the well behind her; the
-  // Hart comes to her there, and her chest is left where she stood.
+  // Hart comes to her there, and her chest is left where she stood. The
+  // offsets below are for a way in from the south; the whole sanctuary turns
+  // to face the way the shrine says the player comes.
   const shrine = world.landmarks.find(l => l.id === 'shrine');
   const moonwell = site(shrine);
-  const approach = { x: moonwell.x, z: moonwell.z + 30 };
-  const around = (dx, dz) => site({ x: moonwell.x + dx, z: moonwell.z + dz });
+  const approach = shrine.approach ?? { x: moonwell.x, z: moonwell.z + 30 };
+  moonwell.facing = faceToward(moonwell, approach);
+  const [cos, sin] = [Math.cos(moonwell.facing), Math.sin(moonwell.facing)];
+  const around = (dx, dz) => site({ x: moonwell.x + dx * cos + dz * sin, z: moonwell.z - dx * sin + dz * cos });
   const places = { maren: around(1.6, 9.2), hart: around(-3.4, 9.8), chest: around(1.6, 8.3), lantern: around(2.3, 1.9) };
   places.maren.facing = faceToward(places.maren, approach);
   places.hart.facing = faceToward(places.hart, places.maren);

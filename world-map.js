@@ -13,7 +13,9 @@ import { createStreamer } from './streaming.js';
 // plinth off the eastern quay, the Nightwood's road off the northern quay,
 // across the city from the yard, and the Red Mesa off the southern quay, west
 // of the yard. This module places them, joins them with jetties, and hands the
-// game a single piece of ground that spans them all.
+// game a single piece of ground that spans them all. With portal travel on,
+// the game walks one map at a time instead (portal-map-world.js), and the city
+// always comes with the Red Mesa: see loadCityAndMesa.
 export const HARBOUR_LEVEL = -6.65;
 // The crossing west: a boardwalk on the pavement's line, high enough to step
 // over the harbour wall, running out to the island's clearing.
@@ -29,10 +31,13 @@ const SOUTH_JETTY = { width: 5, quay: 105, deck: .55 };
 // wall either, level out past its edge, then up at the west jetty's pitch to
 // the end of the Nightwood's road, which stands higher than the quay.
 const NORTH_JETTY = { width: 5, quay: -148, edge: -151.5, deck: .55, pitch: .35 };
-// The crossing to the mesa: from the pavement above the south quay, up at the
-// same pitch, high enough to step over the harbour wall and the sunken walk
-// inside it, and on to the foot of the mesa's gully, which stands higher still.
-const MESA_JETTY = { width: 5, quay: 88, pavement: .45, pitch: .35 };
+// The crossing to the mesa: from the edge of the street above the south quay,
+// up at the same pitch, high enough to step over the kerb, the harbour wall and
+// the sunken walk inside it, and on to the foot of the mesa's gully, which
+// stands higher still. The kerb along that quay stands half a unit proud of
+// both the street and the pavement behind it, a little over a step: a ramp
+// that set off from the pavement could not be reached from the city at all.
+const MESA_JETTY = { width: 5, street: 82, level: .45, pitch: .35 };
 
 // How much daylight reaches the streets at an hour: what the lamps, and the
 // heroes' flashlights, come on by.
@@ -354,20 +359,50 @@ function createNightwoodJetty(wood) {
   };
 }
 
-// A boardwalk south from the pavement above the city's south quay to the foot
-// of the mesa's gully: up a ramp high enough to step over the harbour wall,
-// as the west jetty does, level across the wall and the water, and its end
-// buried a little in the sand. Laid along x and turned, as the south jetty is.
+// The city as portal travel carries it: with the Red Mesa moored off its south
+// quay and the jetty across to it, since the Moonwell stands out on the mesa's
+// sands. The portal world takes the three as one district, read by one
+// navigator and streamed together; the city's own bounds and the mesa's still
+// tell the two apart for the HUD, the sky and the ambience.
+export async function loadCityAndMesa({ lowPower = false, waterline = HARBOUR_LEVEL } = {}) {
+  const [city, butte] = await Promise.all([
+    loadCityDistrict({ lowPower }),
+    import('./mesa-world.js').then(({ loadMesaDistrict }) => loadMesaDistrict({ lowPower, waterline })),
+  ]);
+  const jetty = createMesaJetty(butte);
+  const root = new THREE.Group(); root.name = 'City and Red Mesa'; root.add(city.root, butte.root, jetty.group);
+  return {
+    root, lanterns:city.lanterns, materials:city.materials, asset:city.asset, assets:[city.asset, butte.asset],
+    bounds: {
+      minX: Math.min(city.bounds.minX, butte.bounds.minX), maxX: Math.max(city.bounds.maxX, butte.bounds.maxX),
+      minZ: Math.min(city.bounds.minZ, butte.bounds.minZ), maxZ: Math.max(city.bounds.maxZ, butte.bounds.maxZ),
+    },
+    regions: [{ biome:'city', bounds:city.bounds }, { biome:'mesa', bounds:butte.bounds }],
+    meshes: [...city.meshes, ...butte.meshes, jetty.group],
+    terrains: [city.terrain, butte.terrain, jetty.terrain], openings: [jetty.opening],
+    // Where the jetty comes off onto the plain: the mesa is only worth placing
+    // things on if the navigator can walk there from the city.
+    mesaInland: jetty.inland,
+    setTime(daylight) { city.setTime(daylight); },
+    setQuality(low) { city.setQuality(low); butte.setQuality(low); },
+  };
+}
+
+// A boardwalk south from the street above the city's south quay to the foot
+// of the mesa's gully: up a ramp high enough to step over the kerb and the
+// harbour wall, as the west jetty does, level across the wall and the water,
+// and its end buried a little in the sand. Laid along x and turned, as the
+// south jetty is.
 function createMesaJetty(butte) {
-  const { landing } = butte, { width, quay, pavement, pitch } = MESA_JETTY;
-  const top = quay + (landing.y - pavement) / pitch;
-  const group = boardwalk('Mesa jetty', { z: -landing.x, width }, [[quay, pavement], [top, landing.y], [landing.z - 2, landing.y], [landing.z, landing.y - .3]]);
+  const { landing } = butte, { width, street, level, pitch } = MESA_JETTY;
+  const top = street + (landing.y - level) / pitch;
+  const group = boardwalk('Mesa jetty', { z: -landing.x, width }, [[street, level], [top, landing.y], [landing.z - 2, landing.y], [landing.z, landing.y - .3]]);
   group.rotation.y = -Math.PI / 2;
   // Onto the plain, at the gully's foot.
   const inland = { x: landing.x, z: landing.z + 5 };
   return {
     group, landing, inland,
     terrain: { layout: group, ground:/jetty-deck|jetty-ramp/, walkable: Infinity },
-    opening: { x: landing.x, z: (quay + inland.z) / 2, w: width - 1.2, d: inland.z - quay },
+    opening: { x: landing.x, z: (street + inland.z) / 2, w: width - 1.2, d: inland.z - street },
   };
 }

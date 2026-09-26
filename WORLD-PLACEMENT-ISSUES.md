@@ -2,51 +2,45 @@
 
 Checked on 2026-09-26 against commit `6513d59`, by booting the game headlessly and photographing every placed object in the city, the forest islet and the yard.
 
-Updated later on 2026-09-26: #9, #10, #17 and #18 are fixed (see [Fixed](#fixed)). #15 is better but still open.
+Updated later on 2026-09-26: #3, #9, #10, #13, #17 and #18 are fixed (see [Fixed](#fixed)). #15 is better but still open.
 
 Coordinates are world units (x, z). North is −z.
 
 ## Why most of these happen
 
 - **Snapping to roads.** Props are placed at fixed coordinates, or at an offset from the arrival point, and then moved to the nearest walkable spot. The arrival point (`CITY_ARRIVAL`, (0, 18)) is the main crossroads, and the navigator counts road asphalt as walkable ground. So most things end up on the road.
-- **Portal mode removed things the story relied on.** Since commit `4d52bac`, `createWorld({ portalTravel: true })` loads only the city. The west jetty and the islet next to the quay no longer exist, but Tobin and his boat are still placed for them.
+- **Portal mode removed things the story relied on.** Since commit `4d52bac`, `createWorld({ portalTravel: true })` loads only the city (and, since #3 was fixed, the Red Mesa with it). The west jetty and the islet next to the quay no longer exist, but Tobin and his boat are still placed for them.
 - **Portal placement checked too little (fixed).** `placePortal()` only checked that the book and the reading spot were clear. It did not check the dais (the stepped platform the arch stands on) or the ring of flying stones, which reach 12.4 m from the centre. The portal also had no collision at all.
 
 ## City: story (The Last Keeper)
 
 ### 1. Tobin's rowboat lies on the quay road
 
-- **Where:** (−70.8, 24.5), on the asphalt next to a bus stop. [story.js:123](story.js#L123), [story.js:228-231](story.js#L228-L231)
+- **Where:** (−70.8, 24.5), on the asphalt next to a bus stop. [story.js:129](story.js#L129), [story.js:234-237](story.js#L234-L237)
 - **What's wrong:** the oars are posed as if rowing, so their blades go down into the road. The boat is also tilted 6° (`model.rotation.z = .1`) with nothing under it.
 - **Fix:** moor it in the water just outside the west seawall, by the ladder. Set its height to `HARBOUR_LEVEL`, remove the tilt, and add a gentle bob in `update`. Move its three colliders (`story-boat-*`) off the road.
 
 ### 2. Tobin stands in the road, at a jetty that no longer exists
 
-- **Where:** (−70.5, 16). [story.js:120-121](story.js#L120-L121)
+- **Where:** (−70.5, 16). [story.js:126-127](story.js#L126-L127)
 - **What's wrong:** he is placed "where the west jetty leaves the quay", but portal mode never builds the jetty. He stands on the asphalt facing the city.
 - **Fix:** stand him on the pavement at the seawall ladder, facing the boat and the water. Update the jetty line in [story-script.js:165](story-script.js#L165).
 
-### 3. The Moonwell sanctuary is built in the middle of a street
-
-- **Where:** (0, −50), on the north–south street. [portal-map-world.js:20](portal-map-world.js#L20)
-- **What's wrong:** the well, the 14 m stone circle, Maren, the Hart, the chest and the lantern all stand on the road. Lane markings run through the well, and the pillars block both lanes and the kerb.
-- **Fix:** move the `shrine` point to open ground big enough for a 14 m circle, such as the north-west park lawn around (−50, −115). Everything in the sanctuary is placed relative to it, so it all follows.
-
 ### 4. The wanderers' camp spans the main east–west road
 
-- **Where:** x −50 to −36, z 11 to 18. The camp point comes from [portal-map-world.js:21](portal-map-world.js#L21); offsets are in [story.js:112-116](story.js#L112-L116) and [gameplay-world.js:49](gameplay-world.js#L49), [:109](gameplay-world.js#L109), [:114](gameplay-world.js#L114).
+- **Where:** x −50 to −36, z 11 to 18. The camp point comes from [portal-map-world.js:30](portal-map-world.js#L30); offsets are in [story.js:118-122](story.js#L118-L122) and [gameplay-world.js:49](gameplay-world.js#L49), [:109](gameplay-world.js#L109), [:114](gameplay-world.js#L114).
 - **What's wrong:** the tent, fire, ledger stand, camp lantern, market stall and smithy all stand on the asphalt.
 - **Fix:** move the `camp` point to a garden square (for example around (40, 50)) or the park. The offsets follow.
 
 ### 5. The campfire looks like a pile of boulders
 
-- **Where:** [story.js:240](story.js#L240)
+- **Where:** [story.js:246](story.js#L246)
 - **What's wrong:** the model is scaled so its whole stone scatter is 1.6 m × M (about 3 m) long. The actual fire ends up tiny (about 0.4 m) and off-centre from the camp's ring.
 - **Fix:** size and centre the model on the fire itself with the `measure` option, for example `measure: m => /Firewood|Flames/.test([m.material].flat()[0].name)`. `fit()` already centres on the measured box. Hide the big outer `Stones` meshes if they still crowd it.
 
 ### 6. The notice board stands in the middle of the arrival crossroads
 
-- **Where:** arrival point + (7, −7), about (6.6, 10.6). [story.js:117](story.js#L117)
+- **Where:** arrival point + (7, −7), about (6.6, 10.6). [story.js:123](story.js#L123)
 - **Fix:** put it on the pavement corner next to the arrival point, facing the street.
 
 ## City: activities
@@ -70,14 +64,14 @@ Coordinates are world units (x, z). North is −z.
 
 ### 11. The Sunstone Watch landmark marks empty pavement
 
-- **Where:** (51.4, −4.1), in front of a house door. [portal-map-world.js:22](portal-map-world.js#L22)
+- **Where:** (51.4, −4.1), in front of a house door. [portal-map-world.js:31](portal-map-world.js#L31)
 - **What's wrong:** there is only a floating crystal and a ring. `assets/story/sunstone-watchtower.glb` was packed and credited for this landmark (see `assets/story/CREDITS.md`) but is never loaded.
 - **Fix:** load and place the watchtower at the landmark, as `story.js` does for its other models. Otherwise remove the landmark.
 
 ### 12. Eight city shards were placed inside buildings
 
-- **Where:** `CITY_SHARDS` in [portal-map-world.js:10](portal-map-world.js#L10); they are snapped in [game.js:274](game.js#L274).
-- **What's wrong:** these are pushed 4–22 m onto the nearest street. Shard 8 lands inside the campfire ring and shard 15 beside the Hart.
+- **Where:** `CITY_SHARDS` in [portal-map-world.js:11](portal-map-world.js#L11); they are snapped in [game.js:274](game.js#L274).
+- **What's wrong:** these are pushed 4–22 m onto the nearest street. Shard 8 lands inside the campfire ring.
 
   | Shard | Placed at | Ends up at |
   | --- | --- | --- |
@@ -86,16 +80,11 @@ Coordinates are world units (x, z). North is −z.
   | 11 | (25, −13) | (17.6, −13.1) |
   | 12 | (36, −17) | (35.6, −5.6) |
   | 13 | (47, −26) | (46.9, −41.6) |
-  | 15 | (−15, −42) | (−6.4, −42.4), beside the Hart |
+  | 15 | (−15, −42) | (−6.4, −42.4) |
   | 17 | (−28, −60) | (−6.4, −57.4) |
   | 18 | (30, −63) | (17.6, −66.4) |
 
 - **Fix:** give these eight new spots on open pavement, at least 3 m from any prop. Keep their positions in the list so saved progress still matches.
-
-### 13. A wisp patrols inside the Moonwell sanctuary
-
-- **Where:** patrol (−17, −38) in [portal-map-world.js:113](portal-map-world.js#L113) ends up at (−6.4, −37.9), a few metres from Maren and the Hart.
-- **Fix:** move that patrol away from story sites. Re-check all patrols once the sanctuary and camp have moved.
 
 ### 14. The lobby's hero pedestal stands in the crossroads (low priority)
 
@@ -120,13 +109,30 @@ Coordinates are world units (x, z). North is −z.
 
 ## Settings
 
-### 19. The Lantern Plaza, Nightwood and Red Mesa toggles do nothing
+### 19. The Lantern Plaza and Nightwood toggles do nothing
 
-- **Where:** [game.js:960](game.js#L960); [world-map.js:41-45](world-map.js#L41-L45) returns the portal world before reading them.
+- **Where:** [game.js:961](game.js#L961); [world-map.js:46-50](world-map.js#L46-L50) returns the portal world before reading them.
 - **What's wrong:** the toggles still save and reload the page, but portal mode never loads those districts.
 - **Fix:** hide the toggles while portal travel is on, or make those districts portal destinations.
+- **Update:** the Red Mesa toggle is gone. The mesa now always loads with the city, because the Moonwell stands on it (see #3).
 
 ## Fixed
+
+### 3. The Moonwell sanctuary was built in the middle of a street
+
+- **Was:** at (0, −50), on the north–south street. The well, the 14 m stone circle, Maren, the Hart, the chest and the lantern all stood on the road, with lane markings running through the well.
+- **Fixed:** the sanctuary now stands on the Red Mesa (the "Worldmachine Terrain" model), on its eastern sands at `MOONWELL` (90, 140) in [portal-map-world.js](portal-map-world.js). The street at (0, −50) is clear.
+  - In portal mode the city map now loads with the mesa and the mesa jetty (`loadCityAndMesa` in [world-map.js](world-map.js)), so the sanctuary can be walked to from the start of the story. The Red Mesa settings toggle is removed.
+  - The spot is the flattest open ground on the mesa within reach of the city: 15 m clear, level to 0.4 across the stone circle and 0.64 out to Maren. It is about 98 m along the sand from the jetty's end.
+  - The shrine landmark carries an `approach` (the jetty's end). [story.js](story.js) turns the whole sanctuary to face it, so Maren still waits on the side the player arrives from, with the well behind her.
+  - The pillars' colliders are now measured from the stone circle's own foot. They used to use a fixed world height that only worked at street level, so on the mesa they would have got none.
+- **Found on the way:** the kerb along the south quay stands 0.5 above both the road and the pavement, just over the 0.48 step height. The mesa jetty started on that pavement, so it could not be reached from the city at all. The legacy world only reached it by a back route along the west seawall, and its test teleported onto the pavement. The jetty now starts at the road's edge (z 82) and ramps up over the kerb.
+- **Checked by:** the new test in `tests/optional-districts.spec.js` walks from the street over the jetty to Maren, and checks that every piece of the sanctuary stands in the mesa region.
+
+### 13. A wisp patrolled inside the Moonwell sanctuary
+
+- **Was:** the patrol at (−17, −38) ended up a few metres from Maren and the Hart.
+- **Fixed by #3:** the sanctuary moved to the mesa, and no patrol walks there. The patrol still runs on the street.
 
 ### 9. The portal stood on the quay road and cut through a tree
 

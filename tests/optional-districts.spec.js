@@ -29,35 +29,22 @@ window.__DISTRICT_TEST__ = {
     const { terrain, locomotion: stride } = window.__ASTRA_DEBUG__;
     return {distance:Math.hypot(x-position.x,z-position.z),y:position.y,ground:terrain.height,region:world.biomeAt(position.x,position.z),inWater:stride.inWater};
   },
-  // Stands the hero in front of one of the story's people or things, as the
-  // story's own test does, with the game still running.
-  stand(name, distance = 3.4) {
-    const at = story.places[name];
-    const x = at.x + Math.sin(at.facing) * distance, z = at.z + Math.cos(at.facing) * distance;
-    resetInput();
-    position.set(x, groundHeight(x, z), z);
-    locomotion.reset();
-    avatar.position.copy(position);
-    yaw = Math.atan2(x - at.x, z - at.z); pitch = .3; radius = 8;
-    followCamera.reset(position, yaw, pitch, radius);
-    updateCamera(1);
-    return world.biomeAt(x, z);
-  },
-  grant({ kills = 0 }) { progress.kills = Math.max(progress.kills, kills); updateHUD(); },
-  // What the open conversation says, line by line.
-  chatLines() { return chat ? chat.lines.map(([, text]) => text) : []; },
-  // Where the Wanderer's Camp, its fire and its ledger stand.
-  camp() {
+  // Where the Moonwell sanctuary stands: the well at the shrine's marker, its
+  // keeper, the Hart, her chest and her lantern, and the spot in front of the
+  // keeper that the story's own test speaks to her from.
+  sanctuary() {
     const where = p => ({ x: p.x, z: p.z, region: world.biomeAt(p.x, p.z) });
-    return { camp: where(camp), fire: where(activities.campfire.group.position), ledger: where(story.places.ledger), tent: where(story.places.tent) };
+    const { maren, hart, chest, lantern } = story.places;
+    const front = { x: maren.x + Math.sin(maren.facing) * 3.4, z: maren.z + Math.cos(maren.facing) * 3.4 };
+    return { well: where(world.landmarks.find(l => l.id === 'shrine')), maren: where(maren), hart: where(hart), chest: where(chest), lantern: where(lantern), front: where(front) };
   },
 };
 `;
-// What each district fetches, once it is on.
+// What each district fetches, once it is on. The Red Mesa is not among them:
+// the Moonwell stands on it, so it comes with the city.
 const FILES = {
   plaza: ['/plaza-world.js', '/plaza-lighting.js', '/plaza-light-sources.js', '/plaza-night-time/plaza-night-footprint.glb', '/plaza-night-time/plaza-navigation.json', '/plaza-night-time/plaza-night.glb'],
   nightwood: ['/nightwood-world.js', '/map/a_forest_3_with_a_road_at_night_for_game.glb'],
-  mesa: ['/mesa-world.js', '/map/worldmachine_terrain.glb'],
 };
 
 // Boots the game as a new player finds it, where no district that must be
@@ -107,18 +94,6 @@ async function walk(page, start, route, { region, from, tolerance = .2 }) {
   }
 }
 
-// Pages through the open conversation with the interaction key, returning
-// every line of it.
-async function hear(page) {
-  const lines = await page.evaluate(() => window.__DISTRICT_TEST__.chatLines());
-  for (let presses = 0; presses < 80 && await page.locator('#conversation').isVisible(); presses++) {
-    await page.keyboard.press('f');
-    await page.waitForTimeout(40);
-  }
-  await expect(page.locator('#conversation')).toBeHidden();
-  return lines;
-}
-
 test('the Lantern Plaza is fetched only once turned on, and the east jetty reaches its street', async ({ page }) => {
   test.setTimeout(240000);
   const errors = await turnOn(page, 'plaza');
@@ -145,34 +120,11 @@ test('the Nightwood is fetched only once turned on, and its road is walked from 
   expect(errors).toEqual([]);
 });
 
-test('the Red Mesa is fetched only once turned on, and its gully climbs from the south quay to the summit', async ({ page }) => {
+test('the Red Mesa comes with the city, and the Moonwell sanctuary stands on its sands, walked to from the street', async ({ page }) => {
   test.setTimeout(240000);
-  const errors = await turnOn(page, 'mesa');
-  const { terrain } = await page.evaluate(() => window.__ASTRA_DEBUG__);
-  expect(terrain.assets).toHaveLength(4);
-  expect(terrain.mesaReachable).toBe(true);
-  // Along the pavement above the south quay to the ramp's foot, up it and
-  // over the harbour wall, off the jetty's buried end onto the plain, and up
-  // the gully, and its shoulder, to the butte's highest point.
-  await walk(page, [-10, 88.3], [[-5,88.3],[-5,100],[-5,112],[-5,125],[-5,150],[-5,176],[-5,191],[-11,197],[-17,202],[-23,208],[-29,214],[-35,218],[-41,223],[-47,229]],
-    { region: 'mesa', from: (x, z) => z >= 125, tolerance: .6 });
-  const summit = await page.evaluate(() => window.__ASTRA_DEBUG__.position.y);
-  expect(summit).toBeGreaterThan(58);
-  // The Wanderer's Camp moves out onto the mesa's sands with it, fire, tent
-  // and ledger, and is walked to from the jetty along the plain.
-  const { camp, fire, ledger, tent } = await page.evaluate(() => window.__DISTRICT_TEST__.camp());
-  for (const place of [camp, fire, ledger, tent]) expect(place.region).toBe('mesa');
-  await walk(page, [-5, 125], [[40, 134], [camp.x, camp.z + 4]], { region: 'mesa', from: () => true });
-  expect(errors).toEqual([]);
-});
-
-test('with the Red Mesa on, Tobin sends the player to the camp on the mesa, and its ledger is read there', async ({ page }) => {
-  test.setTimeout(240000);
-  const errors = [];
+  const errors = [], requested = [];
   page.on('pageerror', error => errors.push(error.message));
-  // A save with the mesa on, the keeper met and five shards gathered: the
-  // story stands at the ferryman.
-  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ mesa: true, collected: [0, 1, 2, 3, 4], story: { keeper: true, notice: true } })));
+  page.on('request', request => requested.push(new URL(request.url()).pathname));
   await page.route('**/game.js', async route => {
     const response = await route.fetch();
     await route.fulfill({ response, body: `${await response.text()}\n${probe}` });
@@ -180,31 +132,31 @@ test('with the Red Mesa on, Tobin sends the player to the camp on the mesa, and 
   await page.goto('/');
   await page.waitForFunction(() => window.astraReady && window.__DISTRICT_TEST__);
   await expect(page.locator('#loading')).toBeHidden();
+  expect(requested).toEqual(expect.arrayContaining(['/mesa-world.js', '/map/worldmachine_terrain.glb']));
+  // There is no switch for it.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#mesa-setting')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close menu' }).click();
   await page.locator('#play-button').click();
   await page.waitForFunction(() => window.__ASTRA_DEBUG__?.screen === 'game');
-  expect((await page.evaluate(() => window.__ASTRA_DEBUG__)).story.step).toBe('ferryman');
-
-  // Tobin tells the player where the camp is: out on the mesa.
-  await page.evaluate(() => window.__DISTRICT_TEST__.stand('tobin'));
-  await expect(page.locator('#interaction-text')).toHaveText('Speak with Tobin');
-  await page.keyboard.press('f');
-  await expect(page.locator('#conversation')).toBeVisible();
-  const tobin = (await hear(page)).join(' ');
-  expect(tobin).toContain('Wanderer’s Camp, out on the Red Mesa');
-  expect(tobin).not.toContain('west of the square');
-
-  // Three wisps later, the book lies open by the camp's fire, on the mesa.
-  await page.evaluate(() => window.__DISTRICT_TEST__.grant({ kills: 3 }));
-  expect((await page.evaluate(() => window.__ASTRA_DEBUG__)).story.step).toBe('ledger');
-  await page.waitForFunction(() => window.__ASTRA_DEBUG__.story.loaded.includes('Wanderers’ tent'), null, { timeout: 120000 });
-  expect(await page.evaluate(() => window.__DISTRICT_TEST__.stand('ledger'))).toBe('mesa');
-  await expect(page.locator('#interaction-text')).toHaveText('Read the keeper’s ledger');
-  await page.keyboard.press('f');
-  await expect(page.locator('#conversation')).toBeVisible();
-  const ledger = (await hear(page)).join(' ');
-  expect(ledger).toContain('Maren Ashdown has been dead for twenty years');
-  const { story } = await page.evaluate(() => window.__ASTRA_DEBUG__);
-  expect(story.flags.ledger).toBe(true);
-  expect(story.step).toBe('restore');
+  const { terrain } = await page.evaluate(() => window.__ASTRA_DEBUG__);
+  expect(terrain.mesaReachable).toBe(true);
+  expect(terrain.assets).toEqual(expect.arrayContaining(['map/worldmachine_terrain.glb']));
+  // The whole sanctuary is out on the sand, nothing of it left in the city's
+  // streets: the well and its stone circle, the keeper, the Hart, her chest
+  // and her lantern.
+  const sanctuary = await page.evaluate(() => window.__DISTRICT_TEST__.sanctuary());
+  for (const [name, place] of Object.entries(sanctuary)) expect(place.region, name).toBe('mesa');
+  // From the street above the south quay, up the jetty's ramp over the kerb
+  // and the harbour wall, off its buried end onto the plain, and east along
+  // the sand to stand before the keeper.
+  await walk(page, [-5, 78], [[-5, 84], [-5, 92], [-5, 105], [-5, 118], [-5, 125], [40, 134], [sanctuary.front.x, sanctuary.front.z]],
+    { region: 'mesa', from: (x, z) => z >= 125 });
+  // The mesa is still somewhere to climb: up the gully, and its shoulder, to
+  // the butte's highest point.
+  await walk(page, [-5, 125], [[-5,150],[-5,176],[-5,191],[-11,197],[-17,202],[-23,208],[-29,214],[-35,218],[-41,223],[-47,229]],
+    { region: 'mesa', from: () => true, tolerance: .6 });
+  const summit = await page.evaluate(() => window.__ASTRA_DEBUG__.position.y);
+  expect(summit).toBeGreaterThan(58);
   expect(errors).toEqual([]);
 });

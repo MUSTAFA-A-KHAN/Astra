@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createNavigation } from './navigation.js';
-import { CITY_ARRIVAL, loadCityDistrict } from './city-world.js';
+import { CITY_ARRIVAL } from './city-world.js';
+import { loadCityAndMesa } from './world-map.js';
 import { createStreetLights } from './street-lights.js';
 import { createStreamer } from './streaming.js';
 import { disposeMapResources } from './map-resources.js';
@@ -9,15 +10,23 @@ const WATERLINE = -6.65;
 const ARRIVALS = { city: CITY_ARRIVAL, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 } };
 const CITY_SHARDS = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30]];
 const within = (bounds, x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
+// The Moonwell's sanctuary stands out on the Red Mesa's eastern sands, along
+// the plain from the jetty off the south quay: the flattest open ground in
+// reach of the city, clear 15 units round and level to 0.4 across its stone
+// circle. The city's own streets have no room for it.
+const MOONWELL = { x: 90, z: 140 };
 const districtLoaders = {
-  city: loadCityDistrict,
+  city: loadCityAndMesa,
   forest: options => import('./forest-world.js').then(({ loadForestDistrict }) => loadForestDistrict(options)),
   yard: options => import('./skibidi-world.js').then(({ loadYardDistrict }) => loadYardDistrict(options)),
 };
 
-function cityLandmarks(navigation) {
+// `mesa` is where the jetty comes off onto the mesa, when the navigator can
+// walk there: the keeper waits on that side of the well, facing whoever comes.
+function cityLandmarks(navigation, mesa) {
+  const shrine = mesa ? { ...navigation.findWalkable(MOONWELL.x, MOONWELL.z, 4), approach: { x: mesa.x, z: mesa.z } } : navigation.findWalkable(0, -50, 4);
   return [
-    { id: 'shrine', name: 'Moonwell Sanctuary', ...navigation.findWalkable(0, -50, 4), color: '#83e6ee' },
+    { id: 'shrine', name: 'Moonwell Sanctuary', ...shrine, color: '#83e6ee' },
     { id: 'camp', name: 'Wanderer’s Camp', ...navigation.findWalkable(-45, 25, 3), color: '#ffc681' },
     { id: 'watch', name: 'Sunstone Watch', ...navigation.findWalkable(50, -20, 3), color: '#f1d087' },
   ];
@@ -42,8 +51,9 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
   const root = new THREE.Group(); root.name = 'The Verdant Reach';
   const streaming = createStreamer({ quality: lowPower ? 'low' : 'high' });
   let active = null, loadingMap = null, stagedMap = null, disposed = false, daylight = 1, quality = lowPower ? 'low' : 'high';
-  // Only plain bounds survive a visit, never a model or navigation closure.
-  const knownBounds = new Map();
+  // Only plain bounds survive a visit, never a model or navigation closure:
+  // each map's, or, for one that joins two districts, each district's.
+  const knownRegions = new Map();
   function applySettings(record) {
     const low = quality === 'low' || quality === 'performance' || quality === 0;
     record.district.setQuality?.(low); record.lights?.setQuality(low);
@@ -65,11 +75,14 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
   async function loadMap(map) {
     const district = await loaders[map]({ lowPower: quality === 'low', waterline: WATERLINE });
     const mapRoot = new THREE.Group(); mapRoot.name = `Portal destination: ${map}`; mapRoot.add(district.root);
-    const record = { map, root: mapRoot, district, navigation: null, lights: null, markers: [], landmarks: [] };
+    const record = { map, root: mapRoot, district, navigation: null, lights: null, markers: [], landmarks: [], mesaReachable: false };
     try {
-      record.navigation = createNavigation([district.terrain], district.bounds, { arrival: ARRIVALS[map] });
+      record.navigation = createNavigation(district.terrains ?? [district.terrain], district.bounds, { arrival: ARRIVALS[map], openings: district.openings ?? [] });
       if (map === 'city') {
-        record.landmarks = cityLandmarks(record.navigation);
+        const inland = district.mesaInland;
+        record.mesaReachable = !!inland && record.navigation.isWalkable(inland.x, inland.z, 1);
+        if (inland && !record.mesaReachable) console.warn('The mesa jetty does not reach the Red Mesa: the Moonwell stays in the city.');
+        record.landmarks = cityLandmarks(record.navigation, record.mesaReachable ? inland : null);
         record.markers = landmarkMarkers(mapRoot, record.landmarks);
         record.lights = createStreetLights({ lanterns: district.lanterns ?? [], materials: district.materials ?? [], heightAt: record.navigation.getHeight, lights: lowPower ? 2 : 4 });
         mapRoot.add(record.lights.group);
@@ -83,7 +96,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
   function attach(record) {
     root.add(record.root);
     for (const mesh of record.district.meshes) streaming.add(mesh);
-    knownBounds.set(record.map, { ...record.district.bounds });
+    knownRegions.set(record.map, (record.district.regions ?? [{ biome: record.map, bounds: record.district.bounds }]).map(({ biome, bounds }) => ({ biome, bounds: { ...bounds } })));
   }
   active = await loadMap('city'); attach(active); scene.add(root);
   // Keep city story coordinates and saved shard indices stable. Other map
@@ -95,7 +108,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get residentMaps() { return [...new Set([active?.map, stagedMap].filter(Boolean))]; },
     get loadingMap() { return loadingMap; },
     get asset() { return active?.district.asset ?? null; },
-    get assets() { return active ? [active.district.asset] : []; },
+    get assets() { return active ? active.district.assets ?? [active.district.asset] : []; },
     get meshCount() { return active?.district.meshes.length ?? 0; },
     get triangleCount() { return active?.navigation.diagnostics.triangleCount ?? 0; },
     get surfaceCount() { return active?.navigation.diagnostics.surfaceCount ?? 0; },
@@ -105,7 +118,8 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get streaming() { return streaming.diagnostics; },
     get forestReachable() { return active?.map === 'forest'; },
     get yardReachable() { return active?.map === 'yard'; },
-    plazaReachable: false, woodReachable: false, mesaReachable: false,
+    get mesaReachable() { return active?.map === 'city' && active.mesaReachable; },
+    plazaReachable: false, woodReachable: false,
   };
   return {
     root, landmarks, streaming, diagnostics, portalTravel: true,
@@ -121,7 +135,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     isWalkable(...args) { return active.navigation.isWalkable(...args); },
     findWalkable(...args) { return active.navigation.findWalkable(...args); },
     biomeAt(x, z) {
-      for (const [map, bounds] of knownBounds) if (within(bounds, x, z)) return map;
+      for (const regions of knownRegions.values()) for (const { biome, bounds } of regions) if (within(bounds, x, z)) return biome;
       return x < -75 ? 'forest' : x > 115 && z > 110 ? 'yard' : 'city';
     },
     stepHeightAt() { return undefined; },

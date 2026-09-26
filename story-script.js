@@ -27,7 +27,7 @@ export const PEOPLE = {
 // nothing before it is asked for again. `where` names the place a step
 // without a count sends the player to.
 export const STEPS = [
-  { id: 'keeper', where: 'MOONWELL', title: 'The woman at the well', description: 'Someone is waiting at the Moonwell Sanctuary. Follow the blue marker.', recap: 'Maren, the Keeper, asked you to gather the Moonwell’s scattered light.', done: p => p.story.keeper },
+  { id: 'keeper', where: 'MOONWELL', title: 'The woman at the well', description: 'Someone is waiting at the Moonwell Sanctuary, out on the Red Mesa past the south jetty. Follow the blue marker.', recap: 'Maren, the Keeper, asked you to gather the Moonwell’s scattered light.', done: p => p.story.keeper },
   { id: 'shards', title: 'A glimmer in the green', description: 'Gather 5 shards of the Moonwell’s light along the city streets.', recap: 'You gathered five shards of the old light.', goal: 5, count: p => p.collected.size, done: p => p.collected.size >= 5 || p.restored },
   { id: 'ferryman', where: 'WEST JETTY', title: 'The ferryman’s tale', description: 'Find Tobin the ferryman where the west jetty meets the quay.', recap: 'Tobin told you about the Night of the Long Tide — and went pale at Maren’s name.', done: p => p.story.ferryman },
   { id: 'wisps', title: 'Quiet the restless', description: 'Release 3 restless wisps. They were people once.', recap: 'You released the drowned, and heard what they remembered.', goal: 3, count: p => p.kills, done: p => p.kills >= 3 || p.restored },
