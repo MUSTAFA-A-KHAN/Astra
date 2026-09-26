@@ -9,7 +9,12 @@ import { mkdirSync } from 'node:fs';
 //
 // STORY_SHOTS=1 also saves a screenshot of each beat to test-results/story/.
 const probe = `
+// Every message the game shows, in order: one can come and go between two of
+// a slow test's looks at the screen.
+const shown = toast;
+toast = (message, options) => { window.__STORY_TEST__.toasts.push(message); return shown(message, options); };
 window.__STORY_TEST__ = {
+  toasts: [],
   place(name, distance = 3.4) {
     const at = story.places[name];
     const x = at.x + Math.sin(at.facing) * distance, z = at.z + Math.cos(at.facing) * distance;
@@ -36,6 +41,19 @@ window.__STORY_TEST__ = {
       const want = Math.atan2(-dx, -dz); yaw += Math.atan2(Math.sin(want - yaw), Math.cos(want - yaw)) * .2;
       joyX = (Math.cos(yaw) * dx - Math.sin(yaw) * dz) / d; joyY = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d;
     }, 40);
+  },
+  // Holds each line on the screen until the test moves it on, so that every
+  // shot can be looked at; step() moves it on, finishing it first if it is
+  // still being typed.
+  hold() { const next = nextLine; nextLine = (pressed = false) => { if (pressed) next(true); }; },
+  step() { const at = chat?.index; while (chat && chat.index === at) advance(); return chat?.index ?? null; },
+  // The conversation's film, and where Maren's eyes and the hero's fall on
+  // the screen: inside the picture, between the bars, is |x| < 1, |y| < .78.
+  film() {
+    const screen = (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera); return { x: v.x, y: v.y, z: v.z }; };
+    const maren = story.places.maren;
+    return { ...window.__ASTRA_DEBUG__.camera.conversation, line: chat?.index ?? null, cinematic: document.body.classList.contains('conversation-cinematic'),
+      maren: screen(maren.x, maren.y + maren.top * .93, maren.z), hero: screen(position.x, position.y + hero.height * .91, position.z) };
   },
   grant({ shards = 0, kills = 0 }) {
     for (let i = 0; progress.collected.size < shards; i++) progress.collected.add(i);
@@ -180,7 +198,7 @@ test('after the notice board, the light leads the hero on foot to Maren', async 
   await approach(page, 'notice', 'Read the notice board');
   await hear(page, 'notice');
   await expect.poll(async () => (await snapshot(page)).story.guide.state).toBe('leading');
-  await expect(page.locator('#toast-text')).toContainText('Follow the light');
+  await expect.poll(() => page.evaluate(() => window.__STORY_TEST__.toasts.some(message => /^Follow the light/.test(message)))).toBe(true);
   const { total } = (await snapshot(page)).story.guide;
   expect(total).toBeGreaterThan(20);
   await page.evaluate(() => window.__STORY_TEST__.follow(true));
@@ -197,6 +215,48 @@ test('after the notice board, the light leads the hero on foot to Maren', async 
   // It goes into her, and is gone.
   await expect.poll(async () => (await snapshot(page)).story.guide.state).toBe('done');
   expect((await snapshot(page)).story.step).toBe('keeper');
+  expect(errors).toEqual([]);
+});
+
+// A conversation plays as film: the letterbox closes in and the rest of the
+// screen goes, the camera eases in on the two of them and cuts between them
+// as the voice changes, and it all hands back once the talking is done.
+test('a conversation plays as film, cut to whoever is talking, and hands back', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The camera is checked once, on desktop.');
+  test.setTimeout(process.env.CI ? 600000 : 240000);
+  const errors = await boot(page);
+  await page.evaluate(() => { window.__STORY_TEST__.quiet(); window.__STORY_TEST__.hold(); });
+  const film = () => page.evaluate(() => window.__STORY_TEST__.film());
+  const inPicture = p => Math.abs(p.x) < 1 && Math.abs(p.y) < .78 && p.z < 1;
+  const shows = async (kind, who, not) => { const f = await film(); return f.kind === kind && f.weight === 1 && inPicture(f[who]) && (!not || !inPicture(f[not])); };
+  await approach(page, 'maren', 'Speak with Maren');
+  // Both of them, side on, behind the bars, with nothing else on the screen.
+  await expect.poll(() => shows('two', 'maren')).toBe(true);
+  expect(inPicture((await film()).hero)).toBe(true);
+  expect(await page.evaluate(() => document.body.classList.contains('conversation-cinematic'))).toBe(true);
+  for (const part of ['.quest-tracker', '.minimap-wrap', '.player-panel', '.game-menu']) await expect(page.locator(part)).toBeHidden();
+  await expect(page.locator('#conversation')).toBeVisible();
+  await shoot(page, 'film-two');
+  // She goes on: the picture cuts to her alone.
+  await page.evaluate(() => window.__STORY_TEST__.step());
+  await expect.poll(() => shows('them', 'maren', 'hero')).toBe(true);
+  await shoot(page, 'film-maren');
+  // The hero asks how many: the picture cuts round to the hero.
+  while ((await film()).line < 4) await page.evaluate(() => window.__STORY_TEST__.step());
+  await expect(page.locator('#conversation-name')).toHaveText(await page.locator('#hud-name').textContent());
+  await expect.poll(() => shows('hero', 'hero', 'maren')).toBe(true);
+  await shoot(page, 'film-hero');
+  // And back to her when she answers, from the same side of the two of them.
+  const side = (await film()).side;
+  await page.evaluate(() => window.__STORY_TEST__.step());
+  await expect.poll(() => shows('them', 'maren', 'hero')).toBe(true);
+  expect((await film()).side).toBe(side);
+  // Over: the bars open, the screen comes back, and so does the player's camera.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#conversation')).toBeHidden();
+  await expect.poll(async () => (await film()).weight).toBe(0);
+  expect((await film()).cinematic).toBe(false);
+  await expect(page.locator('.quest-tracker')).toBeVisible();
   expect(errors).toEqual([]);
 });
 

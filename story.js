@@ -144,6 +144,9 @@ export function createStory({ world, activities, collision }) {
   places.boat = site(reserve('story-boat', -70.8, 24.5, 1.4));
   // How tall each speaker stands, for the beacon over their head.
   places.maren.top = 1.62 * M; places.tobin.top = 1.78 * M; places.ledger.top = .9 * M;
+  // Where the eye goes on a thing that is read, for the camera: the papers
+  // pinned to the board, and the open page on the stand.
+  places.notice.face = 1.4 * M; places.ledger.face = .68 * M;
   const along = (p, distance) => ({ x: p.x + Math.cos(p.facing) * distance, z: p.z - Math.sin(p.facing) * distance });
   places.campLantern = site(along(places.ledger, .75 * M));
 

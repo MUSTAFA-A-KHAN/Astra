@@ -60,8 +60,8 @@ export class FollowCamera {
     ) + this.radius;
   }
 
-  safeFraction(from, to, radius = this.radius) {
-    let safe = clamp(finite(this.collision.cameraFraction(from, to, radius), 0), 0, 1);
+  safeFraction(from, to, radius = this.radius, skip) {
+    let safe = clamp(finite(this.collision.cameraFraction(from, to, radius, skip), 0), 0, 1);
     const length = from.distanceTo(to), steps = Math.max(1, Math.ceil(length / .25));
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;

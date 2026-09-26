@@ -74,11 +74,13 @@ export class SpatialHash {
       if (!hit) break;
     }
   }
-  cameraFraction(from, to, radius = .4) {
+  // `skip`, if given, passes over the colliders it answers true for: those of
+  // the people a shot is framing, which the camera may look past at a hand's breadth.
+  cameraFraction(from, to, radius = .4, skip) {
     const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
     let nearest = 1;
     for (const c of this.query(Math.min(from.x,to.x)-radius, Math.min(from.z,to.z)-radius, Math.max(from.x,to.x)+radius, Math.max(from.z,to.z)+radius)) {
-      if (c.noCamera) continue;
+      if (c.noCamera || skip?.(c)) continue;
       let enter = 0, exit = nearest;
       // Camera uses conservative swept boxes for props and precise circular trunks.
       if (c.r !== undefined) {

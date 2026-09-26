@@ -14,6 +14,7 @@ import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, cha
 import { createChapterTwo } from './chapter-two-world.js';
 import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
+import { createConversationDirector } from './conversation-cinematic.js';
 import { portalRoute, portalConversation, SPELL_TAKES } from './portal-script.js';
 import { VOICES } from './voice-manifest.js';
 
@@ -214,6 +215,10 @@ const reins = new MountSteering();
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
 const followCamera = new FollowCamera(camera, activities.terrain, collision);
+// Conversations play as film (conversation-cinematic.js). A shot may look
+// past the shoulder of either of the two talking, but never through a wall.
+const director = createConversationDirector({ clear: (from, to, { hero: h, subject: s }) => followCamera.safeFraction(from, to, .3,
+  c => c.r !== undefined && (Math.hypot(c.x - s.x, c.z - s.z) < c.r + 1.3 || Math.hypot(c.x - h.x, c.z - h.z) < c.r + .6)) });
 function collide(p, radius = .65) {
   collision.resolve(p, radius, 3.3);
   const bounds = world.bounds;
@@ -447,6 +452,8 @@ function begin(person,lines,onEnd){
   const place=person==='portalBook'?portal.places.book:chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
+  // The film is shot round the two of them: the hero's eyes, and the face or page of whatever they face.
+  director.start({hero:{x:position.x,y:position.y,z:position.z},heroEye:(hero?.height||3.4)*.91,subject:{x:place.x,y:place.y??groundHeight(place.x,place.z),z:place.z},subjectEye:place.face??(place.top?place.top*.93:1.7),read:!!speakers[person]?.read,camera:camera.position});
   // Last line first: each goes to the head of the downloads, so the first spoken ends up first.
   for(const [who,text] of [...lines].reverse()){const file=voiceOf(who,text);if(file)audio.load(file,true);}
   avatar.rotation.y=Math.atan2(dx,dz);lockTarget=null;aiming=cinematic=false;resetInput();syncCameraControls();
@@ -454,6 +461,7 @@ function begin(person,lines,onEnd){
 }
 function showLine(){
   const [who,text]=chat.lines[chat.index],host=speakers[chat.person],reading=!host.title;
+  director.cue(who);
   const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?speakers[who]:reading?host:null;
   // A notice, a ledger or an inscription is read from start to finish;
   // with a person, the hero talks with their hands on their own lines
@@ -511,6 +519,8 @@ function heardChapterTwo(entry){
 async function awaken(){
   finale=true;progress.restored=true;gainXP(150);save();
   audio.play('victory');showPulse(story.places.maren.x,story.places.maren.z,22,'#b8f3e0');victoryTime=12;
+  // The film goes on between her two conversations: well back, as the well wakes.
+  director.cue(null);
   await story.awaken();
   begin('maren',conversation('maren','finale').lines,async()=>{
     // Waved off as she walks into the light.
@@ -1140,7 +1150,7 @@ function updateCamera(dt){
     const shot=portalJourney?.pose,weight=shot?portalJourney.weight:0;
     // Under a blend the follow camera keeps its own smoothed pose; give it
     // back before it takes its next step.
-    if(heldCamera.active){camera.position.copy(heldCamera.position);camera.quaternion.copy(heldCamera.quaternion);camera.fov=heldCamera.fov;heldCamera.active=false;}
+    if(heldCamera.active){camera.position.copy(heldCamera.position);camera.quaternion.copy(heldCamera.quaternion);camera.fov=heldCamera.fov;camera.updateProjectionMatrix();heldCamera.active=false;}
     if(weight<1){
       const view=currentView();
       if(settling>0){
@@ -1160,12 +1170,32 @@ function updateCamera(dt){
       const marker=targetPoint.copy(lockTarget.group.position);marker.y+=4;marker.project(camera);
       $('target-marker').hidden=marker.z>1||marker.z< -1; $('target-marker').style.left=`${(marker.x*.5+.5)*100}%`;$('target-marker').style.top=`${(-marker.y*.5+.5)*100}%`;
     }else $('target-marker').hidden=true;
+    // A conversation stays on film until the talking is done: through the
+    // keeper's finale, between her two conversations, and while a spell read
+    // from the portal's book waits to be cast. The crossing's own film takes
+    // over from it there.
+    if(director.on&&!chat&&!finale&&portalJourney?.phase!=='reading')director.stop();
+    if(document.body.classList.contains('conversation-cinematic')!==director.on)document.body.classList.toggle('conversation-cinematic',director.on);
+    const talk=director.update(dt,{reducedMotion,aspect:camera.aspect});
+    if(talk&&weight<1)filmConversation(talk);
     if(weight>0)filmPortal(shot,weight,dt);
   }
 }
 // The portal crossing's camera. Buildings and hills draw it in toward its
 // subject rather than letting it look through them, and it only eases back out.
 const heldCamera={active:false,position:new THREE.Vector3(),quaternion:new THREE.Quaternion(),fov:55};
+// Kept once a frame, before the first film is laid over it.
+function holdCamera(){if(!heldCamera.active){heldCamera.position.copy(camera.position);heldCamera.quaternion.copy(camera.quaternion);heldCamera.fov=camera.fov;heldCamera.active=true;}}
+// A conversation's shot, over the player's camera. That camera goes on
+// following the hero underneath it, so the film hands back to a view that
+// is already where it should be.
+function filmConversation(pose){
+  holdCamera();
+  pose.position.y=Math.max(pose.position.y,followCamera.floorHeight(pose.position.x,pose.position.z));
+  if(pose.weight>=1){camera.position.copy(pose.position);camera.quaternion.copy(pose.quaternion);camera.fov=pose.fov;}
+  else{camera.position.lerp(pose.position,pose.weight);camera.quaternion.slerp(pose.quaternion,pose.weight);camera.fov+=(pose.fov-camera.fov)*pose.weight;}
+  camera.updateProjectionMatrix();
+}
 const filmed={position:new THREE.Vector3(),target:new THREE.Vector3(),quaternion:new THREE.Quaternion(),matrix:new THREE.Matrix4(),desired:new THREE.Vector3(),reach:1,boom:0};
 function filmPortal(shot,weight,dt){
   const f=filmed,shake=reducedMotion?0:(portalJourney?.shake||0)*.16;
@@ -1187,7 +1217,7 @@ function filmPortal(shot,weight,dt){
   f.position.y=Math.max(f.position.y,followCamera.floorHeight(f.position.x,f.position.z));
   f.matrix.lookAt(f.position,f.target,camera.up);f.quaternion.setFromRotationMatrix(f.matrix);
   if(weight<1){
-    heldCamera.position.copy(camera.position);heldCamera.quaternion.copy(camera.quaternion);heldCamera.fov=camera.fov;heldCamera.active=true;
+    holdCamera();
     camera.position.lerp(f.position,weight);camera.quaternion.slerp(f.quaternion,weight);camera.fov+=(shot.fov-camera.fov)*weight;
   }else{camera.position.copy(f.position);camera.quaternion.copy(f.quaternion);camera.fov=shot.fov;}
   camera.updateProjectionMatrix();
@@ -1280,7 +1310,7 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
