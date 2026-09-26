@@ -1331,4 +1331,6 @@ try{
   world.stream({prepare}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
   // The story's people and props follow the same way, each ready before it is shown.
   if(inCity())story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
+  // The Drowned Meridian's trials too, but not until the chapter opens.
+  chapterTwo.load({prepare}).catch(error=>console.warn('The Drowned Meridian keeps its stand-ins.',error));
 }catch(error){console.error(error);$('load-message').textContent='This device could not start the 3D world. Try again with a WebGL-enabled browser.';$('retry-button').hidden=false;}

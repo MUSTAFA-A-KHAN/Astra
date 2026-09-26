@@ -23,4 +23,5 @@ blender-output/*
 # The Sketchfab originals of assets/story/, repacked from here by
 # tools/pack-story-assets.mjs. The whale alone is over the 25 MB limit.
 3D-model-glb/
+3D-model-glb-chapter-2/
 playtest/*

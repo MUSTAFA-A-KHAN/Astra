@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { LocomotionController, SpatialHash } from '../physics.js';
 import { createChapterTwo } from '../chapter-two-world.js';
 import { CHALLENGE_RULES, readChapterTwo, RUNE_ORDER, BELL_ORDER } from '../chapter-two-script.js';
+import { readFile } from 'node:fs/promises';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 function fixture(flags = {}, options = {}) {
   const state = Object.assign(readChapterTwo({}), flags);
@@ -22,6 +24,7 @@ function fixture(flags = {}, options = {}) {
     world, collision, state,
     storyPlaces: { tobin: { x: -45, y: 0, z: -5 }, maren: { x: 0, y: 0, z: -50 } },
     isUnlocked: () => unlocked,
+    loadModel: options.loadModel,
     onChange: entry => changes.push(entry),
     onMessage: message => messages.push(message),
     onDamage: amount => {
@@ -248,4 +251,68 @@ test('a correctly timed jump with the actual locomotion physics clears the boss 
   }
   assert.ok(f.position.y > 1 && f.position.y < 2.2, 'the ordinary jump rises around 1.5 metres');
   assert.deepEqual(f.damage, [], 'jumping at the end of the telegraph avoids the pulse');
+});
+
+// The packed models themselves, read from disk. Node has no image decoder, so
+// their textures are left out; their meshes, rigs and clips are all there.
+globalThis.self ??= globalThis;
+const fromDisk = requested => async file => {
+  requested.push(file);
+  const data = await readFile(new URL(`../assets/story/${file}.glb`, import.meta.url));
+  const quiet = console.error;
+  console.error = (...args) => { if (!/Couldn't load texture/.test(args[0])) quiet(...args); };
+  try { return await new GLTFLoader().parseAsync(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), ''); }
+  finally { console.error = quiet; }
+};
+const chapterColliders = f => [...f.collision.entries.keys()].filter(id => String(id).startsWith('chapter-two-'));
+
+test('the trials keep their stand-ins until the chapter opens, then put on their own models', async () => {
+  const requested = [], prepared = [];
+  const f = fixture({ accepted: true }, { unlocked: false, loadModel: fromDisk(requested) });
+  const ready = f.chapter.load({ prepare: async model => { prepared.push(model); } });
+  f.tick(.1);
+  assert.deepEqual(requested, [], 'nothing is downloaded while the chapter is closed');
+  assert.deepEqual(chapterColliders(f), [], 'nothing unseen stands in the way');
+  assert.deepEqual(f.chapter.diagnostics.dressed.sort(), ['bellTablet', 'dawn', 'dusk', 'tide'], 'only the bells, which need no download, are dressed');
+  f.unlock(); f.tick(.1);
+  const { loaded, failed } = await ready;
+  assert.deepEqual({ loaded, failed }, { loaded: 10, failed: 0 });
+  assert.equal(prepared.length, 10, 'every model is readied before it is shown');
+  assert.deepEqual(f.chapter.diagnostics.dressed.sort(), ['bellTablet', 'beacon', 'dawn', 'dusk', 'moon', 'rain', 'root', 'rootTablet', 'tide', 'valve1', 'valve2', 'valve3', 'valvePanel', 'warden'].sort());
+  assert.deepEqual(f.chapter.diagnostics.marks.sort(), ['chart', 'seal']);
+  const pillars = chapterColliders(f).filter(id => id.startsWith('chapter-two-warden-'));
+  assert.ok(pillars.length >= 6, `the ruins' arches and spire stand in the way (${pillars.length})`);
+  const warden = f.chapter.places.warden;
+  for (const id of pillars) {
+    const shape = f.collision.entries.get(id);
+    const distance = Math.hypot(shape.x - warden.x, shape.z - warden.z);
+    assert.ok(distance > 3.5 && distance < 15, `${id} stands clear of the Warden and inside the arena (${distance.toFixed(1)})`);
+  }
+  f.chapter.syncMap();
+  assert.equal(chapterColliders(f).filter(id => id.startsWith('chapter-two-warden-')).length, pillars.length, 'a rebuilt arena stands its ruins again');
+});
+
+test('echoes and the Hollow Warden fight in their own rigs, with the same rules', async () => {
+  const f = fixture(throughValves, { loadModel: fromDisk([]) });
+  await f.chapter.load();
+  f.use('beacon');
+  assert.ok(f.chapter.diagnostics.enemies.every(enemy => enemy.model), 'each echo wears the drowned model');
+  f.position.x += 6; f.tick(.2);
+  assert.ok(f.chapter.diagnostics.enemies.some(enemy => enemy.clip === 'run'), 'an echo runs at a distant player');
+  for (const count of CHALLENGE_RULES.waveCounts) {
+    assert.equal(f.attack({ damage: 200 }).kills, count);
+    f.tick(2.1);
+  }
+  assert.equal(f.state.vigil, true);
+  f.use('warden');
+  const clip = () => f.chapter.diagnostics.enemies[0].clip;
+  assert.equal(clip(), 'Defence3', 'the Warden curls behind its shield');
+  f.tick(2);
+  assert.equal(clip(), 'Attack1', 'it rises to slam the ground as the pulse breaks');
+  f.tick(3);
+  assert.equal(clip(), 'Idle', 'it stands open while its shield is down');
+  assert.equal(f.attack({ damage: 999 }).kills, 1);
+  assert.equal(f.state.warden, true);
+  f.tick(5);
+  assert.equal(f.chapter.root.children.filter(child => child.isGroup && !child.children.length).length, 0, 'the fallen are buried once they have sunk');
 });
