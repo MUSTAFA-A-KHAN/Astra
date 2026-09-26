@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HARBOUR_LEVEL } from './world-map.js';
 import { disposeMapResources } from './map-resources.js';
+import { createGuide } from './guide.js';
 
 // The Last Keeper, stood up in the Reach: the Moonwell and its keeper in the
 // sanctuary, the ferryman on the west quay, the wanderers' camp and its
@@ -42,6 +43,20 @@ function fit(scene, size, measure = 'height', only = object => object.visible) {
 const meshes = (object, test = () => true) => { const found = []; object.traverse(o => { if (o.isMesh && test(o)) found.push(o); }); return found; };
 const materialsOf = object => [...new Set(meshes(object).flatMap(mesh => [mesh.material].flat()))];
 function shadows(object, cast = true) { for (const mesh of meshes(object)) { mesh.castShadow = cast; mesh.receiveShadow = true; } }
+// A soft white disc, or a soft ring `ring` of the way out, for a glow to take
+// its colour from. Worked out pixel by pixel rather than drawn on a canvas, so
+// the story stands up outside a browser too.
+function softTexture(ring = 0, size = 64) {
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const r = Math.hypot(x + .5 - size / 2, y + .5 - size / 2) / (size / 2);
+    const alpha = ring ? Math.exp(-(((r - ring) / .07) ** 2)) : Math.max(0, 1 - r * r) ** 2;
+    data.set([255, 255, 255, Math.round(255 * alpha)], (y * size + x) * 4);
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter; texture.generateMipmaps = true; texture.needsUpdate = true;
+  return texture;
+}
 // Fades a model's own materials; they are cloned first so a fade never reaches
 // another model sharing them.
 function fader(object) {
@@ -193,7 +208,7 @@ export function createStory({ world, activities, collision }) {
     // once would hold it long enough to swallow the player's first presses.
     const place = (name, promise, then) => { promise.catch(() => {}); return { name, promise, then }; };
     const jobs = [
-      place('notice', load('quest-notice-board', 2.3 * M, 'height'), ({ model }) => add('Harbour notice board', model, places.notice)),
+      place('notice', load('quest-notice-board', 2.3 * M, 'height').then(beckoning), ({ model }) => add('Harbour notice board', model, places.notice)),
       place('well', load('moonwell-well', 2.7 * M, 'length', { hide: m => /^(Ground|Grass_Grass|Flowers)/.test(m.name) }), ({ model }) => {
         add('Moonwell', model, moonwell);
         parts.well.mist = meshes(model, m => /^Fog/.test(m.name));
@@ -208,6 +223,7 @@ export function createStory({ world, activities, collision }) {
         add('Maren', part.model, places.maren); loop(part);
         for (const material of materialsOf(part.model)) if (material.emissive) { material.emissive.set('#6f93ad'); material.emissiveIntensity = .28; }
         part.fade = fader(part.model);
+        part.glow = materialsOf(part.model).filter(material => material.emissive);
       }),
       // The Hart without the islet it was modelled standing on.
       place('hart', load('moonwell-ghost-stag', 2.7 * M, 'height', { hide: m => !/^(GhostStag|ParticleBall)/.test(m.name), measure: m => /^GhostStag/.test(m.name) }), part => {
@@ -366,16 +382,56 @@ export function createStory({ world, activities, collision }) {
   // Where the step at hand is waiting, for the map and the beacon.
   function objective(step) {
     if (disposed) return null;
-    const at = { keeper: places.maren, ferryman: places.tobin, ledger: places.ledger, restore: places.maren, farewell: places.tobin }[step];
+    const at = { notice: places.notice, keeper: places.maren, ferryman: places.tobin, ledger: places.ledger, restore: places.maren, farewell: places.tobin }[step];
     return at ? { x: at.x, y: at.y + (at.top || 0), z: at.z } : null;
   }
 
   // A small gold diamond over whoever the story is waiting on.
   const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(.2 * M), new THREE.MeshStandardMaterial({ color: '#ffd98a', emissive: '#ffb347', emissiveIntensity: 1.4, roughness: .35 }));
   beacon.scale.y = 1.6; beacon.name = 'Story beacon'; beacon.visible = false; root.add(beacon);
+  // Until it has been read, the notice board calls to whoever has just
+  // arrived, without a word: its papers glow, a gold light stands behind it
+  // and pools at its foot, a gold mark bobs over it, and rings spread across
+  // the ground. All of it is built onto the board before the board's shaders
+  // are, so it costs nothing to show, and fades away once the board is read.
+  function beckoning(part) {
+    if (!part) return part;
+    const board = materialsOf(part.model);
+    for (const material of board) { material.emissive.set('#ffbf66'); material.emissiveMap = material.map; material.emissiveIntensity = 0; }
+    const group = new THREE.Group(); group.name = 'Notice board call';
+    const gold = beacon.material.clone(), mark = new THREE.Group(), height = 2.75 * M;
+    const stroke = new THREE.Mesh(new THREE.CylinderGeometry(.085 * M, .05 * M, .4 * M, 12), gold); stroke.position.y = .36 * M;
+    mark.add(stroke, new THREE.Mesh(new THREE.SphereGeometry(.075 * M, 12, 8), gold));
+    const shine = (map, Material = THREE.MeshBasicMaterial) => new Material({ map, color: '#ffa63d', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glow = softTexture(), flat = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+    // The light behind is kept just beyond the board as the camera sees it,
+    // so it rims the board rather than washing over it.
+    const halo = new THREE.Sprite(shine(glow, THREE.SpriteMaterial)); halo.scale.set(5.4 * M, 4.6 * M, 1);
+    const centre = new THREE.Vector3(), eye = new THREE.Vector3();
+    halo.onBeforeRender = (renderer, scene, camera) => {
+      part.model.localToWorld(centre.set(0, 1.25 * M, 0)); eye.setFromMatrixPosition(camera.matrixWorld).sub(centre).setY(0);
+      halo.matrixWorld.setPosition(centre.addScaledVector(eye.normalize(), -.8 * M));
+    };
+    const pool = new THREE.Mesh(flat, shine(glow)); pool.position.y = .06; pool.scale.setScalar(2.4 * M);
+    const band = softTexture(.8, 128);
+    const rings = [0, .5].map(phase => {
+      const ring = new THREE.Mesh(flat, shine(band)); ring.position.y = .08; ring.userData.phase = phase; return ring;
+    });
+    group.add(halo, pool, mark, ...rings); part.model.add(group);
+    part.call = { group, board, halo, pool, mark, height, rings, level: 0 };
+    return part;
+  }
+  // Once the board has been read, a mote of the well's light leads the way
+  // from it to the keeper, until she has been met. Reaching her, it goes into
+  // her, and she glows with it a moment.
+  let flare = 0;
+  const guide = createGuide({ route: (from, to) => world.route?.(from, to), heightAt: ground, texture: softTexture(), onArrive: () => { flare = 1; } });
+  root.add(guide.root);
   const turn = (object, target, dt, rate = 5) => { object.rotation.y += Math.atan2(Math.sin(target - object.rotation.y), Math.cos(target - object.rotation.y)) * (1 - Math.exp(-rate * dt)); };
 
-  function update(dt, time, player, step) {
+  // `flags` are the story's own, as the save keeps them. `active` is false
+  // while the world stands behind a menu, where nobody is there to be led.
+  function update(dt, time, player, step, flags = {}, { active = true } = {}) {
     if (disposed) return;
     // Nobody out of sight is animated: they pick up where they left off.
     for (const part of Object.values(parts)) if (part.mixer && part.model.parent?.visible) part.mixer.update(dt);
@@ -406,7 +462,43 @@ export function createStory({ world, activities, collision }) {
       whale.position.set(TIDEWARDEN.x + Math.cos(angle) * TIDEWARDEN.radius, HARBOUR_LEVEL + lift, TIDEWARDEN.z + Math.sin(angle) * TIDEWARDEN.radius);
       whale.rotation.y = -angle;
     }
-    const goal = talking ? null : objective(step);
+    // The notice board's call rises as it arrives, and falls away while it is
+    // read, never to come back.
+    const call = parts.notice?.call;
+    if (call) {
+      const wanted = flags.notice || talking === 'notice' ? 0 : 1;
+      call.level += (wanted - call.level) * (1 - Math.exp(-(wanted ? 1.2 : 3) * dt));
+      if (!wanted && call.level < .01) call.level = 0;
+      call.group.visible = call.level > 0;
+      const breath = .5 + .5 * Math.sin(time * 2.6);
+      for (const material of call.board) material.emissiveIntensity = call.level * (.5 + .7 * breath);
+      call.halo.material.opacity = call.level * (.45 + .35 * breath);
+      call.pool.material.opacity = call.level * (.35 + .3 * breath);
+      call.mark.position.y = call.height + Math.sin(time * 2.2) * .1 * M;
+      call.mark.scale.setScalar(Math.max(.01, call.level));
+      for (const ring of call.rings) {
+        const k = (time / 2.4 + ring.userData.phase) % 1;
+        ring.scale.setScalar((1.4 + 2.2 * k) * M);
+        ring.material.opacity = call.level * .9 * Math.min(1, k * 8) * (1 - k) ** 1.5;
+      }
+    }
+    // The light sets out from the board the moment it has been read. When a
+    // game is picked up with the keeper still unmet, or the player wanders far
+    // from her once it has gone in, it comes to their shoulder instead.
+    const leading = active && step === 'keeper' && flags.notice && !departed;
+    if (!leading) guide.release();
+    else if (!talking && (guide.state === 'idle' || (guide.state === 'done' && Math.hypot(player.x - places.maren.x, player.z - places.maren.z) > 30))) {
+      const atBoard = Math.hypot(player.x - places.notice.x, player.z - places.notice.z) < RANGE.notice + 2;
+      guide.lead({ x: places.maren.x, y: places.maren.y + 1.1 * M, z: places.maren.z },
+        atBoard ? { x: places.notice.x, y: places.notice.y + 1.3 * M, z: places.notice.z } : { x: player.x, y: player.y + 3.2, z: player.z });
+    }
+    guide.update(dt, time, player, { paused: !!talking });
+    if (flare > 0) {
+      flare = Math.max(0, flare - dt / 1.8);
+      for (const material of parts.maren?.glow ?? []) material.emissiveIntensity = .28 + 1.1 * flare * flare;
+    }
+    // The board has a mark of its own.
+    const goal = talking || step === 'notice' ? null : objective(step);
     beacon.visible = !!goal;
     if (goal) { beacon.position.set(goal.x, goal.y + .7 * M + Math.sin(time * 2.2) * .12, goal.z); beacon.rotation.y = time * 1.4; }
   }
@@ -414,9 +506,11 @@ export function createStory({ world, activities, collision }) {
   return {
     root, places, stream, shard, nearby, objective, update, awaken, depart, setState,
     get talking() { return talking; }, set talking(person) { if (!disposed) talking = person; },
+    // Where the guiding light is, for the map, while it can be seen.
+    get guide() { return disposed ? null : guide.position; },
     get diagnostics() {
       return {
-        restored, departed, talking, disposed, loaded: Object.keys(loaded),
+        restored, departed, talking, disposed, loaded: Object.keys(loaded), guide: guide.diagnostics,
         places: Object.fromEntries(Object.entries(places).map(([name, p]) => [name, { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) }])),
       };
     },

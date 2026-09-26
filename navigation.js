@@ -232,6 +232,55 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
     }
     return isWalkable(x,z,radius) ? {x,y:sampleHeight(x,z),z} : findClear(x,z,radius,true);
   }
+  // The way on foot between two points, over ground the player can reach: a
+  // breadth-first search across the reachable cells, then pulled taut into as
+  // few straight legs as stay on that ground. Each end that stands off it,
+  // such as a player who has jumped a fence into a yard the flood never
+  // reached, joins the nearest reachable cell within thirty units. Null when
+  // either end has none, or no way joins them.
+  const cellOf=(x,z,reach=Math.ceil(30/cellSize))=>{
+    const cx=Math.floor((x-minX)/cellSize),cz=Math.floor((z-minZ)/cellSize);
+    let best=-1,bestDistance=Infinity;
+    for(let r=0;r<=reach&&best<0;r++) for(let iz=cz-r;iz<=cz+r;iz++) for(let ix=cx-r;ix<=cx+r;ix++) {
+      if(Math.max(Math.abs(ix-cx),Math.abs(iz-cz))!==r||ix<0||iz<0||ix>=width||iz>=depth||!reachable[iz*width+ix]) continue;
+      const d=(ix-cx)**2+(iz-cz)**2; if(d<bestDistance){best=iz*width+ix;bestDistance=d;}
+    }
+    return best;
+  };
+  const onGround=(x,z)=>{const ix=Math.floor((x-minX)/cellSize),iz=Math.floor((z-minZ)/cellSize);return ix>=0&&iz>=0&&ix<width&&iz<depth&&!!reachable[iz*width+ix];};
+  const inSight=(a,b)=>{
+    const steps=Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/(cellSize*.4));
+    for(let s=1;s<steps;s++) if(!onGround(a.x+(b.x-a.x)*s/steps,a.z+(b.z-a.z)*s/steps)) return false;
+    return true;
+  };
+  let parents=null;
+  function route(from,to) {
+    const start=cellOf(from.x,from.z),goal=cellOf(to.x,to.z);
+    if(start<0||goal<0) return null;
+    parents??=new Int32Array(width*depth);parents.fill(-1);parents[start]=start;
+    queue[0]=start;let count=1;
+    for(let head=0;head<count&&parents[goal]<0;head++) {
+      const i=queue[head],ix=i%width,iz=(i-ix)/width;
+      for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++) {
+        const nx=ix+dx,nz=iz+dz,ni=nz*width+nx;
+        if((!dx&&!dz)||nx<0||nz<0||nx>=width||nz>=depth||parents[ni]>=0||!reachable[ni]) continue;
+        // A diagonal step never squeezes between two blocked cells.
+        if(dx&&dz&&(!reachable[iz*width+nx]||!reachable[nz*width+ix])) continue;
+        parents[ni]=i;queue[count++]=ni;
+      }
+    }
+    if(parents[goal]<0) return null;
+    const cells=[];for(let i=goal;;i=parents[i]){cells.push(i);if(i===start)break;}
+    const centre=i=>({x:minX+(i%width+.5)*cellSize,z:minZ+(Math.floor(i/width)+.5)*cellSize});
+    const path=[{x:from.x,z:from.z},...cells.reverse().map(centre),{x:to.x,z:to.z}];
+    const legs=[path[0]];
+    for(let at=0;at<path.length-1;) {
+      let next=at+1;
+      while(next+1<path.length&&inSight(path[at],path[next+1])) next++;
+      legs.push(path[next]);at=next;
+    }
+    return legs.map(({x,z})=>({x,y:sampleHeight(x,z),z}));
+  }
   const colliders=[], active=new Map();
   for(let iz=0;iz<depth;iz++) {
     const next=new Map();
@@ -252,7 +301,7 @@ export function createNavigation(districts, bounds, { cellSize = .75, openings =
   }
   for (const collider of layeredColliders) colliders.push(collider);
   return {
-    colliders, spawn, isWalkable, findWalkable,
+    colliders, spawn, isWalkable, findWalkable, route,
     getHeight(x,z) { const h=sampleHeight(x,z);return Number.isFinite(h)?h:0; },
     getSupportHeight(x,z,feetY,step=.48) { const h=sampleHeight(x,z,feetY+step);return Number.isFinite(h)?h:0; },
     getNormal(x,z,out,feetY,step=.48) {

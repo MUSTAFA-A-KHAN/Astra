@@ -429,6 +429,10 @@ function interact(){
  * downloading as it opens, so each is there by the time its line comes up.
  */
 let chat=null,finale=false,closed={person:null,at:0};
+// Once the notice board has been read, the camera turns with the light it
+// sets free for a few seconds, so that it is seen leaving and the view ends up
+// looking the way it goes. Looking round by hand takes the camera back.
+let followLight=0;
 const voiceOf=(who,text)=>who==='you'?VOICES.heroes[heroMeta.id]?.[text]:who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
 // How long a line holds once it is all there: a short beat after a line that
 // was heard spoken, and time to finish reading one that was not (it typed
@@ -485,7 +489,8 @@ function heard(entry){
   if(entry.finale){awaken();return;}
   if(entry.sets&&!progress.story[entry.sets]){
     progress.story[entry.sets]=true;save();
-    if(entry.sets==='notice')toast('Something about that last name stays with you.');
+    // Read before the keeper has been met, the board sets a light leading to her.
+    if(entry.sets==='notice'){toast(progress.story.keeper?'Something about that last name stays with you.':'Follow the light · It knows the way to the Moonwell');if(!progress.story.keeper)followLight=4.5;}
     if(entry.sets==='farewell'){gainXP(100);victoryTime=8;audio.play('victory');}
     else if(entry.sets!=='notice')gainXP(40);
   }
@@ -784,7 +789,7 @@ function toggleEmotes(open=$('emote-panel').hidden){
 }
 function closeEmotes(){toggleEmotes(false);}
 renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==null)return;dragId=e.pointerId;dragX=e.clientX;dragY=e.clientY;dragDistance=0;renderer.domElement.setPointerCapture(e.pointerId);});
-renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;}});
+renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;followLight=0;}});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
 renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,4,25);settling=0;e.preventDefault();}},{passive:false});
@@ -969,7 +974,7 @@ addEventListener('resize', () => {
 });
 applyLayout();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the gold marker':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='notice'?`A notice board glows by the square · Walk up to it and ${touch?'tap Interact':'press F'} to read`:step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
 function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
@@ -1143,6 +1148,10 @@ function updateCamera(dt){
         pitch=damp(pitch,view.pitch,7,dt);
         radius=damp(radius,view.radius,7,dt);
       }
+      // Turned with the light only once it is clear of the hero's shoulder.
+      const light=followLight>0&&!chat&&story.guide;
+      if(followLight>0)followLight=Math.max(0,followLight-dt);
+      if(light&&Math.hypot(light.x-position.x,light.z-position.z)>2.5){const want=Math.atan2(position.x-light.x,position.z-light.z);yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*(1-Math.exp(-2.5*dt));}
       const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
       followCamera.update(dt,position,yaw,pitch,radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
       if(lockTarget&&!followCamera.locked)lockTarget=null;
@@ -1213,6 +1222,8 @@ function drawMap(){
     let gx=px(goal.x)-90,gz=pz(goal.z)-90;const reach=Math.hypot(gx,gz);if(reach>80){gx*=80/reach;gz*=80/reach;}
     map.save();map.translate(90+gx,90+gz);map.rotate(Math.PI/4);map.fillStyle='#ffd98a';map.strokeStyle='#3b2b0d';map.lineWidth=1.5;map.fillRect(-4.5,-4.5,9,9);map.strokeRect(-4.5,-4.5,9,9);map.restore();
   }
+  // The guiding light shows the way on foot, where the diamond only gives the direction.
+  const light=inCity()&&story.guide;if(light){map.fillStyle='#bfefff';map.beginPath();map.arc(px(light.x),pz(light.z),3.2,0,Math.PI*2);map.fill();}
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i)||!shardPositions[i])continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
   map.fillStyle='#ff987d';for(const e of chapterTwo.combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
@@ -1239,7 +1250,7 @@ function animate(now){
     activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
-    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id);
+    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story,{active:screen==='game'});
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;

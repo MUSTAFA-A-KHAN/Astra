@@ -79,7 +79,7 @@ test('the three standing districts load offline and the roster and menus remain 
   // A starter hero has no gestures, so there is no picker to open.
   await expect(page.locator('#emote-button')).toBeHidden();
   await page.getByRole('button', { name: 'Open quest journal' }).click();
-  await expect(page.locator('#dialog-content')).toContainText('The woman at the well');
+  await expect(page.locator('#dialog-content')).toContainText('News from the harbour');
   await page.getByRole('button', { name: 'Close menu' }).click();
   await page.getByRole('button', { name: 'Return to character lobby' }).click();
   // #lobby is a zero-height landmark — every panel inside it is absolutely

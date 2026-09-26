@@ -6,7 +6,8 @@ const progress = (changes = {}) => ({ collected: new Set(), kills: 0, restored: 
 
 test('the story walks its steps in order, one flag at a time', () => {
   const p = progress();
-  assert.equal(stepId(p), 'keeper');
+  assert.equal(stepId(p), 'notice');
+  p.story.notice = true; assert.equal(stepId(p), 'keeper');
   p.story.keeper = true; assert.equal(stepId(p), 'shards');
   for (let i = 0; i < 5; i++) p.collected.add(i);
   assert.equal(stepId(p), 'ferryman');
@@ -20,9 +21,23 @@ test('the story walks its steps in order, one flag at a time', () => {
 
 test('shards and wisps won early count when their step comes round', () => {
   const p = progress({ kills: 7, collected: new Set([0, 1, 2, 3, 4, 5]) });
-  assert.equal(stepId(p), 'keeper');
+  assert.equal(stepId(p), 'notice');
+  p.story.notice = true; assert.equal(stepId(p), 'keeper');
   p.story.keeper = true; assert.equal(stepId(p), 'ferryman');
   p.story.ferryman = true; assert.equal(stepId(p), 'ledger');
+});
+
+test('the notice board comes first, but the keeper met first counts for it', () => {
+  const p = progress();
+  p.story.keeper = true; assert.equal(stepId(p), 'shards');
+  // Found before the board, she says what she says at the start.
+  assert.deepEqual(conversation('maren', 'notice'), conversation('maren', 'keeper'));
+  // Read first, the board ends on the light it sets free; read after, it is only a memorial.
+  const first = conversation('notice', 'notice').lines, later = conversation('notice', 'shards').lines;
+  assert.equal(first.length, later.length + 1);
+  assert.match(first.at(-1)[1], /light/);
+  assert.deepEqual(first.slice(0, -1), later);
+  for (const entry of [conversation('notice', 'notice'), conversation('notice', 'shards')]) assert.equal(entry.sets, 'notice');
 });
 
 test('a save from before the story keeps the ending it already earned', () => {

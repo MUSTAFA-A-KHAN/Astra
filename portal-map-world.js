@@ -134,6 +134,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     getNormal(...args) { return active.navigation.getNormal(...args); },
     isWalkable(...args) { return active.navigation.isWalkable(...args); },
     findWalkable(...args) { return active.navigation.findWalkable(...args); },
+    route(...args) { return active.navigation.route(...args); },
     biomeAt(x, z) {
       for (const regions of knownRegions.values()) for (const { biome, bounds } of regions) if (within(bounds, x, z)) return biome;
       return x < -75 ? 'forest' : x > 115 && z > 110 ? 'yard' : 'city';
