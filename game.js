@@ -12,7 +12,8 @@ import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
 import { createChapterTwo } from './chapter-two-world.js';
-import { createPortal } from './portal-world.js';
+import { createPortal, PORTAL_ENTRY } from './portal-world.js';
+import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
 import { portalRoute, portalConversation } from './portal-script.js';
 
 const $ = id => document.getElementById(id);
@@ -150,7 +151,7 @@ const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterT
   onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
 });
 scene.add(chapterTwo.root);
-const portal = createPortal({ world }); scene.add(portal.root);
+const portal = createPortal({ world, reducedMotion }); scene.add(portal.root);
 const inCity = () => !world.activeMap || world.activeMap === 'city';
 const cityExtraColliders = new Map();
 function placePortal() {
@@ -472,6 +473,8 @@ function portalStatus(text, covered=false) {
   $('portal-status').hidden=!text; $('portal-status').textContent=text;
   $('portal-veil').classList.toggle('visible',covered);
 }
+// Letterbox the screen and set the HUD aside while the crossing plays.
+function portalCinema(on){document.body.classList.toggle('portal-cinematic',on);}
 function readPortalBook() {
   const route=portalRoute(progress,world.activeMap || 'city');
   if(route.lockedReason){begin('portalBook',portalConversation(route).lines);return;}
@@ -480,7 +483,7 @@ function readPortalBook() {
   position.set(reading.x,groundHeight(reading.x,reading.z),reading.z);avatar.position.copy(position);locomotion.reset();
   let release;
   const gate=new Promise(resolve=>{release=resolve;});
-  const journey=portalJourney={route,phase:'reading',elapsed:0,readFinished:false,ready:false,release};
+  const journey=portalJourney={route,phase:'reading',elapsed:0,readFinished:false,ready:false,waited:0,entered:0,weight:0,shot:{},pose:null,release};
   portal.setPhase('reading');
   begin('portalBook',portalConversation(route).lines,()=>{journey.readFinished=true;});
   $('interaction-hint').hidden=true;
@@ -488,36 +491,86 @@ function readPortalBook() {
     await prepareModel(object);journey.ready=true;await gate;
   }}).then(async arrival=>{
     await arriveThroughPortal(arrival);
-    portalJourney=null;portalStatus('');resetInput();settling=.9;
+    // The light clears over the far shore and the camera comes down to the hero.
+    journey.phase='landing';journey.elapsed=0;portalStatus('');
+    showPulse(position.x,position.z,5,'#9deee6');audio.play('interaction',{volume:.6,rate:.8});
     save();updateHUD();toast(`${route.mapName} · The keeper’s spell carries you safely through.`);
   }).catch(error=>{
     console.warn('The portal passage could not open.',error);
     if(chat?.person==='portalBook'){chat.onEnd=null;endConversation();}
-    journey.release();portalJourney=null;portal.setPhase('dormant');portalStatus('');resetInput();
+    journey.release();portalJourney=null;portal.setPhase('dormant');portalStatus('');portalCinema(false);resetInput();
+    position.y=groundHeight(position.x,position.z);avatar.position.copy(position);locomotion.reset();
+    followCamera.reset(position,yaw,pitch,radius);
     toast('The passage faded. Your journey is safe. Read the book again to retry.');
   });
 }
+const turnTo=(from,to,rate,dt)=>from+Math.atan2(Math.sin(to-from),Math.cos(to-from))*(1-Math.exp(-rate*dt));
+/**
+ * THE CROSSING
+ *
+ * reading → casting → ready → entering → traveling → arriving → landing.
+ * The hero reads the book, then casts: the gate's stones break out of the
+ * ground and its aperture opens while the camera takes over. Once the far
+ * shore has loaded, and the turning arch has left the way clear, the hero
+ * walks round to the foot of the dais and the gate draws them in. The light
+ * covers the swap of maps, and clears over the hero on the other side.
+ */
 function updatePortalJourney(dt) {
   const j=portalJourney;if(!j)return;
   j.elapsed+=dt;
   if(j.phase==='reading') {
     if(!chat)hero.animate(dt,{state:'Read',fidget:false,time});
-    if(j.readFinished && j.elapsed>=1.8){j.phase='casting';j.elapsed=0;portalStatus('Speaking the keeper’s spell…');}
+    if(j.readFinished && j.elapsed>=1.8){
+      j.phase='casting';j.elapsed=0;filmed.reach=1;portalStatus('Speaking the keeper’s spell…');portalCinema(true);
+      const gate=portal.places.portal,foot=portal.places.foot;
+      j.rig={gate,aperture:portal.places.aperture,axis:foot.sub(gate).setY(0).normalize(),hero:position};
+    }
   } else if(j.phase==='casting') {
-    const p=portal.places.portal;avatar.rotation.y=Math.atan2(p.x-position.x,p.z-position.z);
-    hero.animate(dt,{state:'Cast',fidget:false,time});portal.setPhase('casting',Math.min(1,j.elapsed/3.4));
-    if(j.elapsed>=3.4){j.phase='ready';j.elapsed=0;portal.setPhase('ready');showPulse(p.x,p.z,8,'#9deee6');}
+    const p=j.rig.gate;avatar.rotation.y=turnTo(avatar.rotation.y,Math.atan2(p.x-position.x,p.z-position.z),8,dt);
+    hero.animate(dt,{state:'Cast',fidget:false,time});portal.setPhase('casting',Math.min(1,j.elapsed/PORTAL_TIMING.cast));
+    if(j.elapsed>=PORTAL_TIMING.cast){
+      j.phase='ready';j.elapsed=0;portal.setPhase('ready');showPulse(p.x,p.z,8,'#9deee6');
+      audio.play('interaction',{volume:.75,rate:.7});j.shake=Math.max(j.shake||0,.6);
+    }
   } else if(j.phase==='ready') {
     hero.animate(dt,{state:'Read',fidget:false,time});
+    if(j.ready)j.waited+=dt;
     portalStatus(j.ready?'The passage is open.':'The spell holds. The far shore is taking shape…');
-    if(j.ready){j.phase='entering';j.elapsed=0;j.from=position.clone();portalStatus('Stepping between the tides…');}
-  } else if(j.phase==='entering') {
-    position.lerpVectors(j.from,portal.places.portal,Math.min(1,j.elapsed/1.2));avatar.position.copy(position);
-    hero.animate(dt,{state:'Walk',moving:true,speed:4,fidget:false,time});
-    if(j.elapsed>=1.2){j.phase='traveling';j.elapsed=0;portal.setPhase('traveling');portalStatus(`Crossing to ${j.route.mapName}…`,true);}
-  } else if(j.phase==='traveling' && j.elapsed>=.35) {
-    j.phase='arriving';j.release();
+    // The arch keeps turning; set off only when its footing stones will be
+    // clear of the way in, or after a long wait whatever they are doing.
+    if(j.ready&&j.elapsed>=.8&&(portal.entryClear()||j.waited>12)){
+      j.phase='entering';j.elapsed=0;j.entered=0;j.from={...j.shot};portalStatus('Stepping between the tides…');
+    }
+  } else if(j.phase==='entering'||j.phase==='traveling'||j.phase==='arriving') {
+    j.entered+=dt;
+    const step=portal.entryPose(j.entered),turn=avatar.rotation.y;
+    position.copy(step.position);avatar.position.copy(position);
+    avatar.rotation.y=turnTo(turn,step.yaw,step.stage==='walk'?7:4,dt);
+    hero.animate(dt,{speed:step.speed,moving:step.speed>.05,turnRate:dt>0?(avatar.rotation.y-turn)/dt:0,fidget:false,time});
+    if(j.phase==='entering'&&step.veil){
+      j.phase='traveling';j.elapsed=0;portal.setPhase('traveling');portalStatus(`Crossing to ${j.route.mapName}…`,true);
+      audio.play('interaction',{volume:.6,rate:1.25});
+    } else if(j.phase==='traveling'&&j.elapsed>=.45){j.phase='arriving';j.release();}
+  } else if(j.phase==='landing') {
+    hero.animate(dt,{speed:0,fidget:false,time});
+    if(j.elapsed>=PORTAL_TIMING.land){portalJourney=null;portalCinema(false);resetInput();settling=0;return;}
   }
+  directPortalShot(j,dt);
+}
+// Where the cinematic camera wants to be this frame. The arrival is shot
+// round the hero; everything before it round the gate.
+function directPortalShot(j,dt) {
+  j.weight=cinematicWeight(j.phase,j.elapsed);
+  if(j.weight<=0||j.phase==='arriving')return;
+  if(j.phase==='landing'){
+    const view=currentView();
+    j.pose=landingPose(j.elapsed,{hero:position,yaw,pitch,distance:radius,height:view.height||1.9,fov:view.fov},j.pose||undefined);
+    return;
+  }
+  const phase=j.phase==='traveling'?'entering':j.phase,t=phase==='entering'?j.entered:j.elapsed;
+  portalShot(phase,t,{entry:PORTAL_ENTRY,from:j.from},j.shot);
+  j.pose=shotPose(j.shot,j.rig,j.pose||undefined);
+  j.shake=Math.max(0,(j.shake||0)*Math.exp(-4*dt));
 }
 async function arriveThroughPortal(arrival) {
   // City actors are separate from the map. Keep the reusable horse and small
@@ -991,21 +1044,46 @@ function updateCamera(dt){
     cameraTarget.x+=spawn.x;cameraTarget.y+=spawn.y;cameraTarget.z+=spawn.z-18;
     camera.position.copy(cameraDesired);camera.lookAt(cameraTarget);
   }else{
-    const view=currentView();
-    if(settling>0){
-      settling=Math.max(0,settling-dt);
-      pitch=damp(pitch,view.pitch,7,dt);
-      radius=damp(radius,view.radius,7,dt);
+    const shot=portalJourney?.pose,weight=shot?portalJourney.weight:0;
+    // Under a blend the follow camera keeps its own smoothed pose; give it
+    // back before it takes its next step.
+    if(heldCamera.active){camera.position.copy(heldCamera.position);camera.quaternion.copy(heldCamera.quaternion);camera.fov=heldCamera.fov;heldCamera.active=false;}
+    if(weight<1){
+      const view=currentView();
+      if(settling>0){
+        settling=Math.max(0,settling-dt);
+        pitch=damp(pitch,view.pitch,7,dt);
+        radius=damp(radius,view.radius,7,dt);
+      }
+      const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
+      followCamera.update(dt,position,yaw,pitch,radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
+      if(lockTarget&&!followCamera.locked)lockTarget=null;
     }
-    const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
-    followCamera.update(dt,position,yaw,pitch,radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
-    if(lockTarget&&!followCamera.locked)lockTarget=null;
-    if(lockTarget){
+    if(lockTarget&&weight===0){
       const marker=targetPoint.copy(lockTarget.group.position);marker.y+=4;marker.project(camera);
       $('target-marker').hidden=marker.z>1||marker.z< -1; $('target-marker').style.left=`${(marker.x*.5+.5)*100}%`;$('target-marker').style.top=`${(-marker.y*.5+.5)*100}%`;
     }else $('target-marker').hidden=true;
-
+    if(weight>0)filmPortal(shot,weight,dt);
   }
+}
+// The portal crossing's camera. Buildings and hills draw it in toward its
+// subject rather than letting it look through them, and it only eases back out.
+const heldCamera={active:false,position:new THREE.Vector3(),quaternion:new THREE.Quaternion(),fov:55};
+const filmed={position:new THREE.Vector3(),target:new THREE.Vector3(),quaternion:new THREE.Quaternion(),matrix:new THREE.Matrix4(),reach:1};
+function filmPortal(shot,weight,dt){
+  const f=filmed,shake=reducedMotion?0:(portalJourney?.shake||0)*.16;
+  f.target.copy(shot.target);
+  if(shake>0){f.target.x+=Math.sin(time*47)*shake;f.target.y+=Math.sin(time*39+1)*shake*.7;f.target.z+=Math.sin(time*43+2)*shake;}
+  const fraction=followCamera.safeFraction(shot.target,shot.position);
+  f.reach=fraction<f.reach?fraction:damp(f.reach,fraction,2.5,dt);
+  f.position.lerpVectors(shot.target,shot.position,f.reach);
+  f.position.y=Math.max(f.position.y,followCamera.floorHeight(f.position.x,f.position.z));
+  f.matrix.lookAt(f.position,f.target,camera.up);f.quaternion.setFromRotationMatrix(f.matrix);
+  if(weight<1){
+    heldCamera.position.copy(camera.position);heldCamera.quaternion.copy(camera.quaternion);heldCamera.fov=camera.fov;heldCamera.active=true;
+    camera.position.lerp(f.position,weight);camera.quaternion.slerp(f.quaternion,weight);camera.fov+=(shot.fov-camera.fov)*weight;
+  }else{camera.position.copy(f.position);camera.quaternion.copy(f.quaternion);camera.fov=shot.fov;}
+  camera.updateProjectionMatrix();
 }
 const map=$('minimap').getContext('2d');
 // The map follows the player at a fixed scale: the Reach is now too wide to
@@ -1057,7 +1135,9 @@ function animate(now){
     if(screen==='game'&&hero){if(chat)updateConversation(dt);else if(!portalJourney){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
     if(screen==='game')updatePortalJourney(dt);
-    portal.root.visible=screen==='game';portal.update(dt,reducedMotion?0:time);
+    portal.root.visible=screen==='game';
+    // Each stone that breaks the ground lands a thud and a jolt of the camera.
+    for(const event of portal.update(dt,reducedMotion?0:time))if(event.type==='stone'){audio.play('landing',{volume:.55,rate:.66});if(portalJourney)portalJourney.shake=Math.min(1,(portalJourney.shake||0)+.35);}
     activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
@@ -1091,7 +1171,7 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics,journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling},render:renderInfo,input:{joyX,joyY,sprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}

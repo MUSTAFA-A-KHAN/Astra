@@ -29,8 +29,10 @@ test('book stays visible while reading and casting; gate only awakens during the
   assert.equal(portal.diagnostics().bookVisible, true);
   assert.equal(portal.diagnostics().apertureVisible, false);
   assert.equal(portal.nearby(portal.places.book), null, 'a ritual cannot be started twice');
-  portal.setPhase('casting', .5); portal.update(.1, 1);
+  portal.setPhase('casting', .3); portal.update(.1, 1);
   assert.equal(portal.diagnostics().bookVisible, true);
+  assert.equal(portal.diagnostics().apertureVisible, false, 'the stones rise before the aperture opens');
+  portal.setPhase('casting', .8); portal.update(.1, 1.1);
   assert.equal(portal.diagnostics().apertureVisible, true);
   portal.setPhase('ready');
   assert.equal(portal.diagnostics().apertureVisible, true);
