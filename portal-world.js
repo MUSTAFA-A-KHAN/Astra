@@ -7,6 +7,21 @@ const PHASES = new Set(['dormant', 'reading', 'casting', 'ready', 'traveling']);
 const AWAKE = new Set(['casting', 'ready', 'traveling']);
 const BOOK_OFFSET = new THREE.Vector3(-4.6, 0, 4.8);
 const READ_OFFSET = new THREE.Vector3(-4.6, 0, 6.6);
+// The gate's solid parts in its own frame, measured from the model at rest:
+// the stepped dais, the arch's two feet, which stand on the ground outside
+// it, and the crown leaning over them. The hero cannot climb the dais or jump
+// its 1.7 m, so the gate lifts them. It keeps this pose while it sleeps;
+// awake, it turns, but then the traveller is in its hands, not the player's.
+const GATE_PARTS = [
+  { name: 'dais', x: 0, z: 0, r: 4.55, top: 1.7 },
+  { name: 'arch-left', x: -4.1, z: .15, r: 1.25, top: 6.1 },
+  { name: 'arch-right', x: 4.55, z: .15, r: 1.3, top: 6.4 },
+  { name: 'arch-crown', x: 2.3, z: .15, r: 1.4, bottom: 5.8, top: 8.1 },
+];
+// How far from its centre the gate stands (its arch's outer foot), and how far
+// its stones fly once awake (12.3 m). Placement keeps the second clear.
+export const PORTAL_FOOTPRINT = 6;
+export const PORTAL_REACH = 13;
 // Sleeping stones wait this far below their place in the gate's own clip.
 const STONE_DEPTH = 12;
 const smoothstep = (from, to, value) => { const t = THREE.MathUtils.clamp((value - from) / (to - from), 0, 1); return t * t * (3 - 2 * t); };
@@ -219,6 +234,11 @@ export function createPortal({ world, collision, reducedMotion = false } = {}) {
     root.updateMatrixWorld(true); clearColliders();
     way = WALK.curve.getSpacedPoints(20).map(point => root.localToWorld(point)); bookSpot.copy(places.book);
     if (collision) {
+      const ground = root.position.y;
+      for (const part of GATE_PARTS) {
+        const at = root.localToWorld(probe.set(part.x, 0, part.z)), id = `portal-${part.name}-${root.id}`;
+        collision.insert(id, { x: at.x, z: at.z, r: part.r, bottom: ground + (part.bottom ?? -.5), top: ground + part.top }); colliderIds.push(id);
+      }
       const position = places.book, id = `portal-lectern-${root.id}`;
       collision.insert(id, { x: position.x, z: position.z, r: .8, bottom: position.y, top: position.y + 2.25 }); colliderIds.push(id);
     }

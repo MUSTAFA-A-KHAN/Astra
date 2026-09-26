@@ -12,7 +12,7 @@ import { createStory } from './story.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
 import { createChapterTwo } from './chapter-two-world.js';
-import { createPortal, PORTAL_ENTRY } from './portal-world.js';
+import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
 import { portalRoute, portalConversation } from './portal-script.js';
 
@@ -151,27 +151,57 @@ const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterT
   onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
 });
 scene.add(chapterTwo.root);
-const portal = createPortal({ world, reducedMotion }); scene.add(portal.root);
+const portal = createPortal({ world, collision, reducedMotion }); scene.add(portal.root);
 const inCity = () => !world.activeMap || world.activeMap === 'city';
 const cityExtraColliders = new Map();
+// The north-east car park: the one stretch of the city open enough for the
+// awakened gate. Anywhere else its stones fly over kerbs, lamps and trees.
+const CITY_PORTAL = { x: 95, z: -100.5 };
+// How far the gate at (x, z) could spread before it met something: the map's
+// own walls, trees and lamps, a story or chapter-two site, a prop, or the
+// arrival point, where travellers land and respawn. At most PORTAL_REACH.
+function portalClearance(x, z) {
+  let clear = PORTAL_REACH;
+  while (clear > 0 && !world.isWalkable(x, z, clear)) clear -= .5;
+  const sites = [world.spawn, ...Object.values(chapterTwo.places), ...(inCity() ? Object.values(story.places) : [])];
+  for (const p of sites) clear = Math.min(clear, Math.hypot(p.x - x, p.z - z));
+  for (const c of collision.query(x - clear, z - clear, x + clear, z + clear)) {
+    if (/^(city|portal)-/.test(c.id)) continue;
+    clear = Math.min(clear, c.r !== undefined ? Math.hypot(c.x - x, c.z - z) - c.r
+      : Math.hypot(Math.max(0, Math.abs(c.x - x) - c.w / 2), Math.max(0, Math.abs(c.z - z) - c.d / 2)));
+  }
+  return clear;
+}
+// The dais stands level: no kerb or bank under it.
+function portalLevel({ x, y, z }) {
+  for (let r = 1.5; r <= PORTAL_FOOTPRINT; r += 1.5) for (let a = 0; a < 12; a++) {
+    if (Math.abs(groundHeight(x + Math.cos(a * Math.PI / 6) * r, z + Math.sin(a * Math.PI / 6) * r) - y) > .3) return false;
+  }
+  return true;
+}
 function placePortal() {
-  const anchor = inCity() ? { x: -52, z: 32 } : world.spawn;
-  // Both the dais and its reader need clear ground. Search locally so the
-  // portal never asks the player to stand inside the imported scenery.
-  let chosen = null;
-  for (let r = 0; r <= 36 && !chosen; r += 3) for (let i = 0; i < 16 && !chosen; i++) {
+  const anchor = inCity() ? CITY_PORTAL : world.spawn;
+  // Take the first spot near the anchor where the gate stands level with its
+  // whole reach clear. A map with no such spot (the forest islet has none)
+  // gets the best one found: level ground first, then the most room. The
+  // book and its reader always need open, level ground of their own.
+  let best = null;
+  const ideal = 2 * PORTAL_REACH, done = () => best?.score >= ideal;
+  for (let r = 0; r <= 36 && !done(); r += 3) for (let i = 0; i < (r ? 16 : 1) && !done(); i++) {
     const x = anchor.x + Math.cos(i * Math.PI / 8) * r, z = anchor.z + Math.sin(i * Math.PI / 8) * r;
-    if (!world.isWalkable(x, z, 2.4)) continue;
+    const clear = portalClearance(x, z);
+    if (clear < 2.4) continue;
     const point = { x, y: groundHeight(x,z), z };
+    const score = clear + (portalLevel(point) ? PORTAL_REACH : 0);
+    if (score <= (best?.score ?? 0)) continue;
     for (let facing = 0; facing < Math.PI * 2; facing += Math.PI / 2) {
       portal.place(point, facing);
       const { book, reading } = portal.places;
-      if ([book, reading].every(p => world.isWalkable(p.x,p.z,.85) && Math.abs(groundHeight(p.x,p.z)-point.y)<.6)
-        && Object.values(chapterTwo.places).every(p => Math.hypot(p.x-book.x,p.z-book.z)>6)
-        && (!inCity() || Object.values(story.places).every(p => Math.hypot(p.x-book.x,p.z-book.z)>6))) { chosen = point; break; }
+      if ([book, reading].every(p => world.isWalkable(p.x,p.z,.85) && Math.abs(groundHeight(p.x,p.z)-point.y)<.6)) { best = { point, facing, score }; break; }
     }
   }
-  if (!chosen) portal.place(world.findWalkable(anchor.x,anchor.z,2.4));
+  if (best) portal.place(best.point, best.facing);
+  else portal.place(world.findWalkable(anchor.x,anchor.z,2.4));
   portal.setPhase('dormant');
 }
 placePortal();
