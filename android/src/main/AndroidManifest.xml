@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The world ships inside the app; only the two guest heroes (Soldier and
+         Female-Soldier) and the web fonts come from the internet. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- three.js renders through WebGL 2, which needs OpenGL ES 3. -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <application
+        android:appCategory="game"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Astra">
+
+        <!-- Rotation, resizing and theme changes are handled in place: recreating
+             the activity would reload the whole world. One instance only, however
+             the game is opened: two would load two worlds into one renderer. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

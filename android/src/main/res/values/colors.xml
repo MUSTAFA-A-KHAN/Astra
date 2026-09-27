@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The loading screen's edge and the site's theme colour. -->
+    <color name="astra_night">#13251E</color>
+    <color name="astra_icon">#172824</color>
+</resources>

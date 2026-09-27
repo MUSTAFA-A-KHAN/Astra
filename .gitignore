@@ -25,3 +25,13 @@ blender-output/*
 3D-model-glb/
 3D-model-glb-chapter-2/
 playtest/*
+
+# The Android app (android/): its build output, and the release key, which
+# must stay private. `npm run android` leaves the finished APK in dist/.
+android/.gradle/
+android/.kotlin/
+android/build/
+android/local.properties
+android/keystore.properties
+android/*.jks
+dist/
