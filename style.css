@@ -54,3 +54,11 @@ body.portal-cinematic #portal-status{bottom:max(3vh,env(safe-area-inset-bottom))
 #game-hud [data-control],#game-hud .camera-tools{zoom:var(--control-scale,1)}#game-hud [data-control],#game-hud .camera-tools button{opacity:var(--control-opacity,1)}#game-hud [data-control]:active,#game-hud #joystick.held,#game-hud .camera-tools button:active{opacity:1}
 /* The stick sprints on its own when pushed most of the way out; its ring lights to say so. */
 #joystick.sprinting .joystick-ring{border-color:var(--gold);box-shadow:0 0 14px #d8c28b66}
+
+/* Fullscreen landscape orientation overlay for Telegram Mini App */
+#telegram-orientation-overlay:not([hidden]){position:fixed;inset:0;z-index:200;background:radial-gradient(ellipse at 50% 40%,#1e362a,#0f1f19 80%);display:grid;place-items:center;padding:24px;text-align:center}
+.telegram-orientation-card{background:linear-gradient(135deg,#1b3327f2,#0f211af0);border:1px solid #d7c08d66;border-radius:10px;padding:36px 28px;max-width:340px;box-shadow:0 20px 80px #0009;display:flex;flex-direction:column;align-items:center;gap:14px}
+.telegram-orientation-card .rotate-icon{font-size:48px;color:var(--gold);line-height:1;animation:rotate-pulse 2s cubic-bezier(.4,0,.6,1) infinite}
+.telegram-orientation-card h2{font:32px 'Cormorant Garamond',Georgia,serif;margin:0;color:var(--gold);letter-spacing:.5px}
+.telegram-orientation-card p{font-size:13px;line-height:1.6;color:var(--muted);margin:0}
+@keyframes rotate-pulse{0%{transform:rotate(0deg) scale(1)}50%{transform:rotate(90deg) scale(1.1)}100%{transform:rotate(0deg) scale(1)}}
