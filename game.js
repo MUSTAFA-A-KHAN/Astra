@@ -9,6 +9,8 @@ import { createGameplayWorld } from './gameplay-world.js';
 import { alignRider, MountSteering } from './riding.js';
 import { HEROES, createHero, createEnemySquad } from './characters.js';
 import { createStory } from './story.js';
+import { createGuide } from './guide.js';
+import { softTexture } from './model-fit.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
 import { createChapterTwo } from './chapter-two-world.js';
@@ -443,10 +445,80 @@ function interact(){
  * downloading as it opens, so each is there by the time its line comes up.
  */
 let chat=null,finale=false,closed={person:null,at:0};
-// Once the notice board has been read, the camera turns with the light it
-// sets free for a few seconds, so that it is seen leaving and the view ends up
-// looking the way it goes. Looking round by hand takes the camera back.
+// The Keeper's light: one mote of the Moonwell's light that shows the way to
+// whatever the story waits on next, from the first step off the arrival square
+// to the last trial, in both chapters and on every map. A newcomer is shown
+// rather than told: it rises at their shoulder, leads them to the notice
+// board, and goes into it; reading the board sets it free again. From then on
+// it comes out of whatever the player has just read or heard, or rises at
+// their shoulder, and leads on. It is sprites rather than a light (guide.js),
+// and the navigator finds it a way once per goal, so it is cheap to keep lit.
+const guideLight=createGuide({route:(from,to)=>world.route?.(from,to),heightAt:(x,z)=>groundHeight(x,z),texture:softTexture(),
+  onArrive:goal=>{lightIn=goal;if(lightFor?.person&&inCity())story.glow(lightFor.person);}});
+scene.add(guideLight.root);
+// What it leads to now, and where it last went in. It waits a beat after the
+// player steps into the world, so the world is seen before it is; `welcome`
+// marks the first lead after that, for a player who has not yet set off.
+let lightFor=null,lightIn=null,lightDelay=0,lightWelcome=false,lightChecked=0,lightQuarry=null;
+// Whenever the light sets off as the player steps into the world or finishes
+// a conversation, the camera turns with it for a few seconds, so that it is
+// seen leaving and the view ends up looking the way it goes. Looking round by
+// hand takes the camera back.
 let followLight=0;
+// How high on a person or thing the light goes in: the page that is read, or
+// a speaker's chest.
+const lightHeight=place=>(place.y??groundHeight(place.x,place.z))+(place.face??(place.top?place.top*.68:1.7));
+// Where the light leads now, as { key, x, y, z }: `key` changes whenever the
+// goal does. Nothing when there is nobody in the world to lead, a fight or a
+// film is on, or the story has nowhere left to send them.
+function lightTarget(){
+  if(screen!=='game'||!hero||portalJourney||finale||contextLost)return null;
+  if(chapterTwoUnlocked()){
+    if(chapterTwo.combatants.some(e=>e.alive))return null;
+    const step=currentStep(),goal=questObjective();
+    return goal&&{key:`${step.id}:${Math.round(goal.x)},${Math.round(goal.z)}`,x:goal.x,y:lightHeight(goal),z:goal.z};
+  }
+  if(!inCity())return null;
+  const step=STEPS[storyStep(progress)].id;
+  // A step that asks for several of something: the nearest, kept until it is
+  // won, so the light never dithers between two.
+  if(step==='shards'||step==='wisps'){
+    const pool=step==='shards'?shardPositions.flatMap((p,i)=>p&&!progress.collected.has(i)?[{id:i,x:p[0],z:p[1]}]:[])
+      :enemies.filter(e=>e.alive).map(e=>({id:e.index,x:e.group.position.x,z:e.group.position.z}));
+    const away=q=>Math.hypot(q.x-position.x,q.z-position.z);
+    let quarry=lightQuarry?.step===step&&pool.find(q=>q.id===lightQuarry.id);
+    if(!quarry){quarry=pool.reduce((best,q)=>!best||away(q)<away(best)?q:best,null);lightQuarry=quarry&&{step,id:quarry.id};}
+    return quarry&&{key:`${step}:${quarry.id}`,x:quarry.x,y:groundHeight(quarry.x,quarry.z)+1.6,z:quarry.z,moving:step==='wisps'};
+  }
+  const person={notice:'notice',keeper:'maren',restore:'maren',ferryman:'tobin',farewell:'tobin',ledger:'ledger'}[step],place=person&&story.places[person];
+  return place&&{key:`${step}:${person}`,person,x:place.x,y:lightHeight(place),z:place.z};
+}
+function updateGuideLight(dt,t){
+  lightDelay=Math.max(0,lightDelay-dt);
+  if(locomotion.speed>.5)lightWelcome=false;
+  const target=lightDelay>0?null:lightTarget(),state=guideLight.state,shoulder={x:position.x,y:position.y+3.2,z:position.z};
+  if(!target){guideLight.release();lightFor=null;}
+  else if(target.key!==lightFor?.key){
+    // Already on its way, it turns for the new goal. Otherwise it comes out of
+    // whatever it last went into, if the player is still beside it, or rises
+    // at their shoulder.
+    if(state==='leading'||state==='arriving')guideLight.retarget(target,position);
+    else{
+      const from=state==='done'&&lightIn&&Math.hypot(lightIn.x-position.x,lightIn.z-position.z)<14?lightIn:shoulder;
+      guideLight.lead(target,from);
+      if(lightWelcome||performance.now()-closed.at<1500)followLight=4.5;
+    }
+    lightFor=target;lightWelcome=false;lightChecked=0;
+  }
+  // Gone in, and the player has walked off without it: it comes back to them.
+  else if(state==='done'&&Math.hypot(position.x-target.x,position.z-target.z)>30)guideLight.lead(target,shoulder);
+  // A wisp drifts: every so often the light turns for where it has got to.
+  else if(target.moving&&state==='leading'&&(lightChecked+=dt)>2){
+    lightChecked=0;const goal=guideLight.goal;
+    if(goal&&Math.hypot(goal.x-target.x,goal.z-target.z)>6)guideLight.retarget(target,position);
+  }
+  guideLight.update(dt,t,position,{paused:!!chat});
+}
 const voiceOf=(who,text)=>who==='you'?VOICES.heroes[heroMeta.id]?.[text]:who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
 // How long a line holds once it is all there: a short beat after a line that
 // was heard spoken, and time to finish reading one that was not (it typed
@@ -507,7 +579,7 @@ function heard(entry){
   if(entry.sets&&!progress.story[entry.sets]){
     progress.story[entry.sets]=true;save();
     // Read before the keeper has been met, the board sets a light leading to her.
-    if(entry.sets==='notice'){toast(progress.story.keeper?'Something about that last name stays with you.':'Follow the light · It knows the way to the Moonwell');if(!progress.story.keeper)followLight=4.5;}
+    if(entry.sets==='notice'&&progress.story.keeper)toast('Something about that last name stays with you.');
     if(entry.sets==='farewell'){gainXP(100);victoryTime=8;audio.play('victory');}
     else if(entry.sets!=='notice')gainXP(40);
   }
@@ -686,6 +758,8 @@ async function arriveThroughPortal(arrival) {
     story.stream({prepare:prepareModel}).catch(error=>console.warn('The story models did not load.',error));
   }
   chapterTwo.syncMap();placePortal();
+  // The light is left behind on the old map, and rises afresh on the new one.
+  guideLight.reset();lightFor=lightIn=null;lightWelcome=true;
   spawn.set(arrival.x,arrival.y,arrival.z);position.copy(spawn);avatar.position.copy(position);stage.position.copy(spawn);
   activities.mount.mounted=false;locomotion.waterZones=inCity()?activities.waterZones:[];locomotion.climbables=inCity()?activities.climbables:[];
   locomotion.reset();lockTarget=null;aiming=cinematic=false;attackTimer=abilityTimer=hurtTimer=combatMemory=0;
@@ -1007,7 +1081,7 @@ function applyControlLook() {
 }
 applyControlLook();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();const step=currentStep();toast(step.id==='notice'?`A notice board glows by the square · Walk up to it and ${touch?'tap Interact':'press F'} to read`:step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();lightDelay=1.2;lightWelcome=true;const step=currentStep();if(step.id!=='notice')toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
 function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
@@ -1053,6 +1127,8 @@ function respawnPlayer(){
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
   followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
   enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
+  // Carried back to the square, the player is shown the way from there at once.
+  if(guideLight.state==='leading'&&lightFor)guideLight.retarget(lightFor,position);
   toast('The keeper?s light shelters you. Your journey continues.');
 }
 // The stamina bar shows only while it is being spent or refilled.
@@ -1186,8 +1262,9 @@ function updateCamera(dt){
         pitch=damp(pitch,view.pitch,7,dt);
         radius=damp(radius,view.radius,7,dt);
       }
-      // Turned with the light only once it is clear of the hero's shoulder.
-      const light=followLight>0&&!chat&&story.guide;
+      // Turned with the light only once it is clear of the hero's shoulder,
+      // and only in the plain follow view: never against an aim or a lock.
+      const light=followLight>0&&!chat&&!aiming&&!cinematic&&!lockTarget&&guideLight.position;
       if(followLight>0)followLight=Math.max(0,followLight-dt);
       if(light&&Math.hypot(light.x-position.x,light.z-position.z)>2.5){const want=Math.atan2(position.x-light.x,position.z-light.z);yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*(1-Math.exp(-2.5*dt));}
       const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
@@ -1281,7 +1358,7 @@ function drawMap(){
     map.save();map.translate(90+gx,90+gz);map.rotate(Math.PI/4);map.fillStyle='#ffd98a';map.strokeStyle='#3b2b0d';map.lineWidth=1.5;map.fillRect(-4.5,-4.5,9,9);map.strokeRect(-4.5,-4.5,9,9);map.restore();
   }
   // The guiding light shows the way on foot, where the diamond only gives the direction.
-  const light=inCity()&&story.guide;if(light){map.fillStyle='#bfefff';map.beginPath();map.arc(px(light.x),pz(light.z),3.2,0,Math.PI*2);map.fill();}
+  const light=guideLight.position;if(light){map.fillStyle='#bfefff';map.beginPath();map.arc(px(light.x),pz(light.z),3.2,0,Math.PI*2);map.fill();}
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i)||!shardPositions[i])continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
   map.fillStyle='#ff987d';for(const e of chapterTwo.combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
@@ -1308,7 +1385,8 @@ function animate(now){
     activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
-    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story,{active:screen==='game'});
+    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story);
+    updateGuideLight(dt,reducedMotion?0:time);
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
@@ -1338,7 +1416,7 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
@@ -1348,7 +1426,10 @@ try{
   // In the hero's hand by now nearly always, so its shader is ready before dusk
   // rather than built on the frame it first comes out.
   await Promise.race([flashlightModel,new Promise(resolve=>setTimeout(resolve,4000))]);
+  // The light too, hidden until it is first wanted, so it rises without a stall.
+  guideLight.root.visible=true;
   if(renderer.compileAsync)await Promise.race([renderer.compileAsync(scene,camera),new Promise(resolve=>setTimeout(resolve,8000))]);
+  guideLight.root.visible=guideLight.state!=='idle';
   window.astraReady=true;$('loading').classList.add('finished');setTimeout(()=>$('loading').hidden=true,600);
   lastFrame=performance.now();renderer.setAnimationLoop(animate);
   // The plaza's model, when the plaza is on, streams in behind the game rather

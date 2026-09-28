@@ -27,17 +27,19 @@ window.__STORY_TEST__ = {
     updateCamera(1);
     return window.__ASTRA_DEBUG__;
   },
+  // How long the camera has left to turn with the light.
+  turning: () => followLight,
   // The patrols put down, so that nothing cuts a walk short.
   quiet() { for (const e of enemies) { e.alive = false; e.respawn = 1e9; } },
   // Walks the hero after the guiding light, as a player would: turning the
   // view toward it, pressing ahead, and stopping a stride short. Once it has
   // gone in, the hero walks up to whoever it went into.
-  follow(on) {
+  follow(on, name = 'maren') {
     clearInterval(this.walking); joyX = joyY = 0; if (!on) return;
     this.walking = setInterval(() => {
-      const light = story.guide, maren = story.places.maren, target = light || maren;
+      const light = guideLight.position, goal = story.places[name], target = light || goal;
       const dx = target.x - position.x, dz = target.z - position.z, d = Math.hypot(dx, dz);
-      if (light ? d < 2.5 : Math.hypot(maren.x - position.x, maren.z - position.z) < 3.6) { joyX = joyY = 0; return; }
+      if (light ? d < 2.5 : Math.hypot(goal.x - position.x, goal.z - position.z) < 3.6) { joyX = joyY = 0; return; }
       const want = Math.atan2(-dx, -dz); yaw += Math.atan2(Math.sin(want - yaw), Math.cos(want - yaw)) * .2;
       joyX = (Math.cos(yaw) * dx - Math.sin(yaw) * dz) / d; joyY = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d;
     }, 40);
@@ -130,7 +132,8 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   expect((await snapshot(page)).story.step).toBe('keeper');
   await expect(page.locator('#quest-title')).toHaveText('The woman at the well');
   await expect(page.locator('#quest-count')).toHaveText('◇ MOONWELL');
-  expect((await snapshot(page)).story.guide.state).toBe('leading');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  expect((await snapshot(page)).guide.state).toBe('leading');
 
   await approach(page, 'maren', 'Speak with Maren');
   await expect(page.locator('#conversation-title')).toHaveText('Keeper of the Moonwell');
@@ -139,33 +142,41 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   expect(first.length).toBeGreaterThan(2);
   expect((await snapshot(page)).story.step).toBe('shards');
   await expect(page.locator('#quest-title')).toHaveText('A glimmer in the green');
-  // Its work done, the light goes out.
-  await expect.poll(async () => (await snapshot(page)).story.guide.state).toBe('idle');
+  // The light comes out of her and leads on, to the nearest shard.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toMatch(/^shards:\d+$/);
+  expect((await snapshot(page)).guide.state).toBe('leading');
 
   await page.evaluate(() => window.__STORY_TEST__.grant({ shards: 5 }));
   expect((await snapshot(page)).story.step).toBe('ferryman');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('ferryman:tobin');
   await approach(page, 'tobin', 'Speak with Tobin');
   expect(await hear(page, 'tobin')).toContain('Tobin');
   expect((await snapshot(page)).story.step).toBe('wisps');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toMatch(/^wisps:\d+$/);
 
   // The book can be looked at early, but it only gives up its last page once
   // Tobin has told the player about it.
   await page.evaluate(() => window.__STORY_TEST__.grant({ kills: 3 }));
   expect((await snapshot(page)).story.step).toBe('ledger');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('ledger:ledger');
   await approach(page, 'ledger', 'Read the keeper’s ledger');
   await hear(page, 'ledger');
   expect((await snapshot(page)).story.step).toBe('restore');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('restore:maren');
 
   // The finale: the well wakes, the Hart comes, the keeper goes home.
   await approach(page, 'maren', 'Give Maren the light');
   await hear(page, 'confession');
   await expect.poll(async () => (await snapshot(page)).story.restored).toBe(true);
+  // The light has no part in the finale.
+  expect((await snapshot(page)).guide.target).toBe(null);
   await expect(page.locator('#conversation')).toBeVisible({ timeout: 15000 });
   await shoot(page, 'hart');
   expect(await hear(page)).toEqual(expect.arrayContaining(['Maren']));
   await expect.poll(async () => (await snapshot(page)).story.departed, { timeout: 15000 }).toBe(true);
   await expect.poll(async () => (await snapshot(page)).story.finale).toBe(false);
   expect((await snapshot(page)).story.step).toBe('farewell');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('farewell:tobin');
   await page.evaluate(() => window.__STORY_TEST__.place('chest', 7));
   await page.waitForTimeout(800);
   await shoot(page, 'moonwell-lit');
@@ -177,6 +188,8 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   expect((await snapshot(page)).story.step).toBe('complete');
   await expect(page.locator('#quest-eyebrow')).toHaveText('CHAPTER TWO · THE DROWNED MERIDIAN');
   expect((await snapshot(page)).chapterTwo.step).toBe('summons');
+  // And into the next chapter, it leads on.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toMatch(/^summons:/);
 
   // The ending is kept: the keeper has gone, and the well stays lit.
   await page.reload();
@@ -184,6 +197,44 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   const after = (await snapshot(page)).story;
   expect(after).toMatchObject({ step: 'complete', restored: true, departed: true });
   expect(Object.values(after.flags).every(Boolean)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// The first minute teaches without a word. A beat after the newcomer steps
+// into the world, a light rises at their shoulder and the view turns with it
+// toward the notice board, where it waits; standing still, they are called.
+// Walking up, it goes into the board, and reading the board sets it free
+// again, out of the carving and on toward the keeper.
+test('a newcomer is led to the notice board and on by the light, without a word on screen', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The intro is played once, on desktop.');
+  test.setTimeout(process.env.CI ? 600000 : 240000);
+  const errors = await boot(page);
+  await page.evaluate(() => window.__STORY_TEST__.quiet());
+  await expect.poll(async () => (await snapshot(page)).guide.target, { timeout: 30000 }).toBe('notice:notice');
+  const rise = await snapshot(page);
+  expect(Math.hypot(rise.guide.position.x - rise.position.x, rise.guide.position.z - rise.position.z)).toBeLessThan(4);
+  expect(await page.evaluate(() => window.__STORY_TEST__.turning())).toBeGreaterThan(0);
+  // It goes on to the board and waits there, and calls to a hero who stands still.
+  const board = rise.story.places.notice;
+  await expect.poll(async () => { const { guide } = await snapshot(page); return Math.hypot(guide.position.x - board.x, guide.position.z - board.z); }, { timeout: 30000 }).toBeLessThan(3);
+  await expect.poll(async () => (await snapshot(page)).guide.calling, { timeout: 30000 }).toBeGreaterThan(.5);
+  await shoot(page, 'intro-calling');
+  // A few steps toward it, and it goes into the board.
+  await page.evaluate(() => window.__STORY_TEST__.follow(true, 'notice'));
+  await expect.poll(async () => (await snapshot(page)).guide.state, { timeout: 60000 }).toBe('done');
+  await expect(page.locator('#interaction-text')).toHaveText('Read the notice board', { timeout: 60000 });
+  await page.evaluate(() => window.__STORY_TEST__.follow(false));
+  await shoot(page, 'intro-board');
+  await page.keyboard.press('f');
+  await expect(page.locator('#conversation')).toBeVisible();
+  await hear(page);
+  // Out of the carving, and on toward the keeper, with the view turning to see it go.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  const out = await snapshot(page);
+  expect(Math.hypot(out.guide.position.x - board.x, out.guide.position.z - board.z)).toBeLessThan(7);
+  expect(await page.evaluate(() => window.__STORY_TEST__.turning())).toBeGreaterThan(0);
+  // Nothing on screen said to do any of it.
+  expect(await page.evaluate(() => window.__STORY_TEST__.toasts.filter(message => /follow|press|walk|read|notice board/i.test(message)))).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -197,23 +248,25 @@ test('after the notice board, the light leads the hero on foot to Maren', async 
   await page.evaluate(() => window.__STORY_TEST__.quiet());
   await approach(page, 'notice', 'Read the notice board');
   await hear(page, 'notice');
-  await expect.poll(async () => (await snapshot(page)).story.guide.state).toBe('leading');
-  await expect.poll(() => page.evaluate(() => window.__STORY_TEST__.toasts.some(message => /^Follow the light/.test(message)))).toBe(true);
-  const { total } = (await snapshot(page)).story.guide;
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  expect((await snapshot(page)).guide.state).toBe('leading');
+  // Shown the way, not told it.
+  expect(await page.evaluate(() => window.__STORY_TEST__.toasts.filter(message => /follow the light|press f|notice board/i.test(message)))).toEqual([]);
+  const { total } = (await snapshot(page)).guide;
   expect(total).toBeGreaterThan(20);
   await page.evaluate(() => window.__STORY_TEST__.follow(true));
   // The light stays close enough to follow all the way.
   let farthest = 0;
   await expect.poll(async () => {
-    const { story, position } = await snapshot(page);
-    if (story.guide.state === 'leading') farthest = Math.max(farthest, Math.hypot(story.guide.position.x - position.x, story.guide.position.z - position.z));
+    const { guide, position } = await snapshot(page);
+    if (guide.state === 'leading') farthest = Math.max(farthest, Math.hypot(guide.position.x - position.x, guide.position.z - position.z));
     return page.locator('#interaction-text').textContent();
   }, { timeout: process.env.CI ? 840000 : 240000, intervals: [500] }).toBe('Speak with Maren');
   await page.evaluate(() => window.__STORY_TEST__.follow(false));
   expect(farthest).toBeLessThan(16);
   await shoot(page, 'led-to-maren');
   // It goes into her, and is gone.
-  await expect.poll(async () => (await snapshot(page)).story.guide.state).toBe('done');
+  await expect.poll(async () => (await snapshot(page)).guide.state).toBe('done');
   expect((await snapshot(page)).story.step).toBe('keeper');
   expect(errors).toEqual([]);
 });

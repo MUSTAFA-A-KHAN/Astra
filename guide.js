@@ -3,10 +3,11 @@ import * as THREE from 'three';
 // A mote of light that shows the way on foot. It asks the world's navigator
 // for the walk, keeps a few strides ahead of whoever follows it along that
 // walk, and never leaves them behind: fall back and it stops and circles,
-// calling; wander off and it plans a new way from wherever they are. Once
-// they come within sight of the end, it spirals down into whatever it was
-// leading to and goes out. It is sprites alone, and no light, so showing it
-// never has a material rebuild its shader.
+// calling; stand still and, after a moment, it calls too; wander off and it
+// plans a new way from wherever they are. Once they come within sight of the
+// end, it spirals down into whatever it was leading to and goes out. It is
+// sprites alone, and no light, so showing it never has a material rebuild its
+// shader.
 //
 // Distances are in world units: the Reach stands about 1.9 to the metre.
 const LEAD = 9;      // how far along the way it keeps ahead of its follower
@@ -15,6 +16,13 @@ const STRAY = 16;    // how far off the way they can wander before it plans agai
 const ARRIVE = 9;    // how close to the end they come before it goes in
 const HOVER = 2.9;   // how high over the ground it rides: just above a head
 const TRAIL = 10;    // how many sparks follow it
+// A way across a whole map takes the navigator several milliseconds to find.
+// A follower who keeps wandering off is given a new one less and less often,
+// up to this many seconds apart, until they walk the one they were given.
+const REPLAN = 1.5, REPLAN_MAX = 6, FOLLOWED = 6;
+// A follower who makes no headway along the way is called after a moment,
+// for a few seconds at a time, and again every so often after that.
+const CALL_AFTER = 3, CALL_FOR = 6, CALL_EVERY = 20;
 
 export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArrive }) {
   const root = new THREE.Group(); root.name = 'Guiding light'; root.visible = false;
@@ -31,7 +39,7 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
   root.add(halo, core, ...sparks);
 
   let state = 'idle', way = [], lengths = [0], total = 0, along = 0, level = 0;
-  let hold = 0, sincePlan = 0, arrival = 0, ground = 0, sparkClock = 0, calling = 0, goal = null;
+  let hold = 0, sincePlan = 0, replanAfter = REPLAN, reached = 0, still = 0, arrival = 0, ground = 0, sparkClock = 0, calling = 0, goal = null;
   const at = new THREE.Vector3(), aim = new THREE.Vector3(), gap = new THREE.Vector3(), history = Array.from({ length: TRAIL }, () => new THREE.Vector3());
 
   // The walk from here to the goal, as straight legs; a straight line when
@@ -41,7 +49,7 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
     way = points?.length >= 2 ? points.map(({ x, z }) => ({ x, z })) : [{ x: from.x, z: from.z }, { x: goal.x, z: goal.z }];
     lengths = [0];
     for (let i = 1; i < way.length; i++) lengths.push(lengths[i - 1] + Math.hypot(way[i].x - way[i - 1].x, way[i].z - way[i - 1].z));
-    total = lengths.at(-1); along = 0; sincePlan = 0;
+    total = lengths.at(-1); along = 0; sincePlan = 0; reached = 0; still = 0;
   }
   function pointAt(distance) {
     let i = 1; while (i < way.length - 1 && lengths[i] < distance) i++;
@@ -68,10 +76,21 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
     ground = heightAt(from.x, from.z);
     at.set(from.x, from.y ?? ground + HOVER, from.z);
     for (const point of history) point.copy(at);
-    state = 'leading'; hold = 1.3; level = 0; arrival = 0; calling = 0; root.visible = true;
+    state = 'leading'; hold = 1.3; level = 0; arrival = 0; calling = 0; replanAfter = REPLAN; root.visible = true;
+  }
+  // Turns for a new goal from wherever it is, without going back to the
+  // follower's shoulder first: for a goal that has changed, or moved, while
+  // it was on its way. Out of sight, it sets off afresh from their shoulder.
+  function retarget(target, follower) {
+    if (state !== 'leading' && state !== 'arriving') { lead(target, { x: follower.x, y: (follower.y ?? heightAt(follower.x, follower.z)) + 3.2, z: follower.z }); return; }
+    goal = { x: target.x, y: target.y, z: target.z };
+    plan(follower);
+    state = 'leading'; arrival = 0;
   }
   // Fades out wherever it is, its work done or no longer wanted.
   function release() { if (state !== 'idle') state = 'leaving'; }
+  // Gone at once: for a follower carried off to another map.
+  function reset() { state = 'idle'; level = 0; calling = 0; goal = null; root.visible = false; }
 
   // `paused` holds it where it is: while its follower is talking to someone.
   function update(dt, time, player, { paused = false } = {}) {
@@ -83,12 +102,16 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
     let speed = 8;
     if (state === 'leading') {
       sincePlan += dt;
-      const { along: follower, off } = project(player);
-      if (off > STRAY && sincePlan > 1.5) plan(player);
+      let { along: follower, off } = project(player);
+      if (off > STRAY && sincePlan > replanAfter) { plan(player); replanAfter = Math.min(REPLAN_MAX, replanAfter * 2); follower = 0; }
+      // Headway counts only on the way, not level with it a street away.
+      if (off <= STRAY && follower > reached + .25) { reached = follower; still = 0; } else if (!paused && hold <= 0) still += dt;
+      if (reached > FOLLOWED) replanAfter = REPLAN;
       // Behind, it stops and calls; otherwise it keeps its lead, and never
-      // goes back along the way to meet a follower who has turned round.
-      const behind = away > LEASH;
-      calling += ((behind && hold <= 0 ? 1 : 0) - calling) * (1 - Math.exp(-3 * dt));
+      // goes back along the way to meet a follower who has turned round. A
+      // follower who stands still, or turns away, it calls more gently.
+      const behind = away > LEASH, waiting = still > CALL_AFTER && (still - CALL_AFTER) % CALL_EVERY < CALL_FOR;
+      calling += ((hold > 0 || paused ? 0 : behind ? 1 : waiting ? .7 : 0) - calling) * (1 - Math.exp(-3 * dt));
       if (hold > 0) hold -= dt;
       else if (!paused && !behind) along = Math.min(total, Math.max(along, follower + LEAD));
       if (hold > 0) {
@@ -109,7 +132,7 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
       const k = Math.min(1, arrival / 1.6), turn = arrival * 5, reach = 1.3 * (1 - k);
       aim.set(goal.x + Math.cos(turn) * reach, goal.y + (1 - k) * 1.2, goal.z + Math.sin(turn) * reach);
       speed = 10;
-      if (k >= 1) { state = 'done'; onArrive?.(); }
+      if (k >= 1) { state = 'done'; onArrive?.({ ...goal }); }
     }
     const distance = gap.subVectors(aim, at).length();
     if (distance > 1e-4) at.addScaledVector(gap, Math.min(distance * (1 - Math.exp(-4 * dt)), speed * dt) / distance);
@@ -126,10 +149,12 @@ export function createGuide({ route, heightAt, texture, color = '#9fe3ff', onArr
   }
 
   return {
-    root, lead, release, update,
+    root, lead, retarget, release, reset, update,
     get state() { return state; },
+    // Where it is leading, while it has somewhere to go.
+    get goal() { return state === 'idle' || !goal ? null : { ...goal }; },
     // Where it is, for the map, while it can be seen.
     get position() { return root.visible && level > .1 ? { x: at.x, y: at.y, z: at.z } : null; },
-    get diagnostics() { return { state, along: +along.toFixed(1), total: +total.toFixed(1), legs: way.length - 1, position: { x: +at.x.toFixed(1), y: +at.y.toFixed(1), z: +at.z.toFixed(1) } }; },
+    get diagnostics() { return { state, along: +along.toFixed(1), total: +total.toFixed(1), legs: way.length - 1, calling: +calling.toFixed(2), replanAfter, position: { x: +at.x.toFixed(1), y: +at.y.toFixed(1), z: +at.z.toFixed(1) } }; },
   };
 }

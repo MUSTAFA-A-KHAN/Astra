@@ -27,9 +27,11 @@ export const PEOPLE = {
 // nothing before it is asked for again. `where` names the place a step
 // without a count sends the player to.
 export const STEPS = [
-  // The first thing a newcomer is asked to do, and the one thing in reach: the
-  // board glows by the square, and reading it sets the light free to lead them
-  // on. Anyone who finds the keeper first has no need of it.
+  // The first thing a newcomer is asked to do, and the one thing in reach: a
+  // mote of the well's light rises at their shoulder and leads them to the
+  // board, glowing by the square, and goes into its carving; reading it sets
+  // the light free again to lead them on. Anyone who finds the keeper first
+  // has no need of it.
   { id: 'notice', where: 'NOTICE BOARD', title: 'News from the harbour', description: 'A notice board glows by the square where you arrived. Walk up to it and read it.', recap: 'On the harbour’s memorial you found a name carved deeper than the rest: Maren Ashdown, Keeper of the Moonwell.', done: p => p.story.notice || p.story.keeper || p.restored },
   { id: 'keeper', where: 'MOONWELL', title: 'The woman at the well', description: 'Someone is waiting at the Moonwell Sanctuary, out on the Red Mesa past the south jetty. Follow the light.', recap: 'Maren, the Keeper, asked you to gather the Moonwell’s scattered light.', done: p => p.story.keeper },
   { id: 'shards', title: 'A glimmer in the green', description: 'Gather 5 shards of the Moonwell’s light along the city streets.', recap: 'You gathered five shards of the old light.', goal: 5, count: p => p.collected.size, done: p => p.collected.size >= 5 || p.restored },
@@ -153,12 +155,12 @@ export const CONVERSATIONS = {
   },
 };
 CONVERSATIONS.ledger.restore = CONVERSATIONS.ledger.farewell = CONVERSATIONS.ledger.complete = { lines: CONVERSATIONS.ledger.ledger.lines };
-// Read before the keeper has been met, the last name on the memorial gives up
-// a mote of the well's light, which leads the way to her (guide.js); read
-// after, it is only a memorial.
+// Read before the keeper has been met, the last name on the memorial gives
+// back the mote of the well's light that led the player to it, and it leads
+// the way on to her (guide.js); read after, it is only a memorial.
 CONVERSATIONS.notice.notice = { sets: 'notice', lines: [
   ...CONVERSATIONS.notice.default.lines,
-  say(null, 'As your fingers find the letters, the carving gives up a mote of pale blue light. It hangs at your shoulder a moment, then drifts away along the street — and waits for you.'),
+  say(null, 'As your fingers find the letters, the pale blue light that led you here slips back out of the carving. It hangs at your shoulder a moment, then drifts away along the street — and waits for you.'),
 ] };
 // Whoever finds the keeper before the board is met by her all the same.
 CONVERSATIONS.maren.notice = CONVERSATIONS.maren.keeper;

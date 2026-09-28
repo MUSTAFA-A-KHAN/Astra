@@ -109,3 +109,63 @@ test('with no navigator, or no way found, it goes straight for its goal', () => 
     assert.equal(Math.round(guide.diagnostics.total), Math.round(Math.hypot(40, 40)));
   }
 });
+
+test('a follower who stands still is called after a moment, and then left in peace a while', () => {
+  const { guide, player } = setup();
+  const calls = [];
+  wait(guide, player, 12, g => calls.push(g.diagnostics.calling));
+  const at = s => calls[Math.round(s / dt)];
+  assert.ok(at(3) < .05, `not at once: ${at(3)}`);
+  assert.ok(at(7) > .5, `calling once they have stood a while: ${at(7)}`);
+  assert.ok(at(11.9) < .1, `and quiet again after a few seconds of it: ${at(11.9)}`);
+  // Walking on along the way hushes it at once.
+  wait(guide, player, 6);
+  walk(guide, player, { x: 12, z: 0 });
+  wait(guide, player, 1);
+  assert.ok(guide.diagnostics.calling < .1, `hushed by a follower on the move: ${guide.diagnostics.calling}`);
+});
+
+test('a follower who keeps wandering off is given a new way less and less often, until they walk it', () => {
+  const { guide, player, asked } = setup();
+  wait(guide, player, 2);
+  // Off exploring, straight away from the goal at a run, never walking the
+  // way they are given.
+  const plans = [];
+  for (let t = 0; t < 40; t += dt) {
+    player.set(0, 0, 20 + 4.7 * t);
+    const before = asked.length;
+    guide.update(dt, t, player);
+    if (asked.length > before) plans.push(t);
+  }
+  const gaps = plans.slice(1).map((t, i) => t - plans[i]);
+  // Every second and a half, this would have been two dozen.
+  assert.ok(plans.length >= 3 && plans.length <= 8, `planned ${plans.length} times in 40 s`);
+  assert.ok(gaps.at(-1) >= 6 - dt, `at most every six seconds once it has settled: ${gaps.at(-1)}`);
+  assert.ok(gaps.every((gap, i) => i === 0 || gap >= gaps[i - 1] - dt), `gaps widen: ${gaps.map(g => g.toFixed(1))}`);
+  assert.equal(guide.diagnostics.replanAfter, 6, 'up to the longest wait');
+  // Once they follow a new way for a few strides, it listens closely again.
+  const { length } = asked;
+  player.set(0, 0, 0); wait(guide, player, 6.5);
+  assert.equal(asked.length, length + 1);
+  walk(guide, player, { x: 10, z: 0 });
+  assert.equal(guide.diagnostics.replanAfter, 1.5);
+});
+
+test('given a new goal on its way, it turns for it from where it is', () => {
+  const { guide, player, asked } = setup();
+  wait(guide, player, 3);
+  const before = guide.position;
+  guide.retarget({ x: -30, y: 2, z: 0 }, player);
+  assert.deepEqual(asked.at(-1).to, { x: -30, y: 2, z: 0 });
+  guide.update(dt, 3, player);
+  const after = guide.position;
+  assert.ok(Math.hypot(after.x - before.x, after.z - before.z) < .5, 'no jump back to the follower');
+  assert.equal(guide.state, 'leading');
+  assert.deepEqual(guide.goal, { x: -30, y: 2, z: 0 });
+  // Out of sight, a new goal has it rise at the follower's shoulder instead.
+  guide.reset();
+  assert.equal(guide.state, 'idle'); assert.equal(guide.root.visible, false); assert.equal(guide.goal, null);
+  guide.retarget({ x: -30, y: 2, z: 0 }, player);
+  wait(guide, player, .5);
+  assert.ok(Math.hypot(guide.position.x - player.x, guide.position.z - player.z) < 2.5, JSON.stringify(guide.position));
+});

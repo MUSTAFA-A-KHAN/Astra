@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HARBOUR_LEVEL } from './world-map.js';
 import { disposeMapResources } from './map-resources.js';
-import { createGuide } from './guide.js';
 import { fit, meshes, materialsOf, shadows, softTexture, footprints } from './model-fit.js';
 
 // The Last Keeper, stood up in the Reach: the Moonwell and its keeper in the
@@ -370,17 +369,15 @@ export function createStory({ world, activities, collision }) {
     part.call = { group, board, halo, pool, mark, height, rings, level: 0 };
     return part;
   }
-  // Once the board has been read, a mote of the well's light leads the way
-  // from it to the keeper, until she has been met. Reaching her, it goes into
-  // her, and she glows with it a moment.
-  let flare = 0;
-  const guide = createGuide({ route: (from, to) => world.route?.(from, to), heightAt: ground, texture: softTexture(), onArrive: () => { flare = 1; } });
-  root.add(guide.root);
+  // The Keeper's light (game.js) leads the way to whoever the story waits on.
+  // What it goes into glows with it a moment: the keeper, whose cold light
+  // flares, and the notice board, whose papers blaze.
+  const flares = { maren: 0, notice: 0 };
+  const glow = person => { if (!disposed && person in flares) flares[person] = 1; };
   const turn = (object, target, dt, rate = 5) => { object.rotation.y += Math.atan2(Math.sin(target - object.rotation.y), Math.cos(target - object.rotation.y)) * (1 - Math.exp(-rate * dt)); };
 
-  // `flags` are the story's own, as the save keeps them. `active` is false
-  // while the world stands behind a menu, where nobody is there to be led.
-  function update(dt, time, player, step, flags = {}, { active = true } = {}) {
+  // `flags` are the story's own, as the save keeps them.
+  function update(dt, time, player, step, flags = {}) {
     if (disposed) return;
     // Nobody out of sight is animated: they pick up where they left off.
     for (const part of Object.values(parts)) if (part.mixer && part.model.parent?.visible) part.mixer.update(dt);
@@ -419,9 +416,9 @@ export function createStory({ world, activities, collision }) {
       call.level += (wanted - call.level) * (1 - Math.exp(-(wanted ? 1.2 : 3) * dt));
       if (!wanted && call.level < .01) call.level = 0;
       call.group.visible = call.level > 0;
-      const breath = .5 + .5 * Math.sin(time * 2.6);
-      for (const material of call.board) material.emissiveIntensity = call.level * (.5 + .7 * breath);
-      call.halo.material.opacity = call.level * (.45 + .35 * breath);
+      const breath = .5 + .5 * Math.sin(time * 2.6), blaze = flares.notice ** 2;
+      for (const material of call.board) material.emissiveIntensity = call.level * (.5 + .7 * breath + 1.2 * blaze);
+      call.halo.material.opacity = call.level * Math.min(1, .45 + .35 * breath + .4 * blaze);
       call.pool.material.opacity = call.level * (.35 + .3 * breath);
       call.mark.position.y = call.height + Math.sin(time * 2.2) * .1 * M;
       call.mark.scale.setScalar(Math.max(.01, call.level));
@@ -431,21 +428,11 @@ export function createStory({ world, activities, collision }) {
         ring.material.opacity = call.level * .9 * Math.min(1, k * 8) * (1 - k) ** 1.5;
       }
     }
-    // The light sets out from the board the moment it has been read. When a
-    // game is picked up with the keeper still unmet, or the player wanders far
-    // from her once it has gone in, it comes to their shoulder instead.
-    const leading = active && step === 'keeper' && flags.notice && !departed;
-    if (!leading) guide.release();
-    else if (!talking && (guide.state === 'idle' || (guide.state === 'done' && Math.hypot(player.x - places.maren.x, player.z - places.maren.z) > 30))) {
-      const atBoard = Math.hypot(player.x - places.notice.x, player.z - places.notice.z) < RANGE.notice + 2;
-      guide.lead({ x: places.maren.x, y: places.maren.y + 1.1 * M, z: places.maren.z },
-        atBoard ? { x: places.notice.x, y: places.notice.y + 1.3 * M, z: places.notice.z } : { x: player.x, y: player.y + 3.2, z: player.z });
+    if (flares.maren > 0) {
+      flares.maren = Math.max(0, flares.maren - dt / 1.8);
+      for (const material of parts.maren?.glow ?? []) material.emissiveIntensity = .28 + 1.1 * flares.maren ** 2;
     }
-    guide.update(dt, time, player, { paused: !!talking });
-    if (flare > 0) {
-      flare = Math.max(0, flare - dt / 1.8);
-      for (const material of parts.maren?.glow ?? []) material.emissiveIntensity = .28 + 1.1 * flare * flare;
-    }
+    flares.notice = Math.max(0, flares.notice - dt / 1.8);
     // The board has a mark of its own.
     const goal = talking || step === 'notice' ? null : objective(step);
     beacon.visible = !!goal;
@@ -453,13 +440,11 @@ export function createStory({ world, activities, collision }) {
   }
 
   return {
-    root, places, stream, shard, nearby, objective, update, awaken, depart, setState,
+    root, places, stream, shard, nearby, objective, update, awaken, depart, setState, glow,
     get talking() { return talking; }, set talking(person) { if (!disposed) talking = person; },
-    // Where the guiding light is, for the map, while it can be seen.
-    get guide() { return disposed ? null : guide.position; },
     get diagnostics() {
       return {
-        restored, departed, talking, disposed, loaded: Object.keys(loaded), guide: guide.diagnostics,
+        restored, departed, talking, disposed, loaded: Object.keys(loaded),
         places: Object.fromEntries(Object.entries(places).map(([name, p]) => [name, { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) }])),
       };
     },
