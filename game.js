@@ -17,9 +17,6 @@ import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } fro
 import { createConversationDirector } from './conversation-cinematic.js';
 import { portalRoute, portalConversation, SPELL_TAKES } from './portal-script.js';
 import { VOICES } from './voice-manifest.js';
-import { setupTelegramOrientation } from './telegram.js';
-
-setupTelegramOrientation();
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
