@@ -14,6 +14,8 @@ import { softTexture } from './model-fit.js';
 import { CHAPTER, PEOPLE, STEPS, INTRO, storyStep, readStory, conversation, whisper } from './story-script.js';
 import { CHAPTER_TWO, CHAPTER_TWO_STEPS, CHAPTER_TWO_PEOPLE, readChapterTwo, chapterTwoStep, chapterTwoConversation } from './chapter-two-script.js';
 import { createChapterTwo } from './chapter-two-world.js';
+import { CHAPTER_THREE, CHAPTER_THREE_STEPS, CHAPTER_THREE_PEOPLE, readChapterThree, chapterThreeStep, chapterThreeConversation, chapterThreeUnlocked as canStartChapterThree } from './chapter-three-script.js';
+import { createChapterThree } from './chapter-three-world.js';
 import { createPortal, PORTAL_ENTRY, PORTAL_FOOTPRINT, PORTAL_REACH } from './portal-world.js';
 import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } from './portal-cinematic.js';
 import { createConversationDirector } from './conversation-cinematic.js';
@@ -31,9 +33,11 @@ const saved = readSave();
 const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v, min, max) : fallback;
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0) : []), story: readStory(saved) };
 progress.chapterTwo = readChapterTwo(saved);
+progress.chapterThree = readChapterThree(saved);
 const chapterTwoUnlocked = () => progress.restored && progress.story.farewell;
-const currentChapter = () => chapterTwoUnlocked() ? CHAPTER_TWO : CHAPTER;
-const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, portalBook: { name: 'The keeper’s spellbook', color: '#bceee6', read: true } };
+const chapterThreeUnlocked = () => canStartChapterThree(progress);
+const currentChapter = () => chapterThreeUnlocked() ? CHAPTER_THREE : chapterTwoUnlocked() ? CHAPTER_TWO : CHAPTER;
+const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, ...CHAPTER_THREE_PEOPLE, portalBook: { name: 'The keeper’s spellbook', color: '#bceee6', read: true } };
 let portalJourney = null;
 // Where the player has put each on-screen control, as a fraction of
 // the viewport: a phone that rotates, or a window that resizes, keeps
@@ -85,7 +89,7 @@ let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, vict
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, map: world.activeMap || 'city', hero: heroMeta.id })); dirtySave = false; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, chapterThree: progress.chapterThree, map: world.activeMap || 'city', hero: heroMeta.id })); dirtySave = false; }
   catch { /* Private browsing and full storage must never stop play. */ }
 }
 // A toast marked `after` waits for the one on screen instead of replacing it:
@@ -157,14 +161,21 @@ const activities = await createGameplayWorld(scene, world, collision);
 // starts; who stands where is known already, so they can be spoken to at once.
 let story = createStory({ world, activities, collision });
 scene.add(story.root); story.setState({ restored: progress.restored });
-const currentStep = () => chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
-const questIndex = () => chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
+const currentStep = () => chapterThreeUnlocked() ? chapterThreeStep(progress.chapterThree) : chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
+const questIndex = () => chapterThreeUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.length + CHAPTER_THREE_STEPS.indexOf(currentStep()) : chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
 const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterTwo, storyPlaces: story.places, isUnlocked: chapterTwoUnlocked,
   onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); react('Cheer'); if(flag==='warden'){victoryTime=10;audio.play('victory');} },
   onMessage: message => toast(message),
   onDamage: amount => { if(hurtTimer>0)return; health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
 });
 scene.add(chapterTwo.root);
+const chapterThree = createChapterThree({ world, collision, state: progress.chapterThree, sites: chapterTwo.places, isUnlocked: chapterThreeUnlocked,
+  onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); react('Cheer'); if(flag==='boss'||flag==='complete'){victoryTime=12;audio.play('victory');} },
+  onMessage: message => toast(message),
+  onDamage: amount => { if(hurtTimer>0)return;health=Math.max(0,health-amount);hurtTimer=.8;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();updateHUD(); },
+});
+scene.add(chapterThree.root);
+const activeTrials = () => chapterThreeUnlocked() ? chapterThree : chapterTwo;
 const portal = createPortal({ world, collision, reducedMotion }); scene.add(portal.root);
 const inCity = () => !world.activeMap || world.activeMap === 'city';
 const cityExtraColliders = new Map();
@@ -177,7 +188,7 @@ const CITY_PORTAL = { x: 95, z: -100.5 };
 function portalClearance(x, z) {
   let clear = PORTAL_REACH;
   while (clear > 0 && !world.isWalkable(x, z, clear)) clear -= .5;
-  const sites = [world.spawn, ...Object.values(chapterTwo.places), ...(inCity() ? Object.values(story.places) : [])];
+  const sites = [world.spawn, ...Object.values(chapterTwo.places), ...Object.values(chapterThree.places), ...(inCity() ? Object.values(story.places) : [])];
   for (const p of sites) clear = Math.min(clear, Math.hypot(p.x - x, p.z - z));
   for (const c of collision.query(x - clear, z - clear, x + clear, z + clear)) {
     if (/^(city|portal)-/.test(c.id)) continue;
@@ -219,7 +230,7 @@ function placePortal() {
   portal.setPhase('dormant');
 }
 placePortal();
-const questObjective = () => chapterTwoUnlocked() ? (currentStep().map !== (world.activeMap || 'city') ? portal.places.book : chapterTwo.objective()) : story.objective(currentStep().id);
+const questObjective = () => chapterTwoUnlocked() ? (currentStep().map !== (world.activeMap || 'city') ? portal.places.book : activeTrials().objective()) : story.objective(currentStep().id);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 // A ridden horse keeps its own heading and wheels round rather than turning on the spot.
 const reins = new MountSteering();
@@ -338,7 +349,11 @@ function updateHUD(){
   const index=questIndex(),step=currentStep(),complete=step.id==='complete',chapter=currentChapter();
   $('quest-eyebrow').textContent=`${chapter.eyebrow} · ${chapter.title.toUpperCase()}`;
   const card=document.querySelector('.journey-card');
-  if(chapterTwoUnlocked()&&card.dataset.chapter!=='two'){
+  if(chapterThreeUnlocked()&&card.dataset.chapter!=='three'){
+    card.dataset.chapter='three';card.querySelector('.eyebrow').textContent=CHAPTER_THREE.eyebrow;
+    card.querySelector('h2').textContent=CHAPTER_THREE.title;card.querySelector('p').textContent=CHAPTER_THREE.intro;
+    card.querySelector('.location-tag').textContent='THE ASHEN OBSERVATORY';
+  }else if(!chapterThreeUnlocked()&&chapterTwoUnlocked()&&card.dataset.chapter!=='two'){
     card.dataset.chapter='two';card.querySelector('.eyebrow').textContent='CHAPTER TWO';
     card.querySelector('h2').textContent=CHAPTER_TWO.title;
     card.querySelector('p').textContent='A stolen voice. Three ancient locks. Follow the tide from Pine Islet to the old pumping yard and face the Hollow Warden.';
@@ -347,7 +362,7 @@ function updateHUD(){
   const value=step.goal?Math.min(step.goal,step.count(progress)):complete?1:0;
   $('quest-title').textContent=step.title;$('quest-description').textContent=step.description;
   const status=$('chapter-status');status.hidden=!chapterTwoUnlocked()||complete;
-  if(!status.hidden){const goal=chapterTwo.objective(),distance=goal?Math.round(Math.hypot(goal.x-position.x,goal.z-position.z)):0;status.textContent=chapterTwo.status||`${step.where} · ${distance} paces · follow the gold map marker`;}
+  if(!status.hidden){const goal=questObjective(),distance=goal?Math.round(Math.hypot(goal.x-position.x,goal.z-position.z)):0;status.textContent=currentStep().map!==(world.activeMap||'city')?'Read the portal book · follow the guiding light':activeTrials().status||`${step.where} · ${distance} paces · follow the gold map marker`;}
   $('quest-count').textContent=step.goal?`${value} / ${step.goal}`:complete?'COMPLETE':`◇ ${step.where}`;$('quest-fill').style.width=`${step.goal?value/step.goal*100:complete?100:0}%`;
   // Held back through the finale, so it lands after the keeper has gone.
   if(index!==shownStep&&!finale){
@@ -362,7 +377,7 @@ function attack(special=false){
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
   const range=special?heroMeta.range+5:heroMeta.range,damage=(special?heroMeta.damage*2:heroMeta.damage)+(level()-1)*3;
   let nearest=null,best=range;
-  for(const e of [...enemies,...chapterTwo.combatants]){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
+  for(const e of [...enemies,...activeTrials().combatants]){if(!e.alive)continue;const d=Math.hypot(e.group.position.x-position.x,e.group.position.z-position.z);if(d<best){nearest=e;best=d;}}
   if(lockTarget?.alive && position.distanceTo(lockTarget.group.position)<range)nearest=lockTarget;
   if(aiming&&!special&&nearest){const dx=nearest.group.position.x-position.x,dz=nearest.group.position.z-position.z;if((-Math.sin(yaw)*dx-Math.cos(yaw)*dz)/Math.max(.01,Math.hypot(dx,dz))<.82)nearest=null;}
   if(nearest && (Math.abs(nearest.group.position.y-position.y)>4 || collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(nearest.group.position.x,nearest.group.position.y+1.8,nearest.group.position.z),.1)<.98))nearest=null;
@@ -379,7 +394,7 @@ function attack(special=false){
       if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;react('Cheer');}
     }
   }
-  const trialHit=chapterTwo.attack({position,range,damage,special,target:nearest,lineOfSight:(a,b)=>collision.cameraFraction(new THREE.Vector3(a.x,a.y+1.8,a.z),new THREE.Vector3(b.x,b.y+1.8,b.z),.1)>.98});
+  const trialHit=activeTrials().attack({position,range,damage,special,target:nearest,lineOfSight:(a,b)=>collision.cameraFraction(new THREE.Vector3(a.x,a.y+1.8,a.z),new THREE.Vector3(b.x,b.y+1.8,b.z),.1)>.98});
   if(trialHit.hits){audio.play('hit',{position,volume:.6});showPulse(position.x,position.z,range,heroMeta.color);}
   if(special){showPulse(position.x,position.z,range,heroMeta.color);if(heroMeta.id==='warden'){health=Math.min(100,health+20);updateHUD();}}
   else if(nearest){targetPoint.copy(nearest.group.position);direction.copy(targetPoint).sub(position).add(new THREE.Vector3(0,-1.6,0));bolt.position.copy(position).add(new THREE.Vector3(0,1.6,0)).addScaledVector(direction,.5);bolt.scale.set(1,direction.length(),1);bolt.quaternion.setFromUnitVectors(up,direction.normalize());bolt.material.color.set(heroMeta.color);boltAge=0;}
@@ -388,14 +403,17 @@ function attack(special=false){
 }
 function nearbyInteraction(){
   if(portalJourney)return null;
-  const book = portal.nearby(position); if(book)return book;
-  if(!inCity())return chapterTwo.nearby(position);
+  const book = portal.nearby(position);
+  const shared = chapterThreeUnlocked() ? chapterThree.nearby(position) : null;
+  if(shared&&(!book||Math.hypot(position.x-shared.x,position.z-shared.z)<Math.hypot(position.x-portal.places.book.x,position.z-portal.places.book.z)))return shared;
+  if(book)return book;
+  if(!inCity())return activeTrials().nearby(position);
   if(activities.mount.mounted)return {type:'mount',label:'Dismount'};
   if(locomotion.climbing)return {type:'climb',label:'Let go of ladder'};
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
   const ladder=activities.climbables.find(c=>Math.hypot(position.x-c.x,position.z-c.z)<(c.r||1.8)&&position.y<c.top+.5);
   if(ladder)return {type:'climb',label:'Climb lookout · forward / back',ladder};
-  if(!finale){const trial=chapterTwo.nearby(position);if(trial)return trial;const person=story.nearby(position,STEPS[storyStep(progress)].id);if(person)return person;}
+  if(!finale){const trial=activeTrials().nearby(position);if(trial)return trial;const person=story.nearby(position,STEPS[storyStep(progress)].id);if(person)return person;}
   if(activities.crates.some(c=>position.distanceTo(c.position)<2.8))return {type:'push',label:'Push supply crate'};
   return null;
 }
@@ -403,6 +421,13 @@ function interact(){
   if(screen!=='game'||dialog.open||chat||portalJourney)return;
   const action=nearbyInteraction();if(!action)return;
   if(action.type==='portal'){readPortalBook();return;}
+  if(action.type==='chapterThree'){
+    if(action.id===closed.person&&performance.now()-closed.at<400)return;
+    const result=chapterThree.interact(action);
+    if(result?.person){const entry=chapterThreeConversation(result.person,progress.chapterThree);if(entry)begin(result.person,entry.lines,()=>{chapterThree.hear(result.person,entry.sets);updateHUD();});}
+    else if(result){avatar.rotation.y=Math.atan2(action.x-position.x,action.z-position.z);perform('Interact');}
+    sound();updateHUD();return;
+  }
   if(action.type==='chapterTwo'){
     if(action.id===closed.person&&performance.now()-closed.at<400)return;
     const result=chapterTwo.interact(action);
@@ -474,7 +499,7 @@ const lightHeight=place=>(place.y??groundHeight(place.x,place.z))+(place.face??(
 function lightTarget(){
   if(screen!=='game'||!hero||portalJourney||finale||contextLost)return null;
   if(chapterTwoUnlocked()){
-    if(chapterTwo.combatants.some(e=>e.alive))return null;
+    if(activeTrials().combatants.some(e=>e.alive))return null;
     const step=currentStep(),goal=questObjective();
     return goal&&{key:`${step.id}:${Math.round(goal.x)},${Math.round(goal.z)}`,x:goal.x,y:lightHeight(goal),z:goal.z};
   }
@@ -530,7 +555,7 @@ function talk(person){
   begin(person,entry.lines,()=>heard(entry));
 }
 function begin(person,lines,onEnd){
-  const place=person==='portalBook'?portal.places.book:chapterTwo.places[person]||story.places[person]||story.places.maren;
+  const place=person==='portalBook'?portal.places.book:chapterThree.places[person]||chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
   // The film is shot round the two of them: the hero's eyes, and the face or page of whatever they face.
@@ -757,7 +782,7 @@ async function arriveThroughPortal(arrival) {
     chapterTwo.places.chart=story.places.tobin;chapterTwo.places.seal=story.places.maren;
     story.stream({prepare:prepareModel}).catch(error=>console.warn('The story models did not load.',error));
   }
-  chapterTwo.syncMap();placePortal();
+  chapterTwo.syncMap();chapterThree.syncMap();placePortal();
   // The light is left behind on the old map, and rises afresh on the new one.
   guideLight.reset();lightFor=lightIn=null;lightWelcome=true;
   spawn.set(arrival.x,arrival.y,arrival.z);position.copy(spawn);avatar.position.copy(position);stage.position.copy(spawn);
@@ -817,7 +842,7 @@ function toggleLock(){
   if(screen!=='game'||dialog.open||chat)return;
   if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
   else{
-    lockTarget=[...enemies,...chapterTwo.combatants].filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
+    lockTarget=[...enemies,...activeTrials().combatants].filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
     if(!lockTarget)toast('No visible target within range.');
   }
   aiming=cinematic=false;syncCameraControls();
@@ -1104,14 +1129,15 @@ function openMenu(type){
     $('control-transparency').oninput=e=>{preferences.controlOpacity=clamp(1-Number(e.target.value),CONTROL_OPACITY.min,CONTROL_OPACITY.max);applyControlLook();showControlLook();save();};
     $('layout-edit').onclick=()=>{closeDialog();editLayout(true);};
   }else if(type==='journal'){
-    const second=chapterTwoUnlocked(),steps=second?CHAPTER_TWO_STEPS:STEPS,index=second?steps.indexOf(currentStep()):storyStep(progress);
+    const third=chapterThreeUnlocked(),second=chapterTwoUnlocked(),steps=third?CHAPTER_THREE_STEPS:second?CHAPTER_TWO_STEPS:STEPS,index=second?steps.indexOf(currentStep()):storyStep(progress);
     const entries=(list,at)=>list.slice(0,at+1).map((step,i)=>{
       const done=i<at,detail=done?step.recap:step.description;
       return '<div class="journal-entry"><span>'+ (done?'✓':'◇') +'</span><div><h3>'+step.title+'</h3><p>'+detail+'</p>'+(!done&&step.goal?'<div class="journal-reward">'+Math.min(step.goal,step.count(progress))+' / '+step.goal+'</div>':!done&&step.where?'<div class="journal-reward">◇ '+step.where+'</div>':'')+'</div></div>';
     }).join('');
-    content.innerHTML='<p class="dialog-copy">'+(second?CHAPTER_TWO.intro:INTRO)+'</p>'+
-      (second?'<div class="chapter-route">CITY → PINE ISLET → SKIBIDI YARD → MOONWELL</div>':'')+
-      entries(steps,index)+(second&&chapterTwo.status?'<p class="dialog-copy">'+chapterTwo.status+'</p>':'')+
+    content.innerHTML='<p class="dialog-copy">'+(second?currentChapter().intro:INTRO)+'</p>'+
+      (second?'<div class="chapter-route">CITY → PINE ISLET → SKIBIDI YARD → '+(third?'ASHEN OBSERVATORY → ':'')+'MOONWELL</div>':'')+
+      entries(steps,index)+(second&&activeTrials().status?'<p class="dialog-copy">'+activeTrials().status+'</p>':'')+
+      (third?'<details class="previous-chapter"><summary>✓ Chapter Two · The Drowned Meridian</summary>'+entries(CHAPTER_TWO_STEPS.slice(0,-1),CHAPTER_TWO_STEPS.length)+'</details>':'')+
       (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
       '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';
   }else{
@@ -1124,6 +1150,7 @@ $('settings-button').onclick=()=>openMenu('settings');$('nav-journal').onclick=$
 
 function respawnPlayer(){
   chapterTwo.resetChallenge();
+  chapterThree.resetChallenge();
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
   followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
   enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
@@ -1202,7 +1229,7 @@ function updatePlayer(dt){
     if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
   }
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
-  const threat=nearestThreat<10||combatMemory>0||chapterTwo.combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
+  const threat=nearestThreat<10||combatMemory>0||activeTrials().combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
   audio.setPaused(false);
   audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':region(),state:locomotion.state,mounted}, {sources:activities.sources,threat});
   syncCameraControls();
@@ -1361,8 +1388,8 @@ function drawMap(){
   const light=guideLight.position;if(light){map.fillStyle='#bfefff';map.beginPath();map.arc(px(light.x),pz(light.z),3.2,0,Math.PI*2);map.fill();}
   map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i)||!shardPositions[i])continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
   map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
-  map.fillStyle='#ff987d';for(const e of chapterTwo.combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
-  map.strokeStyle='#9fe8ed';map.lineWidth=1.5;for(const p of chapterTwo.mapTargets){map.beginPath();map.arc(px(p.x),pz(p.z),3.5,0,Math.PI*2);map.stroke();}
+  map.fillStyle='#ff987d';for(const e of activeTrials().combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
+  map.strokeStyle='#9fe8ed';map.lineWidth=1.5;for(const p of activeTrials().mapTargets){map.beginPath();map.arc(px(p.x),pz(p.z),3.5,0,Math.PI*2);map.stroke();}
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
 }
 
@@ -1389,6 +1416,8 @@ function animate(now){
     updateGuideLight(dt,reducedMotion?0:time);
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
+    chapterThree.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney&&!dialog.open});
+    chapterThree.root.visible=chapterThreeUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
     flashlight.update(dt,{facing:avatar.rotation.y,camera});
@@ -1398,7 +1427,7 @@ function animate(now){
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length??0};
-  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard',nightwood:'Nightwood Road',mesa:'Red Mesa'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD',nightwood:'WOODS',mesa:'MESA'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
+  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard',nightwood:'Nightwood Road',mesa:'Red Mesa',observatory:'Ashen Observatory'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD',nightwood:'WOODS',mesa:'MESA',observatory:'OBSERVATORY'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
   if(preferences.quality==='auto'&&frameSamples>150&&time-lastAdapt>8&&frameMS>25){if(quality==='high')applyQuality('balanced',true);else if(quality==='balanced')applyQuality('low',true);else if(resolutionScale>.7){resolutionScale=Math.max(.7,resolutionScale-.1);applyQuality('low',true);}frameSamples=0;}
@@ -1416,9 +1445,9 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
-  const resumeMap=saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
+  const resumeMap=chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:DEFAULT_HERO);
   if(!hero)await selectHero('warden');

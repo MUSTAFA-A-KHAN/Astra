@@ -2,6 +2,8 @@
 
 Unlocked after **What the ferryman saw**, the final conversation of Chapter One. Speak to Tobin again at the west jetty to begin. Existing completed saves unlock the new chapter automatically.
 
+After returning the Tidewarden’s voice, [Chapter Three — The Shared Flame](CHAPTER-THREE.md) begins at the meridian seal beside the Moonwell.
+
 The Moonwell's light has exposed three locks imprisoning the Tidewarden's voice. Tobin returns Maren's keeper book and reveals the spells for the sleeping portals. The journey follows three maps in order: **City → Pine Islet → Skibidi Yard → City**, then returns to the Moonwell for its ending.
 
 | Mission | Map | Challenge |

@@ -1,9 +1,14 @@
 import { readStory } from './story-script.js';
 import { readChapterTwo } from './chapter-two-script.js';
+import { chapterThreeUnlocked, readChapterThree } from './chapter-three-script.js';
 
 // The keeper's book chooses the next passage from the saved story. Combat
 // abilities and proximity alone can never provide a portal incantation.
 const PASSAGES = Object.freeze({
+  observatory: Object.freeze({
+    destination: 'observatory', mapName: 'The Ashen Observatory', title: 'The forgotten passage',
+    spell: 'By hands that share and hearts that know, reveal the shore lost long ago.',
+  }),
   forest: Object.freeze({
     destination: 'forest', mapName: 'Pine Islet', title: 'The root passage',
     spell: 'By Maren\'s light and keeper\'s word, wake the path the roots have heard.',
@@ -29,6 +34,11 @@ export function portalRoute(progress = {}, activeMap = 'city') {
   if (progress?.restored !== true) return locked('The book\'s passage remains dark. Restore the Moonwell with Maren before awakening a portal.');
   if (!story.farewell) return locked('The book asks you to finish Maren\'s promise. Tell Tobin what happened at the Moonwell.');
   if (!chapter.accepted) return locked('The portal has no destination yet. Read Tobin\'s tide chart at the west jetty to reveal the first passage.');
+  const third = readChapterThree(progress);
+  if (chapterThreeUnlocked(progress)) {
+    if (activeMap === 'yard' && third.relay) return { ...PASSAGES.observatory, lockedReason: null };
+    if (activeMap === 'observatory') return { ...PASSAGES.city, lockedReason: null };
+  }
 
   let destination;
   if (activeMap === 'city') destination = 'forest';
