@@ -5,7 +5,7 @@ import { createPortalWorld } from '../portal-map-world.js';
 import { disposeMapResources } from '../map-resources.js';
 
 function makeDistrict(map) {
-  const [x, z, size, y] = map === 'city' ? [20, -20, 240, .45] : map === 'forest' ? [-115, 8, 60, 2] : [175, 175, 100, 1];
+  const [x, z, size, y] = map === 'city' ? [20, -20, 240, .45] : map === 'forest' ? [-115, 8, 60, 2] : map === 'street' ? [-400, -320, 160, 3] : [175, 175, 100, 1];
   const root = new THREE.Group();
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial());
   mesh.name = 'ground'; mesh.position.set(x, y, z); root.add(mesh);
@@ -21,11 +21,32 @@ function makeDistrict(map) {
 }
 function fixture() {
   const calls = [], records = [], scene = new THREE.Scene();
-  const loaders = Object.fromEntries(['city', 'forest', 'yard'].map(map => [map, async () => {
+  const loaders = Object.fromEntries(['city', 'forest', 'yard', 'street'].map(map => [map, async () => {
     calls.push(map); const district = makeDistrict(map); records.push(district); return district;
   }]));
   return { calls, records, loaders, scene };
 }
+
+test('Street City loads on demand, replaces collision terrain and releases resources on return', async () => {
+  const f = fixture();
+  const world = await createPortalWorld(f.scene, { loaders: f.loaders });
+  assert.deepEqual(f.calls, ['city']);
+  const arrival = await world.travelTo('street');
+  assert.equal(world.activeMap, 'street');
+  assert.equal(world.diagnostics.streetReachable, true);
+  assert.deepEqual(world.diagnostics.assets, ['street.glb']);
+  assert.equal(world.biomeAt(arrival.x, arrival.z), 'street');
+  assert.equal(world.isWalkable(arrival.x, arrival.z, 1), true);
+  assert.ok(Math.abs(world.getHeight(arrival.x, arrival.z) - 3) < 1e-6);
+  assert.deepEqual(world.diagnostics.residentMaps, ['street']);
+  assert.equal(f.records[0].disposed.geometry, 1);
+  await world.travelTo('city');
+  assert.equal(world.diagnostics.streetReachable, false);
+  assert.deepEqual(f.calls, ['city', 'street', 'city']);
+  assert.equal(f.records[1].disposed.geometry, 1);
+  assert.equal(f.records[1].disposed.material, 1);
+  world.dispose();
+});
 
 test('only the city loads initially; a prepared crossing replaces terrain and every navigation delegate', async () => {
   const f = fixture();

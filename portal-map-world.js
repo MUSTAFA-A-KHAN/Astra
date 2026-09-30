@@ -6,9 +6,10 @@ import { createStreetLights } from './street-lights.js';
 import { createStreamer } from './streaming.js';
 import { disposeMapResources } from './map-resources.js';
 import { OBSERVATORY_ARRIVAL } from './observatory-world.js';
+import { STREET_ARRIVAL } from './street-world.js';
 
 const WATERLINE = -6.65;
-const ARRIVALS = { city: CITY_ARRIVAL, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL };
+const ARRIVALS = { city: CITY_ARRIVAL, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL, street: STREET_ARRIVAL };
 const CITY_SHARDS = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30]];
 const within = (bounds, x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
 // The Moonwell's sanctuary stands out on the Red Mesa's eastern sands, along
@@ -21,6 +22,7 @@ const districtLoaders = {
   forest: options => import('./forest-world.js').then(({ loadForestDistrict }) => loadForestDistrict(options)),
   yard: options => import('./skibidi-world.js').then(({ loadYardDistrict }) => loadYardDistrict(options)),
   observatory: options => import('./observatory-world.js').then(({ loadObservatoryDistrict }) => loadObservatoryDistrict(options)),
+  street: options => import('./street-world.js').then(({ loadStreetDistrict }) => loadStreetDistrict(options)),
 };
 
 // `mesa` is where the jetty comes off onto the mesa, when the navigator can
@@ -120,6 +122,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get streaming() { return streaming.diagnostics; },
     get forestReachable() { return active?.map === 'forest'; },
     get yardReachable() { return active?.map === 'yard'; },
+    get streetReachable() { return active?.map === 'street'; },
     get mesaReachable() { return active?.map === 'city' && active.mesaReachable; },
     plazaReachable: false, woodReachable: false,
   };

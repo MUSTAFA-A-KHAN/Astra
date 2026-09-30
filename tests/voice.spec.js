@@ -29,7 +29,7 @@ window.__VOICE_TEST__ = {
     const at = portal.places.reading;
     resetInput(); position.set(at.x, groundHeight(at.x, at.z), at.z); locomotion.reset(); avatar.position.copy(position);
   },
-  read() { if (!chat) readPortalBook(); return !!portalJourney; },
+  read() { if (!chat) readPortalBook(portalRoute(progress,world.activeMap).destination); return !!portalJourney; },
   phase: () => portalJourney?.phase ?? null,
   clock: () => time,
 };

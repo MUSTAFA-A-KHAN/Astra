@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { portalRoute, portalConversation } from '../portal-script.js';
+import { portalRoute, portalChoices, portalConversation } from '../portal-script.js';
 import { readStory } from '../story-script.js';
 import { readChapterTwo } from '../chapter-two-script.js';
 
@@ -97,4 +97,76 @@ test('every passage requires a visible book reading before its distinct spoken s
   const locked = portalRoute({}, 'city');
   assert.deepEqual(portalConversation(locked), { lines: [[null, locked.lockedReason]] });
   assert.ok(portalConversation(null).lines.length > 0);
+});
+
+test('Street City is an optional book passage with a homeward return', () => {
+  const progress = ready();
+  const street = portalRoute(progress, 'city', 'street');
+  assert.equal(street.destination, 'street');
+  assert.equal(street.mapName, 'Street City');
+  assert.equal(street.lockedReason, null);
+  assert.equal(portalRoute(progress, 'city').destination, 'forest');
+  assert.equal(portalRoute(progress, 'city', 'forest').destination, 'forest');
+  assert.deepEqual(portalChoices(progress, 'city'), [portalRoute(progress, 'city'), street]);
+  assert.equal(portalRoute(progress, 'street').destination, 'city');
+  assert.equal(portalRoute(progress, 'street', 'city').destination, 'city');
+  assert.deepEqual(portalChoices(progress, 'street'), [portalRoute(progress, 'street')]);
+  const conversation = portalConversation(street);
+  assert.match(conversation.lines[0][1], /keeper's ledger/);
+  assert.ok(conversation.lines.some(([, text]) => text.includes('Street City')));
+  assert.deepEqual(conversation.lines.at(-1), ['you', street.spell, 'incantation']);
+  assert.notEqual(street.spell, portalRoute(progress, 'city').spell);
+});
+
+test('both Street City passages require every basic book prerequisite', () => {
+  for (const key of ['ledger', 'restored', 'farewell', 'accepted']) {
+    const progress = ready();
+    if (key === 'restored') progress.restored = false;
+    else if (key === 'accepted') progress.chapterTwo.accepted = false;
+    else progress.story[key] = false;
+    for (const [source, destination] of [['city', 'street'], ['street', 'city']]) {
+      const route = portalRoute(progress, source, destination);
+      assert.equal(route.destination, null, `${source} requires ${key}`);
+      assert.equal(route.spell, null);
+      assert.ok(route.lockedReason);
+      assert.deepEqual(portalChoices(progress, source), []);
+    }
+  }
+});
+
+test('destination requests cannot skip chapter locks or invent passages', () => {
+  const progress = ready();
+  assert.match(portalRoute(progress, 'forest', 'street').lockedReason, /root lock/);
+  assert.match(portalRoute(progress, 'yard', 'city').lockedReason, /Tidewarden/);
+  assert.deepEqual(portalChoices(progress, 'forest'), []);
+  assert.deepEqual(portalChoices(progress, 'yard'), []);
+  completeTrials(progress);
+  for (const [source, destination] of [
+    ['city', 'yard'], ['city', 'observatory'], ['city', 'unknown'], ['city', null],
+    ['forest', 'street'], ['yard', 'street'], ['street', 'forest'], ['street', 'street'],
+    ['street', 'unknown'], ['unknown', 'street'],
+  ]) {
+    const route = portalRoute(progress, source, destination);
+    assert.equal(route.destination, null, `${source} cannot request ${destination}`);
+    assert.equal(route.spell, null);
+    assert.ok(route.lockedReason);
+  }
+  assert.deepEqual(portalChoices(progress, 'forest'), [portalRoute(progress, 'forest')]);
+  assert.deepEqual(portalChoices(progress, 'yard'), [portalRoute(progress, 'yard')]);
+  assert.deepEqual(portalChoices(progress, 'unknown'), []);
+});
+
+test('Street City choices survive reloads and leave story progression untouched', () => {
+  const progress = ready();
+  const saved = JSON.stringify(progress);
+  const reloaded = JSON.parse(saved);
+  Object.freeze(reloaded.story);
+  Object.freeze(reloaded.chapterTwo);
+  Object.freeze(reloaded);
+  assert.deepEqual(portalChoices(reloaded, 'city'), portalChoices(progress, 'city'));
+  assert.equal(portalRoute(reloaded, 'city', 'street').destination, 'street');
+  assert.equal(portalRoute(reloaded, 'street').destination, 'city');
+  assert.equal(portalRoute(reloaded, 'city').destination, 'forest');
+  assert.equal(JSON.stringify(reloaded), saved);
+  assert.equal(reloaded.chapterTwo.roots, false);
 });

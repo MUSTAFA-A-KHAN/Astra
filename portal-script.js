@@ -21,23 +21,32 @@ const PASSAGES = Object.freeze({
     destination: 'city', mapName: 'The Moonwell City', title: 'The homeward passage',
     spell: 'Voice returned and lantern bright, carry us home to the keeper\'s light.',
   }),
+  street: Object.freeze({
+    destination: 'street', mapName: 'Street City', title: 'The city passage',
+    spell: 'By lantern glow and keeper\'s key, let distant streets unfold for me.',
+  }),
 });
 
 const locked = reason => ({
   destination: null, mapName: null, title: 'The sleeping portal', spell: null, lockedReason: reason,
 });
 
-export function portalRoute(progress = {}, activeMap = 'city') {
+export function portalRoute(progress = {}, activeMap = 'city', requestedDestination) {
   const story = readStory(progress);
   const chapter = readChapterTwo(progress);
   if (!story.ledger) return locked('Only the keeper\'s book can awaken this portal. Find and read Maren\'s ledger at the Wanderer\'s Camp.');
   if (progress?.restored !== true) return locked('The book\'s passage remains dark. Restore the Moonwell with Maren before awakening a portal.');
   if (!story.farewell) return locked('The book asks you to finish Maren\'s promise. Tell Tobin what happened at the Moonwell.');
   if (!chapter.accepted) return locked('The portal has no destination yet. Read Tobin\'s tide chart at the west jetty to reveal the first passage.');
+  const select = passage => requestedDestination === undefined || requestedDestination === passage.destination
+    ? { ...passage, lockedReason: null }
+    : locked('The keeper\'s book has not revealed that passage from this district.');
+  if (activeMap === 'city' && requestedDestination === 'street') return select(PASSAGES.street);
+  if (activeMap === 'street') return select(PASSAGES.city);
   const third = readChapterThree(progress);
   if (chapterThreeUnlocked(progress)) {
-    if (activeMap === 'yard' && third.relay) return { ...PASSAGES.observatory, lockedReason: null };
-    if (activeMap === 'observatory') return { ...PASSAGES.city, lockedReason: null };
+    if (activeMap === 'yard' && third.relay) return select(PASSAGES.observatory);
+    if (activeMap === 'observatory') return select(PASSAGES.city);
   }
 
   let destination;
@@ -52,7 +61,13 @@ export function portalRoute(progress = {}, activeMap = 'city') {
     destination = 'city';
   } else return locked('No keeper passage answers from this district.');
 
-  return { ...PASSAGES[destination], lockedReason: null };
+  return select(PASSAGES[destination]);
+}
+
+export function portalChoices(progress = {}, activeMap = 'city') {
+  const route = portalRoute(progress, activeMap);
+  if (!route.destination) return [];
+  return activeMap === 'city' ? [route, portalRoute(progress, activeMap, 'street')] : [route];
 }
 
 // The reading ends on the spell itself, so the gate answers the moment it is
