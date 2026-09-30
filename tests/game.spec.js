@@ -17,7 +17,7 @@ async function start(page) {
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 
-test('the three standing districts load offline and the roster and menus remain usable', async ({ page }) => {
+test('the city loads offline without portal destinations and the roster and menus remain usable', async ({ page }) => {
   const districtResponses = [];
   const districtFailures = [];
   const district = url => ['/City_Set_-_Proto_Series/', '/forest-loner-diorama/', '/plaza-night-time/', '/map-79-void/', '/map/'].some(folder => url.includes(folder));
@@ -35,35 +35,33 @@ test('the three standing districts load offline and the roster and menus remain 
   expect(districtResponses.some(response => response.path.endsWith('.gltf'))).toBe(true);
   expect(districtResponses.some(response => response.path.endsWith('.bin'))).toBe(true);
   expect(districtResponses.some(response => response.path.endsWith('.png'))).toBe(true);
-  // The diorama ships as one file: its textures travel inside the binary.
-  expect(districtResponses.some(response => response.path.endsWith('.glb'))).toBe(true);
   expect(districtResponses.some(response => /\.fbx(\.br)?$/i.test(response.path))).toBe(false);
-  // The yard is packed into one file, and never reaches for the supplied glTF it was built from.
-  expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(true);
+  // Portal destinations wait until the player crosses to them.
+  expect(districtResponses.some(response => response.path.includes('/forest-loner-diorama/'))).toBe(false);
+  expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(false);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
   // The plaza and the Nightwood are off until the player turns them on: no model, footprint or module of theirs is fetched.
   expect(districtResponses.some(response => response.path.includes('/map/a_forest_3') || response.path.includes('/plaza-night-time/'))).toBe(false);
   expect(requested.some(path => /\/(plaza-world|plaza-lighting|plaza-light-sources|nightwood-world)\.js$/.test(path))).toBe(false);
-  // The Red Mesa always comes with the city: the Moonwell stands on it.
-  expect(districtResponses.some(response => response.path.endsWith('/map/worldmachine_terrain.glb'))).toBe(true);
+  // Neither Red Mesa's terrain module nor its model is requested at startup.
+  expect(requested).not.toContain('/mesa-world.js');
+  expect(districtResponses.some(response => response.path.endsWith('/map/worldmachine_terrain.glb'))).toBe(false);
   expect(districtResponses.every(response => response.status === 200)).toBe(true);
   const { terrain } = await snapshot(page);
   expect(terrain.ready).toBe(true);
   expect(terrain.provider).toBe('astra-world-map');
   expect(terrain.asset).toContain('City_Set_-_Proto_Series.gltf');
-  expect(terrain.assets).toHaveLength(3);
+  expect(terrain.assets).toHaveLength(1);
+  expect(terrain.residentMaps).toEqual(['city']);
   expect(terrain.triangleCount).toBeGreaterThan(500_000);
   expect(terrain.meshCount).toBeGreaterThan(0);
   expect(terrain.colliderCount).toBeGreaterThan(0);
-  // The island is only a place if the jetty reaches it from the city's spawn.
-  expect(terrain.forestReachable).toBe(true);
-  // And the yard's pier only if the south jetty does.
-  expect(terrain.yardReachable).toBe(true);
+  expect(terrain.forestReachable).toBe(false);
+  expect(terrain.yardReachable).toBe(false);
   // There is no east jetty and no plaza to reach, no north jetty and no Nightwood.
   expect(terrain.plazaReachable).toBe(false);
   expect(terrain.woodReachable).toBe(false);
-  // The mesa is only a place if its jetty reaches it from the street.
-  expect(terrain.mesaReachable).toBe(true);
+  expect(terrain.mesaReachable).toBe(false);
   // Every street lantern in the city model is found and given light.
   expect(terrain.streetLights.lanterns).toBeGreaterThan(100);
   const rosterCount = await page.evaluate(async () => (await import('/characters.js')).HEROES.length);

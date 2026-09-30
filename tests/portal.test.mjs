@@ -13,9 +13,9 @@ const completeTrials = progress => {
   for (const flag of ['roots', 'bells', 'valves', 'vigil', 'warden']) progress.chapterTwo[flag] = true;
 };
 
-test('the first passage requires the book, restored Moonwell, farewell and accepted chapter', () => {
+test('the forest passage requires the book, restored Moonwell, farewell and accepted chapter', () => {
   for (const progress of [undefined, null, {}]) {
-    const route = portalRoute(progress, 'city');
+    const route = portalRoute(progress, 'city', 'forest');
     assert.equal(route.destination, null);
     assert.match(route.lockedReason, /book/);
   }
@@ -27,7 +27,7 @@ test('the first passage requires the book, restored Moonwell, farewell and accep
     if (key === 'restored') progress.restored = false;
     else if (key === 'accepted') progress.chapterTwo.accepted = false;
     else progress.story[key] = false;
-    const route = portalRoute(progress, 'city');
+    const route = portalRoute(progress, 'city', 'forest');
     assert.equal(route.destination, null, key);
     assert.equal(route.spell, null, key);
     assert.match(route.lockedReason, expected, key);
@@ -64,9 +64,9 @@ test('completed saves allow the exploration circuit and still require the book',
   progress.chapterTwo.complete = true;
   const reloaded = JSON.parse(JSON.stringify(progress));
   for (const [source, destination] of [['city', 'forest'], ['forest', 'yard'], ['yard', 'city']]) {
-    assert.equal(portalRoute(reloaded, source).destination, destination);
+    assert.equal(portalRoute(reloaded, source, destination).destination, destination);
     const withoutBook = { ...reloaded, story: { ...reloaded.story, ledger: false } };
-    assert.equal(portalRoute(withoutBook, source).destination, null, `${source} needs the book even after the ending`);
+    assert.equal(portalRoute(withoutBook, source, destination).destination, null, `${source} needs the book even after the ending`);
   }
   assert.deepEqual(reloaded, progress, 'route selection leaves the save untouched');
 });
@@ -74,8 +74,8 @@ test('completed saves allow the exploration circuit and still require the book',
 test('legacy completed chapter-one saves retain the keeper book after accepting the chart', () => {
   const legacy = { restored: true, chapterTwo: { accepted: true } };
   assert.equal(portalRoute(legacy, 'city').destination, 'forest');
-  assert.equal(portalRoute({ restored: true }, 'city').destination, null, 'legacy saves still need the new chapter');
-  assert.equal(portalRoute(ready(), 'mesa').destination, null);
+  assert.equal(portalRoute({ restored: true }, 'city', 'forest').destination, null, 'legacy saves still need the new chapter');
+  assert.equal(portalRoute(ready(), 'mesa').destination, 'city');
 });
 
 test('every passage requires a visible book reading before its distinct spoken spell', () => {
@@ -94,7 +94,7 @@ test('every passage requires a visible book reading before its distinct spoken s
     spells.add(route.spell);
   }
   assert.equal(spells.size, 3);
-  const locked = portalRoute({}, 'city');
+  const locked = portalRoute({}, 'city', 'forest');
   assert.deepEqual(portalConversation(locked), { lines: [[null, locked.lockedReason]] });
   assert.ok(portalConversation(null).lines.length > 0);
 });
@@ -107,7 +107,7 @@ test('Street City is an optional book passage with a homeward return', () => {
   assert.equal(street.lockedReason, null);
   assert.equal(portalRoute(progress, 'city').destination, 'forest');
   assert.equal(portalRoute(progress, 'city', 'forest').destination, 'forest');
-  assert.deepEqual(portalChoices(progress, 'city'), [portalRoute(progress, 'city'), street]);
+  assert.deepEqual(portalChoices(progress, 'city'), [portalRoute(progress, 'city'), portalRoute(progress, 'city', 'mesa'), street]);
   assert.equal(portalRoute(progress, 'street').destination, 'city');
   assert.equal(portalRoute(progress, 'street', 'city').destination, 'city');
   assert.deepEqual(portalChoices(progress, 'street'), [portalRoute(progress, 'street')]);
@@ -129,7 +129,7 @@ test('both Street City passages require every basic book prerequisite', () => {
       assert.equal(route.destination, null, `${source} requires ${key}`);
       assert.equal(route.spell, null);
       assert.ok(route.lockedReason);
-      assert.deepEqual(portalChoices(progress, source), []);
+      assert.deepEqual(portalChoices(progress, source), source === 'city' ? [portalRoute(progress, 'city', 'mesa')] : []);
     }
   }
 });
@@ -169,4 +169,25 @@ test('Street City choices survive reloads and leave story progression untouched'
   assert.equal(portalRoute(reloaded, 'city').destination, 'forest');
   assert.equal(JSON.stringify(reloaded), saved);
   assert.equal(reloaded.chapterTwo.roots, false);
+});
+
+
+test('the sanctuary book allows a first visit and return without skipping later chapter locks', () => {
+  for (const progress of [undefined, null, {}, { story: { notice: true } }, { restored: true }]) {
+    const toMesa = portalRoute(progress, 'city');
+    assert.equal(toMesa.destination, 'mesa');
+    assert.equal(toMesa.mapName, 'Red Mesa');
+    assert.ok(toMesa.spell);
+    assert.deepEqual(portalChoices(progress, 'city'), [toMesa]);
+    assert.equal(portalRoute(progress, 'mesa').destination, 'city');
+    assert.equal(portalRoute(progress, 'city', 'street').destination, null);
+    assert.equal(portalRoute(progress, 'city', 'forest').destination, null);
+    assert.equal(portalRoute(progress, 'mesa', 'forest').destination, null);
+  }
+  const progress = ready(), saved = JSON.stringify(progress);
+  assert.equal(portalRoute(progress, 'city', 'mesa').destination, 'mesa');
+  assert.equal(portalRoute(progress, 'city').destination, 'forest');
+  assert.equal(JSON.stringify(progress), saved);
+  completeTrials(progress);
+  assert.equal(portalRoute(progress, 'city').destination, 'mesa', 'the voice returns to the Moonwell');
 });

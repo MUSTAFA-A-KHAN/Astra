@@ -6,14 +6,23 @@ const probe = `
 renderer.setAnimationLoop(null);
 window.__CHAPTER_TEST__ = {
   place(id) {
-    const p=chapterTwo.places[id],offset=p.facing===undefined?0:3.4;
+    const p=id==='keeper-spellbook'?portal.places.reading:chapterTwo.places[id],offset=id==='keeper-spellbook'||p.facing===undefined?0:3.4;
     position.set(p.x+Math.sin(p.facing||0)*offset,p.y,p.z+Math.cos(p.facing||0)*offset);
-    locomotion.reset();avatar.position.copy(position);resetInput();
+    locomotion.reset();avatar.position.copy(position);resetInput();closed.at=0;
     chapterTwo.update(0,time,position,{active:false});
     const near=nearbyInteraction();$('interaction-hint').hidden=!near;
     if(near)$('interaction-text').textContent=near.label;
     updateHUD();followCamera.reset(position,0,.5,16);updateCamera(1);renderer.render(scene,camera);
     return near;
+  },
+  async finishCrossing() {
+    for(let i=0;i<1200&&portalJourney;i++){
+      time+=.05;portal.update(.05,time);updatePortalJourney(.05);
+      await new Promise(resolve=>setTimeout(resolve,5));
+    }
+    if(portalJourney)throw Error('Portal did not finish: '+portalJourney.phase);
+    chapterTwo.update(0,time,position,{active:false});updateHUD();drawMap();
+    renderer.render(scene,camera);return world.activeMap;
   },
   tick(seconds,active=true) {
     for(let elapsed=0;elapsed<seconds;elapsed+=.05){time+=.05;hurtTimer=Math.max(0,hurtTimer-.05);attackTimer=Math.max(0,attackTimer-.05);chapterTwo.update(.05,time,position,{active});}
@@ -27,7 +36,7 @@ window.__CHAPTER_TEST__ = {
   },
   retreat() {const p=chapterTwo.places.warden;position.set(p.x-12,p.y,p.z);},
   fallen() {respawnPlayer();updateHUD();},
-  sites() {return Object.entries(chapterTwo.places).map(([id,p])=>({id,map:world.biomeAt(p.x,p.z),walkable:world.isWalkable(p.x,p.z,.52)}));},
+  sites() {return Object.entries(chapterTwo.places).filter(([id])=>id!=='chart'&&id!=='seal').map(([id,p])=>({id,map:world.biomeAt(p.x,p.z),walkable:world.isWalkable(p.x,p.z,.52)}));},
 };
 `;
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
@@ -53,16 +62,27 @@ async function read(page,id){
   }else await page.keyboard.press('Escape');
   await expect(page.locator('#conversation')).toBeHidden();
 }
+async function travel(page,map){
+  await use(page,'keeper-spellbook');
+  if(await page.locator('#menu-dialog').isVisible())await page.locator(`[data-portal-destination="${map}"]`).click();
+  await expect(page.locator('#conversation')).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page.locator('#conversation')).toBeHidden();
+  expect(await page.evaluate(()=>window.__CHAPTER_TEST__.finishCrossing())).toBe(map);
+  expect((await snapshot(page)).terrain.residentMaps).toEqual([map]);
+}
+async function expectSites(page,map,ids){
+  const sites=await page.evaluate(()=>window.__CHAPTER_TEST__.sites());
+  expect(sites.map(site=>site.id).sort()).toEqual([...ids].sort());
+  for(const site of sites)expect(site,site.id).toMatchObject({map,walkable:true});
+}
 const chapterOneDone={restored:true,kills:3,collected:[0,1,2,3,4],story:{keeper:true,ferryman:true,ledger:true,farewell:true,notice:true}};
 
-test('Chapter Two waits for Tobin’s farewell and keeps its trials on their own maps',async({page})=>{
+test('Chapter Two waits for Tobin’s farewell and leaves distant trials unloaded in the city',async({page})=>{
   test.setTimeout(180000);const errors=await boot(page);
   await expect(page.locator('#quest-eyebrow')).toContainText('CHAPTER ONE');
   expect((await state(page)).unlocked).toBe(false);
-  const sites=await page.evaluate(()=>window.__CHAPTER_TEST__.sites());
-  for(const id of ['rootTablet','root','rain','moon'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'forest',walkable:true});
-  // Every trial after the islet's runes stands in Map 79's yard.
-  for(const id of ['bellTablet','dusk','tide','dawn','valvePanel','valve1','valve2','valve3','beacon','warden'])expect(sites.find(p=>p.id===id)).toMatchObject({map:'yard',walkable:true});
+  expect((await snapshot(page)).terrain.residentMaps).toEqual(['city']);
+  await expectSites(page,'city',[]);
   expect(errors).toEqual([]);
 });
 
@@ -70,11 +90,15 @@ test('The Drowned Meridian plays through puzzles, retries, waves, boss and saved
   test.setTimeout(300000);const errors=await boot(page,chapterOneDone);
   await expect(page.locator('#quest-eyebrow')).toHaveText('CHAPTER TWO · THE DROWNED MERIDIAN');
   await read(page,'chart');expect((await state(page)).step).toBe('roots');
+  await travel(page,'forest');
+  await expectSites(page,'forest',['rootTablet','root','rain','moon']);
   await read(page,'rootTablet');
   await page.screenshot({path:`test-results/chapter-two-${test.info().project.name}-forest.png`});
   await use(page,'rain');expect((await state(page)).runeIndex).toBe(0);
   for(const id of ['root','rain','moon'])await use(page,id);
   expect((await state(page)).step).toBe('bells');
+  await travel(page,'yard');
+  await expectSites(page,'yard',['bellTablet','dusk','tide','dawn','valvePanel','valve1','valve2','valve3','beacon','warden']);
   await read(page,'bellTablet');
   await page.screenshot({path:`test-results/chapter-two-${test.info().project.name}-bells.png`});
   await use(page,'dawn');expect((await state(page)).bellIndex).toBe(0);
@@ -107,11 +131,15 @@ test('The Drowned Meridian plays through puzzles, retries, waves, boss and saved
   await expect(page.locator('#chapter-status')).toContainText('SHIELD DOWN');
   for(let attacks=0;attacks<60&&(await state(page)).step==='warden';attacks++)await page.evaluate(()=>window.__CHAPTER_TEST__.hit());
   expect((await state(page)).step).toBe('homecoming');
+  await travel(page,'city');await travel(page,'mesa');
+  await expectSites(page,'mesa',[]);
   await read(page,'seal');expect((await state(page)).step).toBe('complete');
-  await expect(page.locator('#quest-count')).toHaveText('COMPLETE');
-  await page.locator('#journal-button').click();await expect(page.locator('#dialog-content')).toContainText('The sea remembers your name');
+  await expect(page.locator('#quest-eyebrow')).toHaveText('CHAPTER THREE · THE SHARED FLAME');
+  await expect(page.locator('#quest-title')).toHaveText('A light in every hand');
+  await page.locator('#journal-button').click();await expect(page.locator('#dialog-content')).toContainText('Chapter Two · The Drowned Meridian');
   await page.screenshot({path:'test-results/chapter-two-complete.png'});
   await page.reload();await page.waitForFunction(()=>window.astraReady&&window.__CHAPTER_TEST__,null,{timeout:120000});
   expect((await state(page)).step).toBe('complete');expect((await snapshot(page)).story.restored).toBe(true);
+  expect((await snapshot(page)).terrain.activeMap).toBe('mesa');
   expect(errors).toEqual([]);
 });

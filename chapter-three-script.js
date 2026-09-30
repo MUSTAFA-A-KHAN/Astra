@@ -23,7 +23,7 @@ export function chapterThreeUnlocked(progress = {}) {
 }
 
 export const CHAPTER_THREE_STEPS = [
-  { id: 'summons', map: 'city', where: 'MOONWELL', title: 'A light in every hand',
+  { id: 'summons', map: 'mesa', where: 'MOONWELL', title: 'A light in every hand',
     description: 'Listen at the meridian seal beside the Moonwell. The Tidewarden has remembered what the keepers left behind.',
     recap: 'The Tidewarden asked you to rekindle a shared flame, so no keeper would have to stand watch alone.' },
   { id: 'memories', map: 'forest', where: 'PINE ISLET', title: 'Those who kept the watch',
@@ -47,10 +47,10 @@ export const CHAPTER_THREE_STEPS = [
   { id: 'boss', map: 'observatory', where: 'THE STAR CHAMBER', title: 'Break the Unwritten',
     description: 'Challenge the Unwritten at the central star chamber. Escape or jump its red pulse, then attack its exposed gold heart. At two-thirds and one-third health, destroy its echo guards to break their shield.',
     recap: 'The Unwritten broke apart. Ilyra and Oren’s island returned to the Reach’s memory.' },
-  { id: 'homecoming', map: 'city', where: 'MOONWELL', title: 'The watch belongs to everyone',
+  { id: 'homecoming', map: 'mesa', where: 'MOONWELL', title: 'The watch belongs to everyone',
     description: 'Read the observatory portal book and cast the homeward spell. Return to the meridian seal beside the Moonwell and share the flame with the Reach.',
     recap: 'The Reach took up the watch together. Maren’s light became a beginning, no longer a burden.' },
-  { id: 'complete', map: 'city', where: 'THE VERDANT REACH', title: 'A thousand small beginnings',
+  { id: 'complete', map: 'mesa', where: 'THE VERDANT REACH', title: 'A thousand small beginnings',
     description: 'The shared flame burns from the roots to the harbour. The portals remain open, and the Reach is yours to explore.',
     recap: 'You gave the Reach a light that belongs to everyone.' },
 ];

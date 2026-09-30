@@ -15,7 +15,7 @@ import { createStreamer } from './streaming.js';
 // of the yard. This module places them, joins them with jetties, and hands the
 // game a single piece of ground that spans them all. With portal travel on,
 // the game walks one map at a time instead (portal-map-world.js), and the city
-// always comes with the Red Mesa: see loadCityAndMesa.
+// and Red Mesa each load only when their portal is crossed.
 export const HARBOUR_LEVEL = -6.65;
 // The crossing west: a boardwalk on the pavement's line, high enough to step
 // over the harbour wall, running out to the island's clearing.
@@ -356,35 +356,6 @@ function createNightwoodJetty(wood) {
     group, landing, inland,
     terrain: { layout: group, ground:/jetty-deck|jetty-ramp/, walkable: Infinity },
     opening: { x: landing.x, z: (quay + inland.z) / 2, w: width - 1.2, d: quay - inland.z },
-  };
-}
-
-// The city as portal travel carries it: with the Red Mesa moored off its south
-// quay and the jetty across to it, since the Moonwell stands out on the mesa's
-// sands. The portal world takes the three as one district, read by one
-// navigator and streamed together; the city's own bounds and the mesa's still
-// tell the two apart for the HUD, the sky and the ambience.
-export async function loadCityAndMesa({ lowPower = false, waterline = HARBOUR_LEVEL } = {}) {
-  const [city, butte] = await Promise.all([
-    loadCityDistrict({ lowPower }),
-    import('./mesa-world.js').then(({ loadMesaDistrict }) => loadMesaDistrict({ lowPower, waterline })),
-  ]);
-  const jetty = createMesaJetty(butte);
-  const root = new THREE.Group(); root.name = 'City and Red Mesa'; root.add(city.root, butte.root, jetty.group);
-  return {
-    root, lanterns:city.lanterns, materials:city.materials, asset:city.asset, assets:[city.asset, butte.asset],
-    bounds: {
-      minX: Math.min(city.bounds.minX, butte.bounds.minX), maxX: Math.max(city.bounds.maxX, butte.bounds.maxX),
-      minZ: Math.min(city.bounds.minZ, butte.bounds.minZ), maxZ: Math.max(city.bounds.maxZ, butte.bounds.maxZ),
-    },
-    regions: [{ biome:'city', bounds:city.bounds }, { biome:'mesa', bounds:butte.bounds }],
-    meshes: [...city.meshes, ...butte.meshes, jetty.group],
-    terrains: [city.terrain, butte.terrain, jetty.terrain], openings: [jetty.opening],
-    // Where the jetty comes off onto the plain: the mesa is only worth placing
-    // things on if the navigator can walk there from the city.
-    mesaInland: jetty.inland,
-    setTime(daylight) { city.setTime(daylight); },
-    setQuality(low) { city.setQuality(low); butte.setQuality(low); },
   };
 }
 

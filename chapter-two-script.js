@@ -61,13 +61,13 @@ export const CHAPTER_TWO_STEPS = [
     recap: 'The Hollow Warden\'s iron shell broke apart, freeing the Tidewarden\'s stolen voice.',
   },
   {
-    id: 'homecoming', map: 'city', where: 'MOONWELL',
+    id: 'homecoming', map: 'mesa', where: 'MOONWELL',
     title: 'A promise with no keeper',
     description: 'Read the book at the yard\'s portal and cast the homeward spell. Bring the Tidewarden\'s voice to the meridian seal beside the Moonwell. Let the Reach hear the promise it forgot.',
     recap: 'The three locks opened into one promise: no soul would have to keep the light alone again.',
   },
   {
-    id: 'complete', map: 'city', where: 'MOONWELL',
+    id: 'complete', map: 'mesa', where: 'MOONWELL',
     title: 'The sea remembers your name',
     description: 'The meridian is whole. From Pine Islet to the pumping yard, the lights answer one another across the water.',
     recap: 'You returned the Tidewarden\'s voice and joined the Reach\'s scattered lights.',

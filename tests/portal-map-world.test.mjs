@@ -5,7 +5,7 @@ import { createPortalWorld } from '../portal-map-world.js';
 import { disposeMapResources } from '../map-resources.js';
 
 function makeDistrict(map) {
-  const [x, z, size, y] = map === 'city' ? [20, -20, 240, .45] : map === 'forest' ? [-115, 8, 60, 2] : map === 'street' ? [-400, -320, 160, 3] : [175, 175, 100, 1];
+  const [x, z, size, y] = map === 'city' ? [20, -20, 240, .45] : map === 'forest' ? [-115, 8, 60, 2] : map === 'mesa' ? [0, 180, 240, 5] : map === 'street' ? [-400, -320, 160, 3] : [175, 175, 100, 1];
   const root = new THREE.Group();
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial());
   mesh.name = 'ground'; mesh.position.set(x, y, z); root.add(mesh);
@@ -21,7 +21,7 @@ function makeDistrict(map) {
 }
 function fixture() {
   const calls = [], records = [], scene = new THREE.Scene();
-  const loaders = Object.fromEntries(['city', 'forest', 'yard', 'street'].map(map => [map, async () => {
+  const loaders = Object.fromEntries(['city', 'mesa', 'forest', 'yard', 'street'].map(map => [map, async () => {
     calls.push(map); const district = makeDistrict(map); records.push(district); return district;
   }]));
   return { calls, records, loaders, scene };
@@ -141,4 +141,43 @@ test('map disposal frees shared GPU resources once and closes each decoded image
   assert.deepEqual({ geometries, materials, textures, images }, { geometries: 1, materials: 1, textures: 2, images: 1 });
   assert.equal(texture.source.data, null);
   assert.equal(root.children.length, 0);
+});
+
+
+test('Red Mesa stays unloaded until crossing and releases geometry, textures and navigation on return', async () => {
+  const f = fixture(), world = await createPortalWorld(f.scene, { loaders: f.loaders });
+  assert.deepEqual(f.calls, ['city']);
+  assert.deepEqual(world.diagnostics.assets, ['city.glb']);
+  assert.equal(world.diagnostics.mesaReachable, false);
+  const shrine = world.landmarks.find(place => place.id === 'shrine');
+  assert.equal(shrine.map, 'mesa');
+  assert.equal(world.root.getObjectByName('Moonwell Sanctuary'), undefined);
+  const arrival = await world.travelTo('mesa');
+  assert.deepEqual(f.calls, ['city', 'mesa']);
+  assert.equal(world.diagnostics.mesaReachable, true);
+  assert.deepEqual(world.diagnostics.residentMaps, ['mesa']);
+  assert.deepEqual(world.diagnostics.assets, ['mesa.glb']);
+  assert.equal(world.biomeAt(arrival.x, arrival.z), 'mesa');
+  assert.equal(world.isWalkable(arrival.x, arrival.z, 1), true);
+  assert.ok(Math.abs(world.getHeight(arrival.x, arrival.z) - 5) < 1e-6);
+  assert.equal(world.landmarks.find(place => place.id === 'shrine'), shrine);
+  assert.ok(Math.abs(shrine.y - 5) < 1e-6);
+  assert.ok(world.root.getObjectByName('Moonwell Sanctuary'));
+  let textures = 0, images = 0;
+  const texture = new THREE.Texture({ close() { images++; } });
+  texture.addEventListener('dispose', () => textures++);
+  f.records[1].materials[0].map = texture;
+  const mesaColliders = world.colliders;
+  await world.travelTo('city');
+  assert.deepEqual(f.calls, ['city', 'mesa', 'city']);
+  assert.deepEqual(world.diagnostics.residentMaps, ['city']);
+  assert.equal(world.diagnostics.mesaReachable, false);
+  assert.notEqual(world.colliders, mesaColliders);
+  assert.equal(world.root.getObjectByName('Moonwell Sanctuary'), undefined);
+  assert.deepEqual(f.records[1].disposed, { geometry: 1, material: 1 });
+  assert.deepEqual({ textures, images }, { textures: 1, images: 1 });
+  assert.equal(world.streaming.diagnostics.items, 1);
+  await world.travelTo('mesa');
+  assert.deepEqual(f.calls, ['city', 'mesa', 'city', 'mesa']);
+  world.dispose();
 });

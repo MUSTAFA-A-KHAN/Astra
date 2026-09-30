@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { createNavigation } from './navigation.js';
-import { CITY_ARRIVAL } from './city-world.js';
-import { loadCityAndMesa } from './world-map.js';
+import { CITY_ARRIVAL, loadCityDistrict } from './city-world.js';
 import { createStreetLights } from './street-lights.js';
 import { createStreamer } from './streaming.js';
 import { disposeMapResources } from './map-resources.js';
@@ -9,30 +8,25 @@ import { OBSERVATORY_ARRIVAL } from './observatory-world.js';
 import { STREET_ARRIVAL } from './street-world.js';
 
 const WATERLINE = -6.65;
-const ARRIVALS = { city: CITY_ARRIVAL, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL, street: STREET_ARRIVAL };
+const ARRIVALS = { city: CITY_ARRIVAL, mesa: { x: -5, z: 125, radius: 1.2 }, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL, street: STREET_ARRIVAL };
 const CITY_SHARDS = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30]];
 const within = (bounds, x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
-// The Moonwell's sanctuary stands out on the Red Mesa's eastern sands, along
-// the plain from the jetty off the south quay: the flattest open ground in
-// reach of the city, clear 15 units round and level to 0.4 across its stone
-// circle. The city's own streets have no room for it.
+// Keep only the sanctuary's coordinates until its portal is crossed. Its
+// ground, navigation, markers and story models belong to the mesa alone.
 const MOONWELL = { x: 90, z: 140 };
 const districtLoaders = {
-  city: loadCityAndMesa,
+  city: loadCityDistrict,
+  mesa: options => import('./mesa-world.js').then(({ loadMesaDistrict }) => loadMesaDistrict(options)),
   forest: options => import('./forest-world.js').then(({ loadForestDistrict }) => loadForestDistrict(options)),
   yard: options => import('./skibidi-world.js').then(({ loadYardDistrict }) => loadYardDistrict(options)),
   observatory: options => import('./observatory-world.js').then(({ loadObservatoryDistrict }) => loadObservatoryDistrict(options)),
   street: options => import('./street-world.js').then(({ loadStreetDistrict }) => loadStreetDistrict(options)),
 };
 
-// `mesa` is where the jetty comes off onto the mesa, when the navigator can
-// walk there: the keeper waits on that side of the well, facing whoever comes.
-function cityLandmarks(navigation, mesa) {
-  const shrine = mesa ? { ...navigation.findWalkable(MOONWELL.x, MOONWELL.z, 4), approach: { x: mesa.x, z: mesa.z } } : navigation.findWalkable(0, -50, 4);
+function cityLandmarks(navigation) {
   return [
-    { id: 'shrine', name: 'Moonwell Sanctuary', ...shrine, color: '#83e6ee' },
-    { id: 'camp', name: 'Wanderer’s Camp', ...navigation.findWalkable(-45, 25, 3), color: '#ffc681' },
-    { id: 'watch', name: 'Sunstone Watch', ...navigation.findWalkable(50, -20, 3), color: '#f1d087' },
+    { id: 'camp', map: 'city', name: 'Wanderer’s Camp', ...navigation.findWalkable(-45, 25, 3), color: '#ffc681' },
+    { id: 'watch', map: 'city', name: 'Sunstone Watch', ...navigation.findWalkable(50, -20, 3), color: '#f1d087' },
   ];
 }
 
@@ -54,6 +48,7 @@ function landmarkMarkers(root, landmarks) {
 export async function createPortalWorld(scene, { lowPower = false, loaders = districtLoaders } = {}) {
   const root = new THREE.Group(); root.name = 'The Verdant Reach';
   const streaming = createStreamer({ quality: lowPower ? 'low' : 'high' });
+  const landmarks = [{ id: 'shrine', map: 'mesa', name: 'Moonwell Sanctuary', ...MOONWELL, y: 0, approach: { x: -5, z: 125 }, color: '#83e6ee' }];
   let active = null, loadingMap = null, stagedMap = null, disposed = false, daylight = 1, quality = lowPower ? 'low' : 'high';
   // Only plain bounds survive a visit, never a model or navigation closure:
   // each map's, or, for one that joins two districts, each district's.
@@ -79,17 +74,18 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
   async function loadMap(map) {
     const district = await loaders[map]({ lowPower: quality === 'low', waterline: WATERLINE });
     const mapRoot = new THREE.Group(); mapRoot.name = `Portal destination: ${map}`; mapRoot.add(district.root);
-    const record = { map, root: mapRoot, district, navigation: null, lights: null, markers: [], landmarks: [], mesaReachable: false };
+    const record = { map, root: mapRoot, district, navigation: null, lights: null, markers: [], landmarks: [] };
     try {
       record.navigation = createNavigation(district.terrains ?? [district.terrain], district.bounds, { arrival: ARRIVALS[map], openings: district.openings ?? [] });
       if (map === 'city') {
-        const inland = district.mesaInland;
-        record.mesaReachable = !!inland && record.navigation.isWalkable(inland.x, inland.z, 1);
-        if (inland && !record.mesaReachable) console.warn('The mesa jetty does not reach the Red Mesa: the Moonwell stays in the city.');
-        record.landmarks = cityLandmarks(record.navigation, record.mesaReachable ? inland : null);
+        record.landmarks = cityLandmarks(record.navigation);
         record.markers = landmarkMarkers(mapRoot, record.landmarks);
         record.lights = createStreetLights({ lanterns: district.lanterns ?? [], materials: district.materials ?? [], heightAt: record.navigation.getHeight, lights: lowPower ? 2 : 4 });
         mapRoot.add(record.lights.group);
+      }
+      if (map === 'mesa') {
+        record.landmarks = [{ ...landmarks[0], ...record.navigation.findWalkable(MOONWELL.x, MOONWELL.z, 4) }];
+        record.markers = landmarkMarkers(mapRoot, record.landmarks);
       }
       const water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), new THREE.MeshStandardMaterial({ color: '#355a64', roughness: .34, metalness: .25 }));
       water.name = 'Harbour water'; water.rotation.x = -Math.PI / 2; water.position.y = WATERLINE; water.receiveShadow = true; mapRoot.add(water);
@@ -99,13 +95,17 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
   }
   function attach(record) {
     root.add(record.root);
+    for (const landmark of record.landmarks) {
+      const known = landmarks.find(place => place.id === landmark.id);
+      if (known) Object.assign(known, landmark);
+      else landmarks.push({ ...landmark });
+    }
     for (const mesh of record.district.meshes) streaming.add(mesh);
     knownRegions.set(record.map, (record.district.regions ?? [{ biome: record.map, bounds: record.district.bounds }]).map(({ biome, bounds }) => ({ biome, bounds: { ...bounds } })));
   }
   active = await loadMap('city'); attach(active); scene.add(root);
   // Keep city story coordinates and saved shard indices stable. Other map
   // slots stay empty while travel is story driven.
-  const landmarks = active.landmarks.map(landmark => ({ ...landmark }));
   const diagnostics = {
     ready: true, provider: 'astra-world-map', portalTravel: true,
     get activeMap() { return active?.map ?? null; },
@@ -123,7 +123,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get forestReachable() { return active?.map === 'forest'; },
     get yardReachable() { return active?.map === 'yard'; },
     get streetReachable() { return active?.map === 'street'; },
-    get mesaReachable() { return active?.map === 'city' && active.mesaReachable; },
+    get mesaReachable() { return active?.map === 'mesa'; },
     plazaReachable: false, woodReachable: false,
   };
   return {
@@ -141,6 +141,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     findWalkable(...args) { return active.navigation.findWalkable(...args); },
     route(...args) { return active.navigation.route(...args); },
     biomeAt(x, z) {
+      if (active && within(active.district.bounds, x, z)) return active.map;
       for (const regions of knownRegions.values()) for (const { biome, bounds } of regions) if (within(bounds, x, z)) return biome;
       return x < -75 ? 'forest' : x > 115 && z > 110 ? 'yard' : 'city';
     },

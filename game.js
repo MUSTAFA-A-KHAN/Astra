@@ -178,7 +178,9 @@ scene.add(chapterThree.root);
 const activeTrials = () => chapterThreeUnlocked() ? chapterThree : chapterTwo;
 const portal = createPortal({ world, collision, reducedMotion }); scene.add(portal.root);
 const inCity = () => !world.activeMap || world.activeMap === 'city';
+const inStoryMap = () => inCity() || world.activeMap === 'mesa';
 const cityExtraColliders = new Map();
+let actorsMap = world.activeMap || 'city';
 // The north-east car park: the one stretch of the city open enough for the
 // awakened gate. Anywhere else its stones fly over kerbs, lamps and trees.
 const CITY_PORTAL = { x: 95, z: -100.5 };
@@ -188,7 +190,7 @@ const CITY_PORTAL = { x: 95, z: -100.5 };
 function portalClearance(x, z) {
   let clear = PORTAL_REACH;
   while (clear > 0 && !world.isWalkable(x, z, clear)) clear -= .5;
-  const sites = [world.spawn, ...Object.values(chapterTwo.places), ...Object.values(chapterThree.places), ...(inCity() ? Object.values(story.places) : [])];
+  const sites = [world.spawn, ...Object.values(chapterTwo.places), ...Object.values(chapterThree.places), ...(inStoryMap() ? Object.values(story.places) : [])];
   for (const p of sites) clear = Math.min(clear, Math.hypot(p.x - x, p.z - z));
   for (const c of collision.query(x - clear, z - clear, x + clear, z + clear)) {
     if (/^(city|portal)-/.test(c.id)) continue;
@@ -230,7 +232,8 @@ function placePortal() {
   portal.setPhase('dormant');
 }
 placePortal();
-const questObjective = () => chapterTwoUnlocked() ? (currentStep().map !== (world.activeMap || 'city') ? portal.places.book : activeTrials().objective()) : story.objective(currentStep().id);
+const questObjective = () => currentStep().id !== 'complete' && currentStep().map !== (world.activeMap || 'city')
+  ? portal.places.book : chapterTwoUnlocked() ? activeTrials().objective() : story.objective(currentStep().id);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 // A ridden horse keeps its own heading and wheels round rather than turning on the spot.
 const reins = new MountSteering();
@@ -361,8 +364,9 @@ function updateHUD(){
   }
   const value=step.goal?Math.min(step.goal,step.count(progress)):complete?1:0;
   $('quest-title').textContent=step.title;$('quest-description').textContent=step.description;
-  const status=$('chapter-status');status.hidden=!chapterTwoUnlocked()||complete;
-  if(!status.hidden){const goal=questObjective(),distance=goal?Math.round(Math.hypot(goal.x-position.x,goal.z-position.z)):0;status.textContent=currentStep().map!==(world.activeMap||'city')?'Read the portal book · follow the guiding light':activeTrials().status||`${step.where} · ${distance} paces · follow the gold map marker`;}
+  const away=step.map!==(world.activeMap||'city');
+  const status=$('chapter-status');status.hidden=complete||(!chapterTwoUnlocked()&&!away);
+  if(!status.hidden){const goal=questObjective(),distance=goal?Math.round(Math.hypot(goal.x-position.x,goal.z-position.z)):0;status.textContent=away?'Read the portal book · follow the guiding light':activeTrials().status||`${step.where} · ${distance} paces · follow the gold map marker`;}
   $('quest-count').textContent=step.goal?`${value} / ${step.goal}`:complete?'COMPLETE':`◇ ${step.where}`;$('quest-fill').style.width=`${step.goal?value/step.goal*100:complete?100:0}%`;
   // Held back through the finale, so it lands after the keeper has gone.
   if(index!==shownStep&&!finale){
@@ -407,7 +411,7 @@ function nearbyInteraction(){
   const shared = chapterThreeUnlocked() ? chapterThree.nearby(position) : null;
   if(shared&&(!book||Math.hypot(position.x-shared.x,position.z-shared.z)<Math.hypot(position.x-portal.places.book.x,position.z-portal.places.book.z)))return shared;
   if(book)return book;
-  if(!inCity())return activeTrials().nearby(position);
+  if(!inCity())return activeTrials().nearby(position)||(!finale&&inStoryMap()?story.nearby(position,STEPS[storyStep(progress)].id):null);
   if(activities.mount.mounted)return {type:'mount',label:'Dismount'};
   if(locomotion.climbing)return {type:'climb',label:'Let go of ladder'};
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
@@ -479,7 +483,7 @@ let chat=null,finale=false,closed={person:null,at:0};
 // their shoulder, and leads on. It is sprites rather than a light (guide.js),
 // and the navigator finds it a way once per goal, so it is cheap to keep lit.
 const guideLight=createGuide({route:(from,to)=>world.route?.(from,to),heightAt:(x,z)=>groundHeight(x,z),texture:softTexture(),
-  onArrive:goal=>{lightIn=goal;if(lightFor?.person&&inCity())story.glow(lightFor.person);}});
+  onArrive:goal=>{lightIn=goal;if(lightFor?.person&&inStoryMap())story.glow(lightFor.person);}});
 scene.add(guideLight.root);
 // What it leads to now, and where it last went in. It waits a beat after the
 // player steps into the world, so the world is seen before it is; `welcome`
@@ -498,12 +502,17 @@ const lightHeight=place=>(place.y??groundHeight(place.x,place.z))+(place.face??(
 // film is on, or the story has nowhere left to send them.
 function lightTarget(){
   if(screen!=='game'||!hero||portalJourney||finale||contextLost)return null;
+  const current=currentStep();
+  if(current.id!=='complete'&&current.map!==(world.activeMap||'city')){
+    const goal=portal.places.book;
+    return {key:`${current.id}:portal:${current.map}`,x:goal.x,y:lightHeight(goal),z:goal.z};
+  }
   if(chapterTwoUnlocked()){
     if(activeTrials().combatants.some(e=>e.alive))return null;
     const step=currentStep(),goal=questObjective();
     return goal&&{key:`${step.id}:${Math.round(goal.x)},${Math.round(goal.z)}`,x:goal.x,y:lightHeight(goal),z:goal.z};
   }
-  if(!inCity())return null;
+  if(!inStoryMap())return null;
   const step=STEPS[storyStep(progress)].id;
   // A step that asks for several of something: the nearest, kept until it is
   // won, so the light never dithers between two.
@@ -663,7 +672,7 @@ function readPortalBook(destination) {
     $('dialog-eyebrow').textContent='THE KEEPER’S SPELLBOOK';
     $('dialog-title').textContent='Choose a passage';
     const content=$('dialog-content');
-    content.innerHTML='<p class="dialog-copy">Follow the keeper’s path, or explore Street City and return through its portal.</p><div class="menu-buttons"></div>';
+    content.innerHTML='<p class="dialog-copy">Travel to the Moonwell on Red Mesa, or explore another passage from the book.</p><div class="menu-buttons"></div>';
     for(const choice of choices){
       const button=document.createElement('button');
       button.dataset.portalDestination=choice.destination;
@@ -785,22 +794,26 @@ function directPortalShot(j,dt) {
   j.shake=Math.max(0,(j.shake||0)*Math.exp(-4*dt));
 }
 async function arriveThroughPortal(arrival) {
-  // City actors are separate from the map. Keep the reusable horse and small
-  // activity props, and release the chapter's imported scenery and people.
-  if(!inCity()) {
-    story.dispose();
-    for(const [id,entry] of collision.entries)if(!String(id).startsWith('city-'))cityExtraColliders.set(id,entry);
+  // The sanctuary and city actors belong to different maps. Only the small
+  // reusable city activities keep their collision records between visits.
+  story.dispose();
+  if(actorsMap==='city') {
+    cityExtraColliders.clear();
+    for(const [id,entry] of collision.entries)if(!/^(city|portal|chapter-two|chapter-three)-/.test(String(id)))cityExtraColliders.set(id,entry);
   }
   collision.clear();
   world.colliders.forEach((shape,index)=>collision.insert(`city-${index}`,shape));
   if(inCity()) {
     for(const [id,shape] of cityExtraColliders)collision.insert(id,shape);
-    cityExtraColliders.clear();
+  }
+  if(inStoryMap()) {
     for(let i=activities.stations.length-1;i>=0;i--)if(activities.stations[i].id.startsWith('story-'))activities.stations.splice(i,1);
     story=createStory({world,activities,collision});scene.add(story.root);story.setState({restored:progress.restored});
-    chapterTwo.places.chart=story.places.tobin;chapterTwo.places.seal=story.places.maren;
+    if(inCity())chapterTwo.places.chart=story.places.tobin;
+    else chapterTwo.places.seal=story.places.maren;
     story.stream({prepare:prepareModel}).catch(error=>console.warn('The story models did not load.',error));
   }
+  actorsMap=world.activeMap||'city';
   chapterTwo.syncMap();chapterThree.syncMap();placePortal();
   // The light is left behind on the old map, and rises afresh on the new one.
   guideLight.reset();lightFor=lightIn=null;lightWelcome=true;
@@ -1137,8 +1150,8 @@ function openMenu(type){
     content.innerHTML=`<label class="setting-row"><span>Graphics<small>Auto adapts resolution and shadows to keep the world responsive.</small></span><select id="quality-select"><option value="auto">Auto</option><option value="low">Performance</option><option value="balanced">Balanced</option><option value="high">High</option></select></label><label class="setting-row"><span>Time of day <output id="time-value">${formatTime(preferences.time)}</output><small>Sunrise at 06:00, sunset at 18:00. A full day takes 20 minutes of play; menus pause time.</small></span><input id="time-setting" type="range" min="0" max="24" step=".25" aria-label="Time of day"></label><label class="setting-row"><span>Enable audio<small id="audio-status"></small></span><input id="sound-setting" type="checkbox"></label>${VOLUME_CHANNELS.map(channel=>`<label class="setting-row"><span>${channel[0].toUpperCase()+channel.slice(1)} volume</span><input id="volume-${channel}" type="range" min="0" max="1" step=".05" value="${preferences.volumes[channel]}" aria-label="${channel[0].toUpperCase()+channel.slice(1)} volume"></label>`).join('')}<label class="setting-row"><span>Show frame rate</span><input id="fps-setting" type="checkbox"></label><label class="setting-row"><span>Lantern Plaza<small>A lamplit market street and its cathedral, built block by block, across the water from the east quay. A 24 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="plaza-setting" type="checkbox"></label><label class="setting-row"><span>Nightwood Road<small>A moonlit forest road across the water from the north quay. A 15 MB download, fetched only while this is on. The world reloads to add or remove it.</small></span><input id="nightwood-setting" type="checkbox"></label><label class="setting-row"><span>Button size <output id="control-scale-value"></output><small>Makes the joystick and the on-screen buttons bigger or smaller.</small></span><input id="control-scale" type="range" min="${CONTROL_SCALE.min}" max="${CONTROL_SCALE.max}" step=".05" aria-label="Button size"></label><label class="setting-row"><span>Button transparency <output id="control-transparency-value"></output><small>Lets the world show through the joystick and the buttons. A button turns solid while you press it.</small></span><input id="control-transparency" type="range" min="0" max="${1-CONTROL_OPACITY.min}" step=".05" aria-label="Button transparency"></label><div class="setting-row"><span>Control layout<small>Put the joystick and the buttons where your thumbs actually land. Drag them anywhere, then press Done.</small></span><button id="layout-edit" class="layout-edit">Rearrange</button></div><p class="credits-note"><a href="./assets/audio/CREDITS.md" target="_blank" rel="noopener">Sound recording and music credits</a>. <a href="./assets/story/CREDITS.md" target="_blank" rel="noopener">Story characters and props</a>: twenty-six Sketchfab models, each credited to its author under CC BY 4.0. City environment: City Set — Proto Series. Street City: <a href="https://sketchfab.com/3d-models/street-city-7-for-games-free-493a69b451284ff88346c7b3e4e1b5a7" target="_blank" rel="noopener">Street city (7) for games (free)</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>. Skibidi Yard: <a href="https://sketchfab.com/3d-models/skibidi-toilet-79-map-2a29c94edd4744f3ab4666da880185c3" target="_blank" rel="noopener">“Skibidi toilet 79 map”</a> by <a href="https://sketchfab.com/Mystv" target="_blank" rel="noopener">MysteriousTV</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, cut down to a pier. Nightwood Road: <a href="https://sketchfab.com/3d-models/a-forest-3-with-a-road-at-night-for-game-61f8c7817fe6457fb26e4814cfc48a3f" target="_blank" rel="noopener">“a forest (3) with a road at night for game”</a> by <a href="https://sketchfab.com/dasy444" target="_blank" rel="noopener">dasy444</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Red Mesa: <a href="https://sketchfab.com/3d-models/worldmachine-terrain-550d7edf4bcb4e79acd4a1bd13c4b5ba" target="_blank" rel="noopener">“Worldmachine Terrain”</a> by <a href="https://sketchfab.com/han" target="_blank" rel="noopener">Hannes Delbeke</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Flashlight: <a href="https://sketchfab.com/3d-models/flashlight-5fa9a65e7b0141ee877ed18f4f42d953" target="_blank" rel="noopener">“Flashlight”</a> by <a href="https://sketchfab.com/mar.cos." target="_blank" rel="noopener">MAR.COS.</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, with smaller textures. Starter heroes made for Astra. Rei and Arthur are your existing imported models and load only when selected.</p>`;
     $('quality-select').value=preferences.quality;$('quality-select').onchange=e=>{preferences.quality=e.target.value;resolutionScale=1;applyQuality(preferences.quality==='auto'?(touch?'balanced':'high'):preferences.quality);lastAdapt=time;save();};
     $('time-setting').value=preferences.time;$('time-setting').oninput=e=>{setTime(Number(e.target.value));dirtySave=true;};$('sound-setting').checked=preferences.sound;$('audio-status').textContent=audioStatus();$('sound-setting').onchange=e=>{preferences.sound=e.target.checked;audio.setEnabled(preferences.sound);if(preferences.sound)enableAudio();save();};$('fps-setting').checked=preferences.showFPS;$('fps-setting').onchange=e=>{preferences.showFPS=e.target.checked;$('performance-readout').hidden=!preferences.showFPS;save();};
-    // The world is built once, with or without the plaza and the Nightwood: it takes a fresh one. The Red Mesa
-    // has no switch: the Moonwell stands on it, so it always comes with the city.
+    // Optional city extensions take a fresh world. Red Mesa is reached through
+    // its portal and loads only when that passage is taken.
     for(const district of ['plaza','nightwood']){$(district+'-setting').checked=preferences[district];$(district+'-setting').onchange=e=>{preferences[district]=e.target.checked;save();location.reload();};}
     for(const channel of VOLUME_CHANNELS)$('volume-'+channel).oninput=e=>{preferences.volumes[channel]=Number(e.target.value);audio.setVolumes(preferences.volumes);save();};
     // Shown as a size and a transparency, kept as a zoom and an opacity.
@@ -1172,8 +1185,8 @@ function respawnPlayer(){
   chapterThree.resetChallenge();
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
   followCamera.reset(position,yaw,pitch,radius);combatMemory=0;audio.play('hit',{volume:.5});
-  enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
-  // Carried back to the square, the player is shown the way from there at once.
+  if(inCity())enemies.forEach(e=>{if(e.alive)e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);});
+  // Carried back to this map's arrival, the player is shown the way at once.
   if(guideLight.state==='leading'&&lightFor)guideLight.retarget(lightFor,position);
   toast('The keeper?s light shelters you. Your journey continues.');
 }
@@ -1397,7 +1410,7 @@ function drawMap(){
   const px=x=>90+(x-position.x)*scale,pz=z=>90+(z-position.z)*scale;
   mapLayer??=drawMapLayer();
   map.drawImage(mapLayer,Math.round(px(bounds.minX)),Math.round(pz(bounds.minZ)));
-  for(const l of world.landmarks){map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
+  for(const l of world.landmarks){if(l.map&&world.activeMap&&l.map!==world.activeMap)continue;map.fillStyle=l.color;map.fillRect(px(l.x)-3,pz(l.z)-3,6,6);}
   const goal=questObjective();
   if(goal){
     let gx=px(goal.x)-90,gz=pz(goal.z)-90;const reach=Math.hypot(gx,gz);if(reach>80){gx*=80/reach;gz*=80/reach;}
@@ -1405,8 +1418,8 @@ function drawMap(){
   }
   // The guiding light shows the way on foot, where the diamond only gives the direction.
   const light=guideLight.position;if(light){map.fillStyle='#bfefff';map.beginPath();map.arc(px(light.x),pz(light.z),3.2,0,Math.PI*2);map.fill();}
-  map.fillStyle='#deca88';for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i)||!shardPositions[i])continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
-  map.fillStyle='#c9a1e2';for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
+  map.fillStyle='#deca88';if(inCity())for(let i=0;i<shardPositions.length;i++){if(progress.collected.has(i)||!shardPositions[i])continue;map.beginPath();map.arc(px(shardPositions[i][0]),pz(shardPositions[i][1]),1.9,0,Math.PI*2);map.fill();}
+  map.fillStyle='#c9a1e2';if(inCity())for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
   map.fillStyle='#ff987d';for(const e of activeTrials().combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
   map.strokeStyle='#9fe8ed';map.lineWidth=1.5;for(const p of activeTrials().mapTargets){map.beginPath();map.arc(px(p.x),pz(p.z),3.5,0,Math.PI*2);map.stroke();}
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
@@ -1431,7 +1444,7 @@ function animate(now){
     activities.root.visible=screen==='game'&&inCity();if(inCity())activities.update(dt,reducedMotion?0:time,locomotion.speed,locomotion.sprinting);
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
-    if(inCity())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story);
+    if(inStoryMap())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story);
     updateGuideLight(dt,reducedMotion?0:time);
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
@@ -1446,7 +1459,7 @@ function animate(now){
   blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length??0};
-  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard',nightwood:'Nightwood Road',mesa:'Red Mesa',observatory:'Ashen Observatory',street:'Street City'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD',nightwood:'WOODS',mesa:'MESA',observatory:'OBSERVATORY',street:'STREET'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
+  uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>(!l.map||!world.activeMap||l.map===world.activeMap)&&Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard',nightwood:'Nightwood Road',mesa:'Red Mesa',observatory:'Ashen Observatory',street:'Street City'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD',nightwood:'WOODS',mesa:'MESA',observatory:'OBSERVATORY',street:'STREET'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
   if(raw>0&&raw<.25&&!dialog.open&&!switching){frameMS=frameMS*.96+raw*1000*.04;frameSamples++;sampleTime+=raw;}
   if(sampleTime>1){$('performance-readout').textContent=`${Math.round(1000/frameMS)} FPS · ${quality} · ${Math.round(renderer.getPixelRatio()*100)}%`;sampleTime=0;}
   if(preferences.quality==='auto'&&frameSamples>150&&time-lastAdapt>8&&frameMS>25){if(quality==='high')applyQuality('balanced',true);else if(quality==='balanced')applyQuality('low',true);else if(resolutionScale>.7){resolutionScale=Math.max(.7,resolutionScale-.1);applyQuality('low',true);}frameSamples=0;}
@@ -1466,8 +1479,8 @@ function ridingStats(){
 }
 Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
-  const resumeMap=saved.map==='street'&&portalRoute(progress,'city','street').destination==='street'?'street':chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
-  if(chapterTwoUnlocked()&&resumeMap!=='city'){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
+  const resumeMap=saved.map==='mesa'||saved.map==='city'?saved.map:saved.map==='street'&&portalRoute(progress,'city','street').destination==='street'?'street':chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
+  if(resumeMap!=='city'&&(resumeMap==='mesa'||chapterTwoUnlocked())){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}
   await selectHero(HEROES.some(h=>h.id===saved.hero)?saved.hero:DEFAULT_HERO);
   if(!hero)await selectHero('warden');
   updateHUD();updateCamera(1);updateShards();$('performance-readout').hidden=!preferences.showFPS;
@@ -1487,7 +1500,7 @@ try{
   portal.load({prepare}).catch(error=>console.warn('The portal uses its carved stand-in.',error));
   world.stream({prepare}).catch(error=>console.warn('The plaza model did not load; its footprint stands in for it.',error));
   // The story's people and props follow the same way, each ready before it is shown.
-  if(inCity())story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
+  if(inStoryMap())story.stream({prepare}).catch(error=>console.warn('The story models did not load.',error));
   // The Drowned Meridian's trials too, but not until the chapter opens.
   chapterTwo.load({prepare}).catch(error=>console.warn('The Drowned Meridian keeps its stand-ins.',error));
 }catch(error){console.error(error);$('load-message').textContent='This device could not start the 3D world. Try again with a WebGL-enabled browser.';$('retry-button').hidden=false;}

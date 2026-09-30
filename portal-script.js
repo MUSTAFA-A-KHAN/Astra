@@ -5,6 +5,10 @@ import { chapterThreeUnlocked, readChapterThree } from './chapter-three-script.j
 // The keeper's book chooses the next passage from the saved story. Combat
 // abilities and proximity alone can never provide a portal incantation.
 const PASSAGES = Object.freeze({
+  mesa: Object.freeze({
+    destination: 'mesa', mapName: 'Red Mesa', title: 'The sanctuary passage',
+    spell: 'By keeper’s light and crimson sand, bear me to the Moonwell’s land.',
+  }),
   observatory: Object.freeze({
     destination: 'observatory', mapName: 'The Ashen Observatory', title: 'The forgotten passage',
     spell: 'By hands that share and hearts that know, reveal the shore lost long ago.',
@@ -34,16 +38,22 @@ const locked = reason => ({
 export function portalRoute(progress = {}, activeMap = 'city', requestedDestination) {
   const story = readStory(progress);
   const chapter = readChapterTwo(progress);
+  const third = readChapterThree(progress);
+  const select = passage => requestedDestination === undefined || requestedDestination === passage.destination
+    ? { ...passage, lockedReason: null }
+    : locked('The keeper\'s book has not revealed that passage from this district.');
+  // The lectern already holds the sanctuary spell. Meeting the keeper and
+  // returning to the city must never depend on restoring her well first.
+  if (activeMap === 'mesa') return select(PASSAGES.city);
+  if (activeMap === 'city' && (requestedDestination === 'mesa' || requestedDestination === undefined &&
+    (!story.ledger || progress?.restored !== true || !story.farewell || !chapter.accepted ||
+      chapter.warden && !chapter.complete || chapterThreeUnlocked(progress) && (!third.accepted || third.boss && !third.complete)))) return select(PASSAGES.mesa);
   if (!story.ledger) return locked('Only the keeper\'s book can awaken this portal. Find and read Maren\'s ledger at the Wanderer\'s Camp.');
   if (progress?.restored !== true) return locked('The book\'s passage remains dark. Restore the Moonwell with Maren before awakening a portal.');
   if (!story.farewell) return locked('The book asks you to finish Maren\'s promise. Tell Tobin what happened at the Moonwell.');
   if (!chapter.accepted) return locked('The portal has no destination yet. Read Tobin\'s tide chart at the west jetty to reveal the first passage.');
-  const select = passage => requestedDestination === undefined || requestedDestination === passage.destination
-    ? { ...passage, lockedReason: null }
-    : locked('The keeper\'s book has not revealed that passage from this district.');
   if (activeMap === 'city' && requestedDestination === 'street') return select(PASSAGES.street);
   if (activeMap === 'street') return select(PASSAGES.city);
-  const third = readChapterThree(progress);
   if (chapterThreeUnlocked(progress)) {
     if (activeMap === 'yard' && third.relay) return select(PASSAGES.observatory);
     if (activeMap === 'observatory') return select(PASSAGES.city);
@@ -66,8 +76,9 @@ export function portalRoute(progress = {}, activeMap = 'city', requestedDestinat
 
 export function portalChoices(progress = {}, activeMap = 'city') {
   const route = portalRoute(progress, activeMap);
-  if (!route.destination) return [];
-  return activeMap === 'city' ? [route, portalRoute(progress, activeMap, 'street')] : [route];
+  if (activeMap !== 'city') return route.destination ? [route] : [];
+  return [route, ...['mesa', 'forest', 'street'].filter(destination => destination !== route.destination)
+    .map(destination => portalRoute(progress, activeMap, destination))].filter(choice => choice.destination);
 }
 
 // The reading ends on the spell itself, so the gate answers the moment it is

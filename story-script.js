@@ -32,15 +32,15 @@ export const STEPS = [
   // board, glowing by the square, and goes into its carving; reading it sets
   // the light free again to lead them on. Anyone who finds the keeper first
   // has no need of it.
-  { id: 'notice', where: 'NOTICE BOARD', title: 'News from the harbour', description: 'A notice board glows by the square where you arrived. Walk up to it and read it.', recap: 'On the harbour’s memorial you found a name carved deeper than the rest: Maren Ashdown, Keeper of the Moonwell.', done: p => p.story.notice || p.story.keeper || p.restored },
-  { id: 'keeper', where: 'MOONWELL', title: 'The woman at the well', description: 'Someone is waiting at the Moonwell Sanctuary, out on the Red Mesa past the south jetty. Follow the light.', recap: 'Maren, the Keeper, asked you to gather the Moonwell’s scattered light.', done: p => p.story.keeper },
-  { id: 'shards', title: 'A glimmer in the green', description: 'Gather 5 shards of the Moonwell’s light along the city streets.', recap: 'You gathered five shards of the old light.', goal: 5, count: p => p.collected.size, done: p => p.collected.size >= 5 || p.restored },
-  { id: 'ferryman', where: 'WEST JETTY', title: 'The ferryman’s tale', description: 'Find Tobin the ferryman where the west jetty meets the quay.', recap: 'Tobin told you about the Night of the Long Tide — and went pale at Maren’s name.', done: p => p.story.ferryman },
-  { id: 'wisps', title: 'Quiet the restless', description: 'Release 3 restless wisps. They were people once.', recap: 'You released the drowned, and heard what they remembered.', goal: 3, count: p => p.kills, done: p => p.kills >= 3 || p.restored },
-  { id: 'ledger', where: 'WANDERER’S CAMP', title: 'The keeper’s ledger', description: 'The wanderers pulled a book from the flooded cistern. Look for it at the Wanderer’s Camp.', recap: 'The ledger’s last page told you how Maren died.', done: p => p.story.ledger },
-  { id: 'restore', where: 'MOONWELL', title: 'Awaken the Moonwell', description: 'Take the light back to Maren at the Moonwell.', recap: 'The Moonwell woke, and the Keeper went home with the Hart.', done: p => p.restored },
-  { id: 'farewell', where: 'WEST JETTY', title: 'What the ferryman saw', description: 'Tell Tobin what happened at the well.', recap: 'You gave Tobin Maren’s last words.', done: p => p.story.farewell },
-  { id: 'complete', title: 'A light returned', description: 'The Moonwell shines again. The Reach is yours to explore.', done: () => false },
+  { id: 'notice', map: 'city', where: 'NOTICE BOARD', title: 'News from the harbour', description: 'A notice board glows by the square where you arrived. Walk up to it and read it.', recap: 'On the harbour’s memorial you found a name carved deeper than the rest: Maren Ashdown, Keeper of the Moonwell.', done: p => p.story.notice || p.story.keeper || p.restored },
+  { id: 'keeper', map: 'mesa', where: 'MOONWELL', title: 'The woman at the well', description: 'Someone is waiting at the Moonwell Sanctuary, on the Red Mesa. Read the book beside the city portal and cast its passage spell. Follow the light.', recap: 'Maren, the Keeper, asked you to gather the Moonwell’s scattered light.', done: p => p.story.keeper },
+  { id: 'shards', map: 'city', title: 'A glimmer in the green', description: 'Gather 5 shards of the Moonwell’s light along the city streets.', recap: 'You gathered five shards of the old light.', goal: 5, count: p => p.collected.size, done: p => p.collected.size >= 5 || p.restored },
+  { id: 'ferryman', map: 'city', where: 'WEST JETTY', title: 'The ferryman’s tale', description: 'Find Tobin the ferryman where the west jetty meets the quay.', recap: 'Tobin told you about the Night of the Long Tide — and went pale at Maren’s name.', done: p => p.story.ferryman },
+  { id: 'wisps', map: 'city', title: 'Quiet the restless', description: 'Release 3 restless wisps. They were people once.', recap: 'You released the drowned, and heard what they remembered.', goal: 3, count: p => p.kills, done: p => p.kills >= 3 || p.restored },
+  { id: 'ledger', map: 'city', where: 'WANDERER’S CAMP', title: 'The keeper’s ledger', description: 'The wanderers pulled a book from the flooded cistern. Look for it at the Wanderer’s Camp.', recap: 'The ledger’s last page told you how Maren died.', done: p => p.story.ledger },
+  { id: 'restore', map: 'mesa', where: 'MOONWELL', title: 'Awaken the Moonwell', description: 'Use the city portal to return to the Red Mesa. Take the light back to Maren at the Moonwell.', recap: 'The Moonwell woke, and the Keeper went home with the Hart.', done: p => p.restored },
+  { id: 'farewell', map: 'city', where: 'WEST JETTY', title: 'What the ferryman saw', description: 'Tell Tobin what happened at the well.', recap: 'You gave Tobin Maren’s last words.', done: p => p.story.farewell },
+  { id: 'complete', map: 'city', title: 'A light returned', description: 'The Moonwell shines again. The Reach is yours to explore.', done: () => false },
 ];
 
 export const storyStep = progress => STEPS.findIndex(step => !step.done(progress));
@@ -69,7 +69,7 @@ const say = (who, text, feeling) => feeling ? [who, text, feeling] : [who, text]
 // gives directions to the camp says `{camp}` where they go.
 export const CAMP_DIRECTIONS = {
   city: 'west of the square',
-  mesa: 'out on the Red Mesa — take the jetty off the south quay and keep east along the sand',
+  mesa: 'out on the Red Mesa — take the portal from the city and keep east along the sand',
 };
 
 // What each person says, by the step the story stands at. A step not listed

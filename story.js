@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HARBOUR_LEVEL } from './world-map.js';
+import { CITY_ARRIVAL } from './city-world.js';
 import { disposeMapResources } from './map-resources.js';
 import { fit, meshes, materialsOf, shadows, softTexture, footprints } from './model-fit.js';
 
@@ -9,12 +10,14 @@ import { fit, meshes, materialsOf, shadows, softTexture, footprints } from './mo
 // ledger, a notice board by the arrival square, and the Tidewarden circling
 // the harbour. story-script.js has the words; this has the places and things.
 //
-// Everything is placed from the world's own layout the moment the story is
-// created, so the people can be spoken to straight away. The models stream in
-// behind the game's start, like the plaza, and each is dropped into its place
-// when it lands.
+// Current-map interactions are placed as soon as the story is created. Only
+// that map's models stream in; off-map places remain plain coordinates for
+// quest guidance until the player crosses a portal.
 const ASSETS = new URL('./assets/story/', import.meta.url);
 const loader = new GLTFLoader();
+// Only coordinates survive a crossing, never city models or navigation.
+const cityPlaces = new WeakMap();
+const sanctuaryParts = new Set(['well', 'circle', 'maren', 'hart', 'chest', 'lantern']);
 
 // The Reach is built at about 1.9 units to the metre: its people stand 3.4
 // tall. Sizes here are given in metres, times M.
@@ -48,12 +51,18 @@ function fader(object) {
 export function createStory({ world, activities, collision }) {
   const root = new THREE.Group(); root.name = 'The Last Keeper';
   let disposed = false;
+  const cityHere = !world.portalTravel || world.activeMap === 'city';
+  const sanctuaryHere = !world.portalTravel || world.activeMap === 'mesa';
   const ground = (x, z) => world.getHeight(x, z);
   const colliderIds = new Set(), reservations = new Set(), holders = new Set(), liveParts = new Set(), fireVisibility = new Map();
   const collide = (id, shape) => { if (!disposed) { colliderIds.add(id); collision.insert(id, shape); } };
   const uncollide = id => { if (!disposed) { colliderIds.delete(id); collision.remove(id); } };
   const reserve = (...args) => { reservations.add(args[0]); return activities.reserve(...args); };
   const site = (point, facing = 0) => ({ x: point.x, y: point.y ?? ground(point.x, point.z), z: point.z, facing });
+  const savedCity = cityPlaces.get(world);
+  const citySite = (name, id, x, z, radius) => cityHere
+    ? site(reserve(id, x, z, radius))
+    : { ...(savedCity?.[name] ?? site({ x, y: 0, z })) };
   const faceToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
 
   // The sanctuary, round the shrine's own marker: the well at its heart and
@@ -67,7 +76,7 @@ export function createStory({ world, activities, collision }) {
   const approach = shrine.approach ?? { x: moonwell.x, z: moonwell.z + 30 };
   moonwell.facing = faceToward(moonwell, approach);
   const [cos, sin] = [Math.cos(moonwell.facing), Math.sin(moonwell.facing)];
-  const around = (dx, dz) => site({ x: moonwell.x + dx * cos + dz * sin, z: moonwell.z - dx * sin + dz * cos });
+  const around = (dx, dz) => site({ x: moonwell.x + dx * cos + dz * sin, z: moonwell.z - dx * sin + dz * cos, ...(sanctuaryHere ? {} : { y: moonwell.y }) });
   const places = { maren: around(1.6, 9.2), hart: around(-3.4, 9.8), chest: around(1.6, 8.3), lantern: around(2.3, 1.9) };
   places.maren.facing = faceToward(places.maren, approach);
   places.hart.facing = faceToward(places.hart, places.maren);
@@ -75,30 +84,37 @@ export function createStory({ world, activities, collision }) {
   // The camp: the wanderers' fire, their tent, and the ledger on its stand,
   // which faces out from the fire so its reader stands clear of the camp.
   const fire = activities.campfire.group.position;
-  places.tent = site(reserve('story-tent', fire.x - 8, fire.z - 6, 3.4));
+  places.tent = citySite('tent', 'story-tent', fire.x - 8, fire.z - 6, 3.4);
   places.tent.facing = faceToward(places.tent, fire);
-  places.ledger = site(reserve('story-ledger', fire.x + 3, fire.z - 6, 1));
+  places.ledger = citySite('ledger', 'story-ledger', fire.x + 3, fire.z - 6, 1);
   places.ledger.facing = faceToward(fire, places.ledger);
   // The notice board, a few strides from where every journey starts.
-  places.notice = site(reserve('story-notice', world.spawn.x + 7, world.spawn.z - 7, 2.4));
-  places.notice.facing = faceToward(places.notice, world.spawn);
+  const citySpawn = cityHere ? world.spawn : savedCity?.spawn ?? CITY_ARRIVAL;
+  places.notice = citySite('notice', 'story-notice', citySpawn.x + 7, citySpawn.z - 7, 2.4);
+  places.notice.facing = faceToward(places.notice, citySpawn);
   // The ferryman, where the west jetty leaves the quay.
-  places.tobin = site(reserve('story-ferryman', -70.5, 16, 1));
+  places.tobin = citySite('tobin', 'story-ferryman', -70.5, 16, 1);
   places.tobin.facing = faceToward(places.tobin, { x: -60, z: 16 });
   // His boat is hauled up on the quay beside him: the ferry is closed.
-  places.boat = site(reserve('story-boat', -70.8, 24.5, 1.4));
+  places.boat = citySite('boat', 'story-boat', -70.8, 24.5, 1.4);
   // How tall each speaker stands, for the beacon over their head.
   places.maren.top = 1.62 * M; places.tobin.top = 1.78 * M; places.ledger.top = .9 * M;
   // Where the eye goes on a thing that is read, for the camera: the papers
   // pinned to the board, and the open page on the stand.
   places.notice.face = 1.4 * M; places.ledger.face = .68 * M;
   const along = (p, distance) => ({ x: p.x + Math.cos(p.facing) * distance, z: p.z - Math.sin(p.facing) * distance });
-  places.campLantern = site(along(places.ledger, .75 * M));
+  places.campLantern = cityHere ? site(along(places.ledger, .75 * M)) : { ...(savedCity?.campLantern ?? site({ ...along(places.ledger, .75 * M), y: places.ledger.y })) };
+  if (cityHere) cityPlaces.set(world, {
+    spawn: { ...citySpawn },
+    ...Object.fromEntries(['tent', 'ledger', 'notice', 'tobin', 'boat', 'campLantern'].map(name => [name, { ...places[name] }])),
+  });
 
-  collide('story-maren', { x: places.maren.x, z: places.maren.z, r: .42 * M });
-  collide('story-tobin', { x: places.tobin.x, z: places.tobin.z, r: .42 * M });
-  collide('story-ledger', { x: places.ledger.x, z: places.ledger.z, r: .4 * M });
-  for (const side of [-1, 1]) collide(`story-notice-${side}`, { ...along(places.notice, side * .95 * M), r: .25 * M });
+  if (sanctuaryHere) collide('story-maren', { x: places.maren.x, z: places.maren.z, r: .42 * M });
+  if (cityHere) {
+    collide('story-tobin', { x: places.tobin.x, z: places.tobin.z, r: .42 * M });
+    collide('story-ledger', { x: places.ledger.x, z: places.ledger.z, r: .4 * M });
+    for (const side of [-1, 1]) collide(`story-notice-${side}`, { ...along(places.notice, side * .95 * M), r: .25 * M });
+  }
 
   let restored = false, departed = false, talking = null;
   const loaded = {}, tweens = [];
@@ -116,15 +132,19 @@ export function createStory({ world, activities, collision }) {
 
   // The ledger's stand and the Moonwell's light are the story's own, so they
   // are there before any download.
-  const wood = new THREE.MeshStandardMaterial({ color: '#6b4c38', roughness: .95 });
-  const stand = new THREE.Mesh(new THREE.BoxGeometry(.56 * M, .62 * M, .44 * M), wood);
-  stand.position.y = .31 * M; stand.castShadow = stand.receiveShadow = true;
-  const ledgerGroup = add('Keeper’s ledger', new THREE.Group(), places.ledger); ledgerGroup.add(stand);
+  let ledgerGroup = null;
+  if (cityHere) {
+    const wood = new THREE.MeshStandardMaterial({ color: '#6b4c38', roughness: .95 });
+    const stand = new THREE.Mesh(new THREE.BoxGeometry(.56 * M, .62 * M, .44 * M), wood);
+    stand.position.y = .31 * M; stand.castShadow = stand.receiveShadow = true;
+    ledgerGroup = add('Keeper’s ledger', new THREE.Group(), places.ledger); ledgerGroup.add(stand);
+  }
   // The story's one light, there from the start and only ever brightened: a
   // light added or hidden later would have every material in the Reach
   // rebuild its shader. The Hart and the keeper's lantern stand in its glow;
   // the camp's lantern stands in its fire's.
-  const wellLight = new THREE.PointLight('#9fe3ff', 0, 22 * M, 1.6); wellLight.position.set(moonwell.x, moonwell.y + 2.2 * M, moonwell.z); root.add(wellLight);
+  const wellLight = sanctuaryHere ? new THREE.PointLight('#9fe3ff', 0, 22 * M, 1.6) : null;
+  if (wellLight) { wellLight.position.set(moonwell.x, moonwell.y + 2.2 * M, moonwell.z); root.add(wellLight); }
 
   const parts = {};
   function disposePart(part) {
@@ -148,43 +168,50 @@ export function createStory({ world, activities, collision }) {
   }
   const loop = (part, clip = part.clips[0]) => part.mixer.clipAction(clip).play();
 
-  async function stream({ prepare } = {}) {
+  let streamPromise = null;
+  function stream(options) {
+    if (disposed) return Promise.resolve({ loaded: 0, failed: 0 });
+    return streamPromise ??= streamModels(options);
+  }
+  async function streamModels({ prepare } = {}) {
     if (disposed) return { loaded: 0, failed: 0 };
-    // Every download starts at once, but the models are readied and shown one
-    // at a time, in the order the story reaches them: building a model's
-    // shaders and uploading its textures holds the page up, and fourteen at
-    // once would hold it long enough to swallow the player's first presses.
-    const place = (name, promise, then) => { promise.catch(() => {}); return { name, promise, then }; };
+    // Current-map downloads start together, but models are readied and shown
+    // one at a time: building shaders and uploading textures all at once
+    // would hold the page up long enough to swallow the player's first presses.
+    const place = (name, download, then) => {
+      if (!(sanctuaryParts.has(name) ? sanctuaryHere : cityHere)) return null;
+      const promise = download(); promise.catch(() => {}); return { name, promise, then };
+    };
     const jobs = [
-      place('notice', load('quest-notice-board', 2.3 * M, 'height').then(beckoning), ({ model }) => add('Harbour notice board', model, places.notice)),
-      place('well', load('moonwell-well', 2.7 * M, 'length', { hide: m => /^(Ground|Grass_Grass|Flowers)/.test(m.name) }), ({ model }) => {
+      place('notice', () => load('quest-notice-board', 2.3 * M, 'height').then(beckoning), ({ model }) => add('Harbour notice board', model, places.notice)),
+      place('well', () => load('moonwell-well', 2.7 * M, 'length', { hide: m => /^(Ground|Grass_Grass|Flowers)/.test(m.name) }), ({ model }) => {
         add('Moonwell', model, moonwell);
         parts.well.mist = meshes(model, m => /^Fog/.test(m.name));
         collide('story-well', { x: moonwell.x, z: moonwell.z, r: 1.3 * M });
       }),
-      place('circle', load('moonwell-stone-circle', 7.4 * M, 'length'), ({ model }) => {
+      place('circle', () => load('moonwell-stone-circle', 7.4 * M, 'length'), ({ model }) => {
         add('Moonwell stone circle', model, moonwell);
         footprints(model, .35 * M, .5 * M).forEach((pillar, i) => collide(`story-pillar-${i}`, { x: pillar.x, z: pillar.z, r: pillar.r }));
       }),
       // No shadow of her own, and a little cold light: the first clues.
-      place('maren', load('moonwell-keeper', 1.62 * M, 'height', { castShadow: false }), part => {
+      place('maren', () => load('moonwell-keeper', 1.62 * M, 'height', { castShadow: false }), part => {
         add('Maren', part.model, places.maren); loop(part);
         for (const material of materialsOf(part.model)) if (material.emissive) { material.emissive.set('#6f93ad'); material.emissiveIntensity = .28; }
         part.fade = fader(part.model);
         part.glow = materialsOf(part.model).filter(material => material.emissive);
       }),
       // The Hart without the islet it was modelled standing on.
-      place('hart', load('moonwell-ghost-stag', 2.7 * M, 'height', { hide: m => !/^(GhostStag|ParticleBall)/.test(m.name), measure: m => /^GhostStag/.test(m.name) }), part => {
+      place('hart', () => load('moonwell-ghost-stag', 2.7 * M, 'height', { hide: m => !/^(GhostStag|ParticleBall)/.test(m.name), measure: m => /^GhostStag/.test(m.name) }), part => {
         add('The Hart of the Moonwell', part.model, places.hart); loop(part);
         shadows(part.model, false); part.fade = fader(part.model);
       }),
-      place('chest', load('treasure-chest', 1.1 * M, 'length'), part => {
+      place('chest', () => load('treasure-chest', 1.1 * M, 'length'), part => {
         add('Keeper’s chest', part.model, places.chest);
         part.open = part.mixer.clipAction(part.clips.find(c => /Open$/.test(c.name)));
         part.open.setLoop(THREE.LoopOnce); part.open.clampWhenFinished = true;
       }),
-      place('lantern', load('old-lantern', .55 * M, 'height'), ({ model }) => add('Maren’s lantern', model, places.lantern)),
-      place('tobin', Promise.all([load('harbour-villager', 1.78 * M, 'height'), fetch(new URL('harbour-villager-clips.json', ASSETS)).then(r => r.json())]).then(([part, clips]) => {
+      place('lantern', () => load('old-lantern', .55 * M, 'height'), ({ model }) => add('Maren’s lantern', model, places.lantern)),
+      place('tobin', () => Promise.all([load('harbour-villager', 1.78 * M, 'height'), fetch(new URL('harbour-villager-clips.json', ASSETS)).then(r => r.json())]).then(([part, clips]) => {
         if (!part || disposed || part.disposed) { disposePart(part); return null; }
         // His own clip is a single frame of T-pose; these replace it.
         part.clips = clips.map(clip => THREE.AnimationClip.parse(clip));
@@ -195,28 +222,28 @@ export function createStory({ world, activities, collision }) {
         part.idle = part.mixer.clipAction(part.clips.find(c => c.name === 'Idle')).play();
         part.talk = part.mixer.clipAction(part.clips.find(c => c.name === 'Talk'));
       }),
-      place('boat', load('harbour-rowboat', 4.6 * M, 'length'), ({ model }) => {
+      place('boat', () => load('harbour-rowboat', 4.6 * M, 'length'), ({ model }) => {
         add('Tobin’s rowboat', model, places.boat); model.rotation.z = .1;
         for (const step of [-1, 0, 1]) collide(`story-boat-${step}`, { x: places.boat.x, z: places.boat.z + step * 1.4 * M, r: .7 * M });
       }),
-      place('campLantern', load('old-lantern', .55 * M, 'height'), ({ model }) => add('Camp lantern', model, places.campLantern)),
-      place('book', load('lore-book', .52 * M, 'length'), ({ model }) => { model.position.y = .62 * M; ledgerGroup.add(model); }),
-      place('tent', load('wanderers-tent', 2.5 * M, 'height'), ({ model }) => {
+      place('campLantern', () => load('old-lantern', .55 * M, 'height'), ({ model }) => add('Camp lantern', model, places.campLantern)),
+      place('book', () => load('lore-book', .52 * M, 'length'), ({ model }) => { model.position.y = .62 * M; ledgerGroup.add(model); }),
+      place('tent', () => load('wanderers-tent', 2.5 * M, 'height'), ({ model }) => {
         add('Wanderers’ tent', model, places.tent);
         collide('story-tent', { x: places.tent.x, z: places.tent.z, r: 1.6 * M });
       }),
       // The wanderers' fire takes the place of the camp's stand-in flame; its
       // light and its crackle stay where they were.
-      place('campfire', load('wanderers-campfire', 1.6 * M, 'length', { hide: m => /Ground|Grass/i.test([m.material].flat()[0].name) }), part => {
+      place('campfire', () => load('wanderers-campfire', 1.6 * M, 'length', { hide: m => /Ground|Grass/i.test([m.material].flat()[0].name) }), part => {
         add('Wanderers’ fire', part.model, site(fire)); loop(part);
         for (const child of activities.campfire.group.children) if (child.isMesh) { fireVisibility.set(child, child.visible); child.visible = false; }
       }),
-      place('tidewarden', load('harbour-mythic-whale', 20 * M, 'length'), part => {
+      place('tidewarden', () => load('harbour-mythic-whale', 20 * M, 'length'), part => {
         // Streamed by the whole of the water it circles, as far out as the city.
         add('The Tidewarden', part.model, { x: TIDEWARDEN.x, y: HARBOUR_LEVEL, z: TIDEWARDEN.z }, { kind: 'scenery', bounds: { x: TIDEWARDEN.x, z: TIDEWARDEN.z, radius: TIDEWARDEN.radius + 10 * M } }); loop(part);
         shadows(part.model, false);
       }),
-    ];
+    ].filter(Boolean);
     let failed = 0, shown = 0;
     for (const { name, promise, then } of jobs) {
       let part;
@@ -271,13 +298,13 @@ export function createStory({ world, activities, collision }) {
     }
     if (lantern) lantern.model.visible = departed;
     if (well) for (const mist of well.mist) mist.visible = restored;
-    wellLight.intensity = restored ? 22 : 0;
-    if (departed) { uncollide('story-maren'); collide('story-chest', { x: places.chest.x, z: places.chest.z, r: .55 * M }); }
+    if (wellLight) wellLight.intensity = restored ? 22 : 0;
+    if (departed && sanctuaryHere) { uncollide('story-maren'); collide('story-chest', { x: places.chest.x, z: places.chest.z, r: .55 * M }); }
   }
 
   // The Moonwell wakes: its light climbs, and the Hart steps out of it.
   async function awaken() {
-    if (disposed) return;
+    if (disposed || !sanctuaryHere) return;
     restored = true;
     const { hart, well } = parts;
     if (well) for (const mist of well.mist) mist.visible = true;
@@ -289,7 +316,7 @@ export function createStory({ world, activities, collision }) {
   }
   // The keeper goes home with the Hart, leaving her lantern and her chest.
   async function depart() {
-    if (disposed) return;
+    if (disposed || !sanctuaryHere) return;
     const { maren, chest, lantern } = parts;
     departed = true;
     await tween(2.6, k => {
@@ -315,10 +342,10 @@ export function createStory({ world, activities, collision }) {
   function nearby(position, step) {
     if (disposed) return null;
     const candidates = [
-      !departed && ['maren', places.maren, step === 'restore' ? 'Give Maren the light' : 'Speak with Maren'],
-      ['tobin', places.tobin, 'Speak with Tobin'],
-      ['notice', places.notice, 'Read the notice board'],
-      ['ledger', places.ledger, step === 'ledger' ? 'Read the keeper’s ledger' : 'Look at the book'],
+      sanctuaryHere && !departed && ['maren', places.maren, step === 'restore' ? 'Give Maren the light' : 'Speak with Maren'],
+      cityHere && ['tobin', places.tobin, 'Speak with Tobin'],
+      cityHere && ['notice', places.notice, 'Read the notice board'],
+      cityHere && ['ledger', places.ledger, step === 'ledger' ? 'Read the keeper’s ledger' : 'Look at the book'],
     ].filter(Boolean);
     let best = null, bestDistance = Infinity;
     for (const [id, place, label] of candidates) {
@@ -329,7 +356,7 @@ export function createStory({ world, activities, collision }) {
   }
   // Where the step at hand is waiting, for the map and the beacon.
   function objective(step) {
-    if (disposed) return null;
+    if (disposed || !(['keeper', 'restore'].includes(step) ? sanctuaryHere : cityHere)) return null;
     const at = { notice: places.notice, keeper: places.maren, ferryman: places.tobin, ledger: places.ledger, restore: places.maren, farewell: places.tobin }[step];
     return at ? { x: at.x, y: at.y + (at.top || 0), z: at.z } : null;
   }
@@ -398,7 +425,7 @@ export function createStory({ world, activities, collision }) {
       if (!wanted.isRunning()) { wanted.reset().play(); other.crossFadeTo(wanted, .4, false); }
     }
     if (parts.hart && restored) parts.hart.model.rotation.y = places.hart.facing + Math.sin(time * .3) * .25;
-    if (restored && !tweens.length) wellLight.intensity = 22 + Math.sin(time * 1.7) * 2.5;
+    if (wellLight && restored && !tweens.length) wellLight.intensity = 22 + Math.sin(time * 1.7) * 2.5;
     // The Tidewarden circles the harbour, breaking the surface as it goes.
     // Once the well is lit it comes up into the air to look.
     const whale = parts.tidewarden?.model;

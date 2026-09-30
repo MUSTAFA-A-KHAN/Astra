@@ -58,7 +58,7 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   const root = new THREE.Group(); root.name = 'The Drowned Meridian'; root.visible = false;
   const places = { chart: storyPlaces.tobin, seal: storyPlaces.maren };
   const props = {}, marks = {}, fighters = [], remains = [], templates = {};
-  const siteMaps = { chart: 'city', seal: 'city' };
+  const siteMaps = { chart: 'city', seal: world.portalTravel ? 'mesa' : 'city' };
   const sites = [];
   let player = new THREE.Vector3(), runeIndex = 0, bellIndex = 0, valves = new Set(), valveTime = 0;
   let wave = 0, arena = null, waveDelay = 0, bossTime = 0, enabled = false;
@@ -194,15 +194,17 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
   place('valve3', 176, 178, 'yard', '#f1a265', 'valve');
   place('beacon', 140, 182, 'yard', '#b6fff2', 'beacon');
   place('warden', 205, 206, 'yard', '#c5a5fc', 'dais');
-  // The two things in the city that are the chapter's own: the meridian seal,
+  // The two homeward sites that are the chapter's own: the meridian seal,
   // on the ground where the keeper stood, and Tobin's tide chart, open on a
   // crate at his side.
   function buildMarks() {
     for (const id of Object.keys(marks)) { world.streaming?.removeTree?.(marks[id].group); marks[id].group.removeFromParent(); delete marks[id]; }
     unblock('chapter-two-chart');
-    if (world.activeMap && world.activeMap !== 'city') return;
-    const seal = new THREE.Group(); seal.name = 'The meridian seal'; seal.position.set(places.seal.x, places.seal.y + .03, places.seal.z);
-    marks.seal = { kind: 'seal', group: seal, glows: [] };
+    if (!world.activeMap || world.activeMap === siteMaps.seal) {
+      const seal = new THREE.Group(); seal.name = 'The meridian seal'; seal.position.set(places.seal.x, places.seal.y + .03, places.seal.z);
+      marks.seal = { kind: 'seal', group: seal, glows: [] };
+    }
+    if (!world.activeMap || world.activeMap === siteMaps.chart) {
     const tobin = places.chart, facing = tobin.facing ?? 0;
     const [beside] = [1, -1].map(side => ({ x: tobin.x + Math.cos(facing) * 1.15 * M * side, z: tobin.z - Math.sin(facing) * 1.15 * M * side }))
       .sort((a, b) => world.isWalkable(b.x, b.z, .4 * M) - world.isWalkable(a.x, a.z, .4 * M));
@@ -210,6 +212,7 @@ export function createChapterTwo({ world, collision, state, storyPlaces, isUnloc
     const crate = solidly(new THREE.Mesh(unitBox, wood)); crate.scale.set(.6 * M, .5 * M, .45 * M); crate.position.y = .25 * M; chart.add(crate);
     marks.chart = { kind: 'chart', group: chart, glows: [] };
     block('chapter-two-chart', { x: beside.x, z: beside.z, r: .38 * M });
+    }
     for (const mark of Object.values(marks)) {
       root.add(mark.group); world.streaming?.add(mark.group, { kind: 'props', bounds: { x: mark.group.position.x, z: mark.group.position.z, radius: 3 } });
       dressMark(mark);

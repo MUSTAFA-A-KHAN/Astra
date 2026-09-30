@@ -18,7 +18,7 @@ test('chapter two saves only explicit booleans and never inherits chapter one co
   assert.equal(saved.chapterTwo.accepted, true, 'reading creates an independent state object');
 });
 
-test('the chapter advances through three maps and retains completed trials', () => {
+test('the chapter advances through four maps and retains completed trials', () => {
   const state = readChapterTwo({});
   const expected = ['summons', 'roots', 'bells', 'valves', 'vigil', 'warden', 'homecoming', 'complete'];
   assert.equal(CHAPTER_TWO.title, 'The Drowned Meridian');
@@ -28,7 +28,7 @@ test('the chapter advances through three maps and retains completed trials', () 
     state[flags[index]] = true;
     assert.equal(chapterTwoStep(state).id, expected[index + 1]);
   }
-  assert.deepEqual([...new Set(CHAPTER_TWO_STEPS.map(step => step.map))].sort(), ['city', 'forest', 'yard']);
+  assert.deepEqual([...new Set(CHAPTER_TWO_STEPS.map(step => step.map))].sort(), ['city', 'forest', 'mesa', 'yard']);
   state.bells = false;
   assert.equal(chapterTwoStep(state).id, 'bells', 'a later flag cannot skip an unfinished trial');
 });
@@ -77,7 +77,7 @@ test('Tobin gives the physical keeper book and mission directions follow the por
   assert.match(chart, /places Maren's ledger in your hands/);
   assert.match(chart, /Only this book can awaken them/);
   assert.match(chart, /open it on the lectern, read the passage, then cast the spell/);
-  for (const [id, map] of [['roots', 'forest'], ['bells', 'yard'], ['homecoming', 'city']]) {
+  for (const [id, map] of [['roots', 'forest'], ['bells', 'yard'], ['homecoming', 'mesa']]) {
     const step = CHAPTER_TWO_STEPS.find(entry => entry.id === id);
     assert.equal(step.map, map);
     assert.match(step.description, /book/);

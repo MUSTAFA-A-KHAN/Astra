@@ -126,7 +126,7 @@ export function createChapterThree({ world, collision, state, sites, isUnlocked,
     }
     for (const site of [...MEMORY_IDS, ...RELAY_LAMPS, 'beacon', 'seal']) {
       const p = sites[site];
-      if (!p || (world.activeMap && world.activeMap !== (MEMORY_IDS.includes(site) ? 'forest' : site === 'seal' ? 'city' : 'yard'))) continue;
+      if (!p || (world.activeMap && world.activeMap !== (MEMORY_IDS.includes(site) ? 'forest' : site === 'seal' ? 'mesa' : 'yard'))) continue;
       const group = new THREE.Group(); group.name = `Shared flame · ${site}`; group.position.set(p.x, p.y + (MEMORY_IDS.includes(site) ? 3.1 : site === 'seal' ? .3 : 1.2), p.z);
       const material = new THREE.MeshStandardMaterial({ color: '#ffdda0', emissive: '#ffb653', emissiveIntensity: .7, metalness: .45, roughness: .35 });
       const ring = new THREE.Mesh(new THREE.TorusGeometry(.75, .07, 6, 24), material); group.add(ring);

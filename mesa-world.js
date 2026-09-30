@@ -6,8 +6,8 @@ import { bank } from './bank.js';
 // The sixth district: "Worldmachine Terrain", by Hannes Delbeke
 // (https://sketchfab.com/han), used under CC-BY-4.0. A wind-carved butte on a
 // plain of red sand, moored off the city's south quay, west of the yard.
-// Loaded as supplied, and only once the player turns it on in the settings:
-// world-map.js imports this module then.
+// Loaded only when the player chooses its portal passage; the city never
+// downloads or retains this terrain during ordinary portal travel.
 export const MESA_ASSET = 'map/worldmachine_terrain.glb';
 // The model stands some kilometres from its own origin: it is first brought
 // home, its middle over the origin and its lowest sand at nought. At 8 the
