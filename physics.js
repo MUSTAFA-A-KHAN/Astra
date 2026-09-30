@@ -106,7 +106,8 @@ export class SpatialHash {
           else { let a=(center-extent-origin)/delta,b=(center+extent-origin)/delta; if(a>b)[a,b]=[b,a]; enter=Math.max(enter,a);exit=Math.min(exit,b); }
         }
       }
-      const bottom=(c.bottom ?? -10000)-radius, top=(c.top ?? 10000)+radius;
+      // A box's walking top may be rounded up; the camera sees what is really there.
+      const bottom=(c.bottom ?? -10000)-radius, top=(c.cameraTop ?? c.top ?? 10000)+radius;
       if(Math.abs(dy)<1e-10) { if(from.y<bottom || from.y>top) continue; }
       else { let a=(bottom-from.y)/dy,b=(top-from.y)/dy;if(a>b)[a,b]=[b,a];enter=Math.max(enter,a);exit=Math.min(exit,b); }
       if(enter<=exit && exit>=0 && enter>=0) nearest=Math.min(nearest,enter);

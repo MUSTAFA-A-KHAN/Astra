@@ -5,6 +5,8 @@ const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 const isPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
 const blend = (rate, dt) => 1 - Math.exp(-rate * dt);
 const MODES = new Set(['follow', 'combat', 'aim', 'cinematic', 'mount']);
+// How far a blocked boom may climb, tried in turn, and the steepest it goes.
+const LIFTS = [.2, .4, .65, .9], MAX_ORBIT = 1.25;
 
 /** Third-person camera. All positions are world coordinates; pitch may look above the horizon. */
 export class FollowCamera {
@@ -18,6 +20,7 @@ export class FollowCamera {
     this.candidate = new THREE.Vector3();
     this.anchor = new THREE.Vector3();
     this.previous = new THREE.Vector3();
+    this.lifted = new THREE.Vector3();
     this.lockPoint = new THREE.Vector3();
     this.yaw = 0;
     this.pitch = .36;
@@ -30,6 +33,10 @@ export class FollowCamera {
     this.colliding = false;
     this.initialized = false;
     this.cinematicTime = 0;
+    this.lift = 0;
+    // The boom swings through trunks and posts instead of diving in at each
+    // one: in a wood that dive is most of every walk. Walls still hold it off.
+    this.lookPast = c => c.slender;
   }
 
   reset(position, yaw = 0, pitch = .36, distance = 12) {
@@ -45,6 +52,7 @@ export class FollowCamera {
     this.targetId = null;
     this.mode = 'follow';
     this.cinematicTime = 0;
+    this.lift = 0;
     this.initialized = false;
   }
 
@@ -77,8 +85,19 @@ export class FollowCamera {
     return safe;
   }
 
+  // Where the boom ends at this orbit pitch, into `out`, and how much of it is clear.
+  reach(pitch, out) {
+    const cp = Math.cos(pitch);
+    out.set(
+      this.anchor.x + Math.sin(this.yaw) * cp * this.distance,
+      this.anchor.y + Math.sin(pitch) * this.distance,
+      this.anchor.z + Math.cos(this.yaw) * cp * this.distance,
+    );
+    return this.safeFraction(this.anchor, out, this.radius, this.lookPast);
+  }
+
   clip(from, to, radius = this.radius) {
-    const fraction = this.safeFraction(from, to, radius);
+    const fraction = this.safeFraction(from, to, radius, this.lookPast);
     if (fraction < 1) {
       // Keep a small clearance without imposing a minimum boom length through a wall.
       const padding = .04 / Math.max(.04, from.distanceTo(to));
@@ -166,13 +185,21 @@ export class FollowCamera {
       this.target.lerp(this.lockPoint, .42);
     }
     // Looking up tilts the lens instead of moving the boom through the ground.
-    const orbitPitch = Math.max(.08, this.pitch), cp = Math.cos(orbitPitch);
-    this.desired.set(
-      this.anchor.x + Math.sin(this.yaw) * cp * this.distance,
-      this.anchor.y + Math.sin(orbitPitch) * this.distance,
-      this.anchor.z + Math.cos(this.yaw) * cp * this.distance,
-    );
-    const fraction = this.safeFraction(this.anchor, this.desired);
+    const orbitPitch = Math.max(.08, this.pitch);
+    // A boom cut short first climbs over what is in the way (a fence, a
+    // parked truck, a signpost) and draws in toward the hero only as far as
+    // climbing leaves it blocked. It climbs at once and settles back slowly,
+    // so walking past a post is a gentle rise, not a dive into the hero's back.
+    let lift = 0, fraction = this.reach(orbitPitch, this.desired);
+    if (fraction < .8 && mode !== 'aim') {
+      for (const step of LIFTS) {
+        const clear = this.reach(Math.min(MAX_ORBIT, orbitPitch + step), this.lifted);
+        if (clear > fraction + .1) { lift = step; fraction = clear; }
+        if (clear >= .95) break;
+      }
+    }
+    this.lift = snap || lift > this.lift ? lift : THREE.MathUtils.damp(this.lift, lift, 2, dt);
+    if (this.lift > 1e-3) fraction = this.reach(Math.min(MAX_ORBIT, orbitPitch + this.lift), this.desired);
     const safeDistance = Math.max(0, this.distance * fraction - (fraction < 1 ? .04 : 0));
     if (fraction < 1) this.colliding = true;
     // Retract immediately; ease back out so pillars and doorways do not make the camera pump.
@@ -184,7 +211,7 @@ export class FollowCamera {
     // Both the boom and the actual smoothed travel need a sweep: interpolating safe
     // endpoints alone can still cut through the inside corner of a building.
     this.clip(this.anchor, this.camera.position);
-    if (!snap && this.collision.cameraFraction(this.previous, this.previous, this.radius) === 1) {
+    if (!snap && this.collision.cameraFraction(this.previous, this.previous, this.radius, this.lookPast) === 1) {
       this.clip(this.previous, this.camera.position);
     }
     this.camera.position.y = Math.max(this.camera.position.y, this.floorHeight(this.camera.position.x, this.camera.position.z));
@@ -204,7 +231,7 @@ export class FollowCamera {
     return {
       mode: this.mode, locked: this.locked, targetId: this.targetId, colliding: this.colliding,
       distance: this.camera.position.distanceTo(this.anchor), requestedDistance: this.distance,
-      yaw: this.yaw, pitch: this.pitch, fov: this.camera.fov,
+      yaw: this.yaw, pitch: this.pitch, lift: this.lift, fov: this.camera.fov,
       position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
       target: { x: this.target.x, y: this.target.y, z: this.target.z },
     };

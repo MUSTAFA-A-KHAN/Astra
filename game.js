@@ -1203,6 +1203,9 @@ function updatePlayer(dt){
   let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+joyX;
   let z=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+joyY;
   const length=Math.hypot(x,z);if(length>1){x/=length;z/=length;}
+  // Setting off ends the turn with the light, as looking round does: input is
+  // read against the view, so turning it under a walking hero steers them.
+  if(length>.1)followLight=0;
   const run=sprinting||stickSprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
   const movementYaw=lockTarget?followCamera.yaw:yaw;
   let wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z,magnitude=Math.min(1,length);
