@@ -6,7 +6,7 @@ const isPoint = point => point && Number.isFinite(point.x) && Number.isFinite(po
 const blend = (rate, dt) => 1 - Math.exp(-rate * dt);
 const MODES = new Set(['follow', 'combat', 'aim', 'cinematic', 'mount']);
 // How far a blocked boom may climb, tried in turn, and the steepest it goes.
-const LIFTS = [.2, .4, .65, .9], MAX_ORBIT = 1.25;
+const LIFTS = [.15, .3, .45], MAX_ORBIT = 1.25;
 
 /** Third-person camera. All positions are world coordinates; pitch may look above the horizon. */
 export class FollowCamera {
@@ -186,17 +186,13 @@ export class FollowCamera {
     }
     // Looking up tilts the lens instead of moving the boom through the ground.
     const orbitPitch = Math.max(.08, this.pitch);
-    // A boom cut short first climbs over what is in the way (a fence, a
-    // parked truck, a signpost) and draws in toward the hero only as far as
-    // climbing leaves it blocked. It climbs at once and settles back slowly,
-    // so walking past a post is a gentle rise, not a dive into the hero's back.
+    // A boom cut short by something a small climb clears (a fence, a parked
+    // truck, a signpost) climbs over it rather than diving into the hero's
+    // back. Anything taller it draws in front of: swinging up over a roof
+    // would turn the whole view. It climbs at once and settles back slowly.
     let lift = 0, fraction = this.reach(orbitPitch, this.desired);
     if (fraction < .8 && mode !== 'aim') {
-      for (const step of LIFTS) {
-        const clear = this.reach(Math.min(MAX_ORBIT, orbitPitch + step), this.lifted);
-        if (clear > fraction + .1) { lift = step; fraction = clear; }
-        if (clear >= .95) break;
-      }
+      for (const step of LIFTS) if (this.reach(Math.min(MAX_ORBIT, orbitPitch + step), this.lifted) >= .95) { lift = step; break; }
     }
     this.lift = snap || lift > this.lift ? lift : THREE.MathUtils.damp(this.lift, lift, 2, dt);
     if (this.lift > 1e-3) fraction = this.reach(Math.min(MAX_ORBIT, orbitPitch + this.lift), this.desired);

@@ -44,7 +44,7 @@ let portalJourney = null;
 // the thumb rest in the same corner instead of the same pixel. An
 // absent control has never been moved and stays where the stylesheet
 // puts it.
-const CONTROLS = ['joystick','sprint','attack','ability','jump','view'];
+const CONTROLS = ['joystick','sprint','attack','ability','jump','view','look'];
 // Camera perspectives, cycled by the view button. Each one is a pitch,
 // a distance and a field of view; the player is free to drag and zoom
 // away from any of them afterwards, which is why these are a starting
@@ -855,9 +855,34 @@ function cycleView(step=1){
   showView();save();toast(`Camera · ${currentView().name}`);sound();
 }
 showView();
+/**
+ * PLAYER FOLLOW AND FREE LOOK
+ *
+ * The camera holds the way PUBG Mobile's does. The player follow camera
+ * sits behind the hero's heading, `yaw` and `pitch`: a swipe turns that
+ * heading, the stick walks along it, and a hero standing still turns round
+ * with the swipe. Holding the eye button (Alt on a keyboard) is the free
+ * look camera: a swipe then swings the view alone, by `look`, while the
+ * hero keeps their heading and their stride. Let go, and the view swings
+ * back behind them.
+ */
+const look={held:false,pointer:null,x:0,y:0,yaw:0,pitch:0};
+// How much longer a hero standing still turns to face a heading just swiped.
+let faceHeading=0;
+function swipe(dx,dy){
+  if(look.held){look.yaw-=dx*.005;look.pitch=clamp(look.pitch+dy*.004,-1.2-pitch,1.08-pitch);}
+  else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;faceHeading=.4;}
+  followLight=0;
+}
+function holdLook(on){
+  if(on&&(screen!=='game'||dialog.open||chat||portalJourney))on=false;
+  if(look.held===on)return;
+  look.held=on;$('look-button').setAttribute('aria-pressed',String(on));syncCameraControls();
+}
+function releaseLook(){look.pointer=null;look.yaw=look.pitch=0;holdLook(false);}
 function syncCameraControls(){
   $('aim-button').setAttribute('aria-pressed',String(aiming));$('lock-button').setAttribute('aria-pressed',String(!!lockTarget));$('cinematic-button').setAttribute('aria-pressed',String(cinematic));
-  $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
+  $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=look.held?'FREE LOOK':activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
 }
 // The flashlight comes out at dusk and goes away at dawn by itself; this is
 // the player's say over whether it comes out at all.
@@ -872,6 +897,7 @@ function toggleAim(){if(screen!=='game'||dialog.open||chat)return;aiming=!aiming
 function toggleCinematic(){if(screen!=='game'||dialog.open||chat)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
 function toggleLock(){
   if(screen!=='game'||dialog.open||chat)return;
+  releaseLook();
   if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
   else{
     lockTarget=[...enemies,...activeTrials().combatants].filter(e=>e.alive&&position.distanceTo(e.group.position)<35&&collision.cameraFraction(new THREE.Vector3(position.x,position.y+1.8,position.z),new THREE.Vector3(e.group.position.x,e.group.position.y+1.8,e.group.position.z),.1)>.98).sort((a,b)=>position.distanceToSquared(a.group.position)-position.distanceToSquared(b.group.position))[0]||null;
@@ -879,7 +905,7 @@ function toggleLock(){
   }
   aiming=cinematic=false;syncCameraControls();
 }
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;stickSprinting=false;dragId=null;emoting=null;aiming=false;closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';$('joystick').classList.remove('held','sprinting');}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;stickSprinting=false;dragId=null;emoting=null;aiming=false;releaseLook();closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';$('joystick').classList.remove('held','sprinting');}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
   // reaches the game, and Escape finishes the same as Done.
@@ -892,8 +918,10 @@ addEventListener('keydown',e=>{
   if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
   // An open emote picker is the first thing Escape closes.
   if(e.code==='Escape'&&!$('emote-panel').hidden){e.preventDefault();closeEmotes();return;}
-  if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
+  // Alt is the free look, as in PUBG: the browser does not get it for its menu.
+  if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','AltLeft','AltRight'].includes(e.code))e.preventDefault();
   keys.add(e.code);if(e.repeat)return;
+  if(e.code==='AltLeft'||e.code==='AltRight')holdLook(true);
   // The Escape that opens the pause menu is spent: left alone, the browser
   // would take it as a request to close the modal it just opened.
   if(e.code==='Escape')e.preventDefault();
@@ -901,7 +929,7 @@ addEventListener('keydown',e=>{
   if(e.code==='KeyL')toggleLock();if(e.code==='KeyR')toggleAim();if(e.code==='KeyC')toggleCinematic();if(e.code==='KeyT')toggleFlashlight();
   if(EMOTE_KEYS[e.code])perform(EMOTE_KEYS[e.code]);if(e.code==='KeyG')toggleEmotes();
 });
-addEventListener('keyup',e=>keys.delete(e.code));
+addEventListener('keyup',e=>{keys.delete(e.code);if(e.code==='AltLeft'||e.code==='AltRight'){e.preventDefault();if(look.pointer===null)holdLook(keys.has('AltLeft')||keys.has('AltRight'));}});
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
 addEventListener('pagehide',()=>{save();audio.setPaused(true);});
 document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){audio.setPaused(true);save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
@@ -939,7 +967,7 @@ function toggleEmotes(open=$('emote-panel').hidden){
 }
 function closeEmotes(){toggleEmotes(false);}
 renderer.domElement.addEventListener('pointerdown',e=>{if(dialog.open||dragId!==null)return;dragId=e.pointerId;dragX=e.clientX;dragY=e.clientY;dragDistance=0;renderer.domElement.setPointerCapture(e.pointerId);});
-renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else{yaw-=dx*.005;pitch=clamp(pitch+dy*.004,-1.2,1.08);settling=0;followLight=0;}});
+renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==dragId)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragDistance+=Math.abs(dx)+Math.abs(dy);dragX=e.clientX;dragY=e.clientY;if(screen==='lobby')previewYaw+=dx*.009;else swipe(dx,dy);});
 renderer.domElement.addEventListener('pointerup',e=>{if(e.pointerId!==dragId)return;if(dragDistance<7&&e.pointerType==='mouse'&&e.button===0)attack();dragId=null;});
 renderer.domElement.addEventListener('pointercancel',()=>dragId=null);renderer.domElement.addEventListener('lostpointercapture',()=>dragId=null);
 renderer.domElement.addEventListener('wheel',e=>{if(screen==='game'){radius=clamp(radius+e.deltaY*.014,ZOOM.min,ZOOM.max);settling=0;e.preventDefault();}},{passive:false});
@@ -970,6 +998,12 @@ joystick.addEventListener('pointermove',e=>{if(e.pointerId===joyId)moveJoy(e);})
 function endJoy(e){if(e.pointerId===joyId){joyId=null;joyX=joyY=0;stickSprinting=false;$('joystick-knob').style.transform='';joystick.classList.remove('held','sprinting');}}
 for(const event of ['pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(event,endJoy);
 const sprint=$('sprint-button');sprint.addEventListener('pointerdown',e=>{sprinting=true;sprint.setPointerCapture(e.pointerId);e.preventDefault();});for(const event of ['pointerup','pointercancel','lostpointercapture'])sprint.addEventListener(event,()=>sprinting=false);
+// The eye: held, the view looks round freely, by dragging the thumb on it or
+// swiping anywhere else. Let go, and it swings back behind the hero.
+const lookButton=$('look-button');
+lookButton.addEventListener('pointerdown',e=>{e.preventDefault();if(look.pointer!==null)return;holdLook(true);if(!look.held)return;look.pointer=e.pointerId;look.x=e.clientX;look.y=e.clientY;lookButton.setPointerCapture(e.pointerId);});
+lookButton.addEventListener('pointermove',e=>{if(e.pointerId!==look.pointer)return;swipe(e.clientX-look.x,e.clientY-look.y);look.x=e.clientX;look.y=e.clientY;});
+for(const event of ['pointerup','pointercancel','lostpointercapture'])lookButton.addEventListener(event,e=>{if(e.pointerId!==look.pointer)return;look.pointer=null;holdLook(keys.has('AltLeft')||keys.has('AltRight'));});
 // A press that begins while another finger is already down never
 // becomes a click: the browser only promotes a single-pointer
 // gesture to a tap. A thumb on the joystick is exactly that, so
@@ -1226,9 +1260,13 @@ function updatePlayer(dt){
   if(health<=0){respawnPlayer();return;}
   const floor=locomotion.groundHeight;
   avatar.position.copy(position);
-  const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
+  // Standing still, the hero turns round with the heading the player swipes;
+  // on the move they face the way they go.
+  faceHeading=Math.max(0,faceHeading-dt);
+  const turning=faceHeading>0&&locomotion.speed<=.2;
+  const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming||turning?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
   if(mounted)avatar.rotation.y=reins.heading;
-  else if((locomotion.speed>.2||lockTarget||aiming)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
+  else if((locomotion.speed>.2||lockTarget||aiming||turning)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
   if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
   if(locomotion.climbing)avatar.rotation.y=Math.PI;
   if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||hurtTimer>.9||!locomotion.grounded))emoting=null;
@@ -1328,9 +1366,12 @@ function updateCamera(dt){
       // and only in the plain follow view: never against an aim or a lock.
       const light=followLight>0&&!chat&&!aiming&&!cinematic&&!lockTarget&&guideLight.position;
       if(followLight>0)followLight=Math.max(0,followLight-dt);
-      if(light&&Math.hypot(light.x-position.x,light.z-position.z)>2.5){const want=Math.atan2(position.x-light.x,position.z-light.z);yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*(1-Math.exp(-2.5*dt));}
+      if(light&&Math.hypot(light.x-position.x,light.z-position.z)>2.5){const want=Math.atan2(position.x-light.x,position.z-light.z);yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*(1-Math.exp(-2.5*dt));faceHeading=.4;}
+      // Let go, the free look swings back behind the hero, the short way round.
+      if(look.held&&chat)holdLook(false);
+      if(!look.held){look.yaw=damp(Math.atan2(Math.sin(look.yaw),Math.cos(look.yaw)),0,10,dt);look.pitch=damp(look.pitch,0,10,dt);}
       const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
-      followCamera.update(dt,position,yaw,pitch,radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
+      followCamera.update(dt,position,yaw+look.yaw,clamp(pitch+look.pitch,-1.2,1.08),radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
       if(lockTarget&&!followCamera.locked)lockTarget=null;
     }
     if(lockTarget&&weight===0){
@@ -1480,7 +1521,7 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),control:look.held?'freeLook':'playerFollow',heading:yaw,look:{yaw:look.yaw,pitch:look.pitch},facing:avatar.rotation.y,view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='mesa'||saved.map==='city'?saved.map:saved.map==='street'&&portalRoute(progress,'city','street').destination==='street'?'street':chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(resumeMap!=='city'&&(resumeMap==='mesa'||chapterTwoUnlocked())){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}

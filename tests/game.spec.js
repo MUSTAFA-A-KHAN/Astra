@@ -357,7 +357,7 @@ test('responsive touch controls fit and joystick drives the same player', async 
   const errors = await boot(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await start(page);
-  for (const selector of ['#joystick', '#jump-button', '#sprint-button', '#attack-button', '#ability-button', '#view-button']) {
+  for (const selector of ['#joystick', '#jump-button', '#sprint-button', '#attack-button', '#ability-button', '#view-button', '#look-button']) {
     await expect(page.locator(selector)).toBeVisible();
     const box = await page.locator(selector).boundingBox();
     expect(box.x).toBeGreaterThanOrEqual(0);
@@ -399,7 +399,7 @@ test('responsive touch controls fit and joystick drives the same player', async 
 
   // No control may begin a gesture of its own: they are pressed and dragged.
   const touchAction = selector => page.locator(selector).evaluate(element => getComputedStyle(element).touchAction);
-  for (const selector of ['#attack-button', '#ability-button', '#jump-button', '#view-button', '#joystick', '#sprint-button']) {
+  for (const selector of ['#attack-button', '#ability-button', '#jump-button', '#view-button', '#joystick', '#sprint-button', '#look-button']) {
     expect(await touchAction(selector), `${selector} may not begin a gesture`).toBe('none');
   }
 
@@ -535,6 +535,77 @@ test('the view button cycles camera perspectives and remembers the one you left 
   expect(remembered.view).toBe('shoulder');
   expect(shape(remembered)).toBe(shape(seen[1]));
   expect(await page.locator('#view-label').textContent()).toBe('Shoulder');
+  expect(errors).toEqual([]);
+});
+
+// The camera holds the way PUBG Mobile's does. The player follow camera sits
+// behind the heading the player swipes, and a hero standing still turns round
+// with it. Holding the eye (Alt on a keyboard) is the free look camera: the
+// view swings on its own, the hero keeps their heading and walks along it,
+// and letting go swings the view back behind them.
+test('the camera follows the swiped heading and the eye looks round freely', async ({ page, isMobile }) => {
+  const errors = await boot(page);
+  await start(page);
+  const camera = async () => (await snapshot(page)).camera;
+  const off = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  const touch = isMobile ? await page.context().newCDPSession(page) : null;
+  // A finger on the glass, or the mouse, pressed at `from` and moved by `dx`.
+  const press = async (from, id = 1) => {
+    if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...from, id }] });
+    else { await page.mouse.move(from.x, from.y); await page.mouse.down(); }
+  };
+  const slide = async (from, dx, id = 1) => {
+    if (touch) for (let step = 1; step <= 6; step++) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + dx * step / 6, y: from.y, id }] });
+    else await page.mouse.move(from.x + dx, from.y, { steps: 6 });
+  };
+  const lift = async (from, dx, id = 1) => {
+    if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ x: from.x + dx, y: from.y, id }] });
+    else await page.mouse.up();
+  };
+  const { width, height } = page.viewportSize(), middle = { x: width / 2, y: height * .45 };
+
+  const before = await camera();
+  expect(before.control).toBe('playerFollow');
+  await press(middle); await slide(middle, -160); await lift(middle, -160);
+  const swiped = await camera();
+  expect(off(swiped.heading, before.heading)).toBeGreaterThan(.4);
+  // The standing hero turns round with it, and the camera stays behind them.
+  await expect.poll(async () => { const c = await camera(); return off(c.facing, c.heading + Math.PI); }).toBeLessThan(.05);
+  expect(off((await camera()).yaw, swiped.heading)).toBeLessThan(.05);
+
+  // The eye is a touch control; a keyboard holds Alt instead.
+  const eye = touch && await page.locator('#look-button').boundingBox();
+  const thumb = eye && { x: eye.x + eye.width / 2, y: eye.y + eye.height / 2 };
+  if (touch) { await press(thumb); await slide(thumb, -120); }
+  else {
+    await page.keyboard.down('Alt');
+    await press(middle); await slide(middle, -160); await lift(middle, -160);
+  }
+  await expect(page.locator('#camera-mode')).toHaveText('FREE LOOK');
+  const looking = await camera();
+  expect(looking.control).toBe('freeLook');
+  expect(looking.look.yaw).toBeGreaterThan(.4);
+  // The heading, and the hero on it, stay where they were.
+  expect(off(looking.heading, swiped.heading)).toBeLessThan(1e-6);
+  expect(off(looking.facing, swiped.heading + Math.PI)).toBeLessThan(.05);
+  if (!touch) {
+    // And walking goes along the heading, not the way the view looks.
+    const from = (await snapshot(page)).position;
+    await page.keyboard.down('KeyW');
+    await expect.poll(async () => { const at = (await snapshot(page)).position; return Math.hypot(at.x - from.x, at.z - from.z); }).toBeGreaterThan(1.5);
+    await page.keyboard.up('KeyW');
+    const to = (await snapshot(page)).position;
+    expect(off(Math.atan2(to.x - from.x, to.z - from.z), looking.heading + Math.PI)).toBeLessThan(.3);
+    await page.keyboard.up('Alt');
+  } else await lift(thumb, -120);
+
+  // Let go, and the view swings back behind the hero.
+  await expect.poll(async () => { const c = await camera(); return off(c.yaw, c.heading); }).toBeLessThan(.02);
+  const back = await camera();
+  expect(back.control).toBe('playerFollow');
+  expect(Math.abs(back.look.yaw)).toBeLessThan(.02);
+  await expect(page.locator('#camera-mode')).toHaveText('');
+  await touch?.detach();
   expect(errors).toEqual([]);
 });
 
