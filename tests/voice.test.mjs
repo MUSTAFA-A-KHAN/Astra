@@ -5,6 +5,7 @@ import { GameAudio } from '../audio.js';
 import { HEROES } from '../characters.js';
 import { PEOPLE, CAMP_DIRECTIONS } from '../story-script.js';
 import { VOICES } from '../voice-manifest.js';
+import { PASSAGES } from '../portal-script.js';
 import { CAST, FEELINGS, scripts, spokenLines, voiceOf } from '../tools/voice-direction.mjs';
 
 const audioDirectory = new URL('../assets/audio/', import.meta.url);
@@ -16,7 +17,7 @@ test('every line the cast speaks has a feeling the recording knows', () => {
   for (const { voice, text, feeling } of lines) assert.ok(FEELINGS[feeling], `${voice}'s “${text}” is felt as ${feeling}, which tools/voice-direction.mjs does not know`);
   const { heroes, people } = scripts();
   // The hero's spells are among theirs, one for each of the book's passages.
-  assert.equal(heroes.Spiderman.filter(line => line.feeling === 'incantation').length, 3);
+  assert.equal(heroes.Spiderman.filter(line => line.feeling === 'incantation').length, Object.keys(PASSAGES).length);
   // Maren and Tobin say every line they have that has words in it.
   assert.equal(people.maren.length, 18);
   assert.ok(people.tobin.every(line => /\p{L}/u.test(line.text)));

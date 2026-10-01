@@ -4,7 +4,7 @@ import { chapterThreeUnlocked, readChapterThree } from './chapter-three-script.j
 
 // The keeper's book chooses the next passage from the saved story. Combat
 // abilities and proximity alone can never provide a portal incantation.
-const PASSAGES = Object.freeze({
+export const PASSAGES = Object.freeze({
   mesa: Object.freeze({
     destination: 'mesa', mapName: 'Red Mesa', title: 'The sanctuary passage',
     spell: 'By keeper’s light and crimson sand, bear me to the Moonwell’s land.',

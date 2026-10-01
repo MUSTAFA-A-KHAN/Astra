@@ -14,7 +14,7 @@
 import { fileURLToPath } from 'node:url';
 import { PEOPLE, CONVERSATIONS, CAMP_DIRECTIONS, conversation } from '../story-script.js';
 import { CHAPTER_TWO_PEOPLE, chapterTwoConversation } from '../chapter-two-script.js';
-import { portalRoute, portalConversation } from '../portal-script.js';
+import { PASSAGES, portalConversation } from '../portal-script.js';
 
 // Who speaks aloud: heroes by hero id, for the lines the scripts give to
 // 'you', and people by the voice their speakers name (their own id, unless
@@ -117,8 +117,8 @@ export function spokenLines() {
     const state = Object.fromEntries(flags.map((flag, i) => [flag, !!(bits & 1 << i)]));
     for (const person of Object.keys(CHAPTER_TWO_PEOPLE)) take(chapterTwoConversation(person, state));
   }
-  const finished = { restored: true, story: { keeper: true, ferryman: true, ledger: true, farewell: true, notice: true }, chapterTwo: Object.fromEntries(flags.map(flag => [flag, true])) };
-  for (const map of ['city', 'forest', 'yard']) take(portalConversation(portalRoute(finished, map)));
+  // Every passage's spell is read at the lectern on some crossing.
+  for (const passage of Object.values(PASSAGES)) take(portalConversation(passage));
   return [...lines.values()];
 }
 
