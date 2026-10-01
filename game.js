@@ -408,8 +408,13 @@ function attack(special=false){
 function nearbyInteraction(){
   if(portalJourney)return null;
   const book = portal.nearby(position);
+  // Whatever stands nearer than the keeper's book is what the player came for:
+  // on Pine Islet the gate stands a few strides from the rain rune.
+  const nearer=place=>place&&(!book||Math.hypot(position.x-place.x,position.z-place.z)<Math.hypot(position.x-portal.places.book.x,position.z-portal.places.book.z));
   const shared = chapterThreeUnlocked() ? chapterThree.nearby(position) : null;
-  if(shared&&(!book||Math.hypot(position.x-shared.x,position.z-shared.z)<Math.hypot(position.x-portal.places.book.x,position.z-portal.places.book.z)))return shared;
+  if(nearer(shared))return shared;
+  const trial = book&&!finale ? activeTrials().nearby(position) : null;
+  if(nearer(trial))return trial;
   if(book)return book;
   if(!inCity())return activeTrials().nearby(position)||(!finale&&inStoryMap()?story.nearby(position,STEPS[storyStep(progress)].id):null);
   if(activities.mount.mounted)return {type:'mount',label:'Dismount'};

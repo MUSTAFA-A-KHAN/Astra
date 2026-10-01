@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 
-// The story is heard aloud. Meeting Maren as Spiderman, Maren speaks, then
-// Gwen's question is heard in her own voice, its words typing out at the pace
-// she says it; once she has said it the conversation moves on by itself, and
-// each falls quiet when it moves on or is skipped. Tobin, at the jetty, speaks
-// too, and a line no one speaks holds long enough to be read and then closes
-// the conversation. As in story.spec.js, the
+// The story is heard aloud. Meeting Maren at the Moonwell on the Red Mesa as
+// Spiderman, Maren speaks, then Gwen's question is heard in her own voice, its
+// words typing out at the pace she says it; once she has said it the
+// conversation moves on by itself, and each falls quiet when it moves on or is
+// skipped. Tobin, at the city's west jetty across the portal, speaks too, and a
+// line no one speaks holds long enough to be read and then closes the
+// conversation. As in story.spec.js, the
 // hook exists only in this intercepted response: it stands the hero before
 // Maren, and opens a conversation of its own choosing.
 const probe = `
@@ -29,7 +30,8 @@ window.__VOICE_TEST__ = {
     const at = portal.places.reading;
     resetInput(); position.set(at.x, groundHeight(at.x, at.z), at.z); locomotion.reset(); avatar.position.copy(position);
   },
-  read() { if (!chat) readPortalBook(portalRoute(progress,world.activeMap).destination); return !!portalJourney; },
+  // Reads the passage asked for, or else the one the book opens at.
+  read(destination) { if (!chat) readPortalBook(destination ?? portalRoute(progress,world.activeMap).destination); return !!portalJourney; },
   phase: () => portalJourney?.phase ?? null,
   clock: () => time,
 };
@@ -41,6 +43,8 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   test.setTimeout(process.env.CI ? 600000 : 240000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  // The Moonwell is on the Red Mesa, which the game resumes on from a save left there.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ map: 'mesa' })));
   await page.route('**/game.js', async route => {
     const response = await route.fetch();
     await route.fulfill({ response, body: `${await response.text()}\n${probe}` });
@@ -50,7 +54,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await page.locator('[data-hero="Spiderman"]').click();
   await page.waitForFunction(() => window.__ASTRA_DEBUG__.hero === 'Spiderman' && !window.__ASTRA_DEBUG__.switching, null, { timeout: 120000 });
   await page.locator('#play-button').click();
-  await page.waitForFunction(() => window.__ASTRA_DEBUG__.screen === 'game' && window.__ASTRA_DEBUG__.audio.state === 'running');
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.screen === 'game' && window.__ASTRA_DEBUG__.audio.state === 'running' && window.__ASTRA_DEBUG__.terrain.activeMap === 'mesa', null, { timeout: 120000 });
 
   await page.evaluate(() => window.__VOICE_TEST__.place('maren'));
   await expect(page.locator('#interaction-text')).toHaveText('Speak with Maren');
@@ -98,6 +102,13 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await expect(page.locator('#conversation')).toBeHidden();
   expect((await audio(page)).speaking).toBeNull();
 
+  // Tobin waits at the city's west jetty: home through the portal, as a player goes.
+  await page.evaluate(() => window.__VOICE_TEST__.toBook());
+  await page.waitForFunction(() => window.__VOICE_TEST__.read());
+  for (let presses = 0; presses < 20 && await page.locator('#conversation').isVisible(); presses++) {
+    await page.keyboard.press('f'); await page.waitForTimeout(40);
+  }
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.terrain.activeMap === 'city' && !window.__VOICE_TEST__.phase(), null, { timeout: 120000 });
   // Tobin, with the ferry closed, says so in his own voice.
   await page.evaluate(() => window.__VOICE_TEST__.place('tobin'));
   await expect(page.locator('#interaction-text')).toHaveText('Speak with Tobin');
@@ -127,7 +138,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
 });
 
 // A save with both chapters done, in the city: the book by the gate offers the
-// passage to Pine Islet.
+// passage to Pine Islet among its others, and the hero reads that one.
 const done = ['accepted', 'roots', 'bells', 'valves', 'vigil', 'warden', 'complete'];
 const FINISHED = {
   hero: 'Spiderman', map: 'city', restored: true, kills: 3, collected: [0, 1, 2, 3, 4],
@@ -168,7 +179,7 @@ ${probe}` });
     watch();
   });
   await page.evaluate(() => window.__VOICE_TEST__.toBook());
-  await page.waitForFunction(() => window.__VOICE_TEST__.read());
+  await page.waitForFunction(() => window.__VOICE_TEST__.read('forest'));
   await expect(page.locator('#conversation-name')).toHaveText('The keeper’s spellbook');
   // Page through the book's narration to the spell.
   for (let presses = 0; presses < 12 && await page.locator('#conversation-title').textContent() !== 'You'; presses++) {

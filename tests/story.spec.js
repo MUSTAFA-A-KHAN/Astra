@@ -29,6 +29,14 @@ window.__STORY_TEST__ = {
   },
   // How long the camera has left to turn with the light.
   turning: () => followLight,
+  // Stands the hero at the keeper's book by the gate and reads the passage
+  // to \`map\`: the Moonwell is on the Red Mesa, the rest of the story in the city.
+  cross(map) {
+    const at = portal.places.reading;
+    resetInput(); position.set(at.x, groundHeight(at.x, at.z), at.z); locomotion.reset(); avatar.position.copy(position);
+    readPortalBook(map);
+    return !!portalJourney;
+  },
   // The patrols put down, so that nothing cuts a walk short.
   quiet() { for (const e of enemies) { e.alive = false; e.respawn = 1e9; } },
   // Walks the hero after the guiding light, as a player would: turning the
@@ -37,7 +45,7 @@ window.__STORY_TEST__ = {
   follow(on, name = 'maren') {
     clearInterval(this.walking); joyX = joyY = 0; if (!on) return;
     this.walking = setInterval(() => {
-      const light = guideLight.position, goal = story.places[name], target = light || goal;
+      const light = guideLight.position, goal = name === 'portal' ? portal.places.book : story.places[name], target = light || goal;
       const dx = target.x - position.x, dz = target.z - position.z, d = Math.hypot(dx, dz);
       if (light ? d < 2.5 : Math.hypot(goal.x - position.x, goal.z - position.z) < 3.6) { joyX = joyY = 0; return; }
       const want = Math.atan2(-dx, -dz); yaw += Math.atan2(Math.sin(want - yaw), Math.cos(want - yaw)) * .2;
@@ -92,6 +100,17 @@ async function boot(page, hero) {
   return errors;
 }
 
+// Through the portal to `map`: the book is read to its spell, and the
+// crossing plays out until the hero stands on the far shore.
+async function cross(page, map) {
+  await page.waitForFunction(map => window.__STORY_TEST__.cross(map), map);
+  for (let presses = 0; presses < 20 && await page.locator('#conversation').isVisible(); presses++) {
+    await page.keyboard.press('f');
+    await page.waitForTimeout(40);
+  }
+  await page.waitForFunction(map => window.__ASTRA_DEBUG__.terrain.activeMap === map && !window.__ASTRA_DEBUG__.portal.journey, map, { timeout: 120000 });
+}
+
 // Stands in front of someone, checks what the prompt offers, and speaks.
 async function approach(page, name, label) {
   await page.evaluate(name => window.__STORY_TEST__.place(name), name);
@@ -115,13 +134,15 @@ async function hear(page, beat) {
 }
 
 test('The Last Keeper plays from the notice board to the ferryman’s farewell', async ({ page }) => {
-  test.setTimeout(process.env.CI ? 900000 : 420000);
+  // Four crossings of the portal, each loading the far shore.
+  test.setTimeout(process.env.CI ? 1200000 : 600000);
   const errors = await boot(page);
   // The first task is the board, which calls to whoever has just arrived.
   await expect(page.locator('#quest-title')).toHaveText('News from the harbour');
   await expect(page.locator('#quest-count')).toHaveText('◇ NOTICE BOARD');
-  // Every person and prop streams in behind the start.
-  await expect.poll(async () => (await snapshot(page)).story.loaded.length, { timeout: 120000 }).toBe(14);
+  // Every person and prop of the city streams in behind the start; the
+  // sanctuary's six wait on the Red Mesa.
+  await expect.poll(async () => (await snapshot(page)).story.loaded.length, { timeout: 120000 }).toBe(8);
 
   // The memorial on the notice board, read before anyone has been met.
   await approach(page, 'notice', 'Read the notice board');
@@ -132,8 +153,12 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   expect((await snapshot(page)).story.step).toBe('keeper');
   await expect(page.locator('#quest-title')).toHaveText('The woman at the well');
   await expect(page.locator('#quest-count')).toHaveText('◇ MOONWELL');
-  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  // The keeper is on the Red Mesa: the light leads first to the portal's book.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:portal:mesa');
   expect((await snapshot(page)).guide.state).toBe('leading');
+  await cross(page, 'mesa');
+  await expect.poll(async () => (await snapshot(page)).story.loaded.length, { timeout: 120000 }).toBe(6);
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
 
   await approach(page, 'maren', 'Speak with Maren');
   await expect(page.locator('#conversation-title')).toHaveText('Keeper of the Moonwell');
@@ -142,7 +167,10 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   expect(first.length).toBeGreaterThan(2);
   expect((await snapshot(page)).story.step).toBe('shards');
   await expect(page.locator('#quest-title')).toHaveText('A glimmer in the green');
-  // The light comes out of her and leads on, to the nearest shard.
+  // The light comes out of her and leads home through the gate, then on to
+  // the nearest shard.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('shards:portal:city');
+  await cross(page, 'city');
   await expect.poll(async () => (await snapshot(page)).guide.target).toMatch(/^shards:\d+$/);
   expect((await snapshot(page)).guide.state).toBe('leading');
 
@@ -162,6 +190,8 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   await approach(page, 'ledger', 'Read the keeper’s ledger');
   await hear(page, 'ledger');
   expect((await snapshot(page)).story.step).toBe('restore');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('restore:portal:mesa');
+  await cross(page, 'mesa');
   await expect.poll(async () => (await snapshot(page)).guide.target).toBe('restore:maren');
 
   // The finale: the well wakes, the Hart comes, the keeper goes home.
@@ -176,11 +206,13 @@ test('The Last Keeper plays from the notice board to the ferryman’s farewell',
   await expect.poll(async () => (await snapshot(page)).story.departed, { timeout: 15000 }).toBe(true);
   await expect.poll(async () => (await snapshot(page)).story.finale).toBe(false);
   expect((await snapshot(page)).story.step).toBe('farewell');
-  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('farewell:tobin');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('farewell:portal:city');
   await page.evaluate(() => window.__STORY_TEST__.place('chest', 7));
   await page.waitForTimeout(800);
   await shoot(page, 'moonwell-lit');
 
+  await cross(page, 'city');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('farewell:tobin');
   await approach(page, 'tobin', 'Speak with Tobin');
   // The hero speaks too, under their own name.
   const heroName = await page.locator('#hud-name').textContent();
@@ -228,8 +260,9 @@ test('a newcomer is led to the notice board and on by the light, without a word 
   await page.keyboard.press('f');
   await expect(page.locator('#conversation')).toBeVisible();
   await hear(page);
-  // Out of the carving, and on toward the keeper, with the view turning to see it go.
-  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  // Out of the carving, and on toward the keeper by way of the portal, with the
+  // view turning to see it go.
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:portal:mesa');
   const out = await snapshot(page);
   expect(Math.hypot(out.guide.position.x - board.x, out.guide.position.z - board.z)).toBeLessThan(7);
   expect(await page.evaluate(() => window.__STORY_TEST__.turning())).toBeGreaterThan(0);
@@ -239,8 +272,8 @@ test('a newcomer is led to the notice board and on by the light, without a word 
 });
 
 // A newcomer who reads the board and then simply follows the light walks,
-// on their own feet, to the keeper: down the street, over the jetty, and
-// along the mesa's sands, however far the Moonwell stands from the square.
+// on their own feet, to the keeper: down the street to the portal, through
+// it, and along the mesa's sands, however far the Moonwell stands from the gate.
 test('after the notice board, the light leads the hero on foot to Maren', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The walk is played once, on desktop.');
   test.setTimeout(process.env.CI ? 900000 : 300000);
@@ -248,20 +281,27 @@ test('after the notice board, the light leads the hero on foot to Maren', async 
   await page.evaluate(() => window.__STORY_TEST__.quiet());
   await approach(page, 'notice', 'Read the notice board');
   await hear(page, 'notice');
-  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:portal:mesa');
   expect((await snapshot(page)).guide.state).toBe('leading');
   // Shown the way, not told it.
   expect(await page.evaluate(() => window.__STORY_TEST__.toasts.filter(message => /follow the light|press f|notice board/i.test(message)))).toEqual([]);
   const { total } = (await snapshot(page)).guide;
   expect(total).toBeGreaterThan(20);
-  await page.evaluate(() => window.__STORY_TEST__.follow(true));
-  // The light stays close enough to follow all the way.
+  // The light stays close enough to follow all the way: to the portal's book,
+  // and on the far shore to the keeper.
   let farthest = 0;
-  await expect.poll(async () => {
+  const led = text => expect.poll(async () => {
     const { guide, position } = await snapshot(page);
     if (guide.state === 'leading') farthest = Math.max(farthest, Math.hypot(guide.position.x - position.x, guide.position.z - position.z));
     return page.locator('#interaction-text').textContent();
-  }, { timeout: process.env.CI ? 840000 : 240000, intervals: [500] }).toBe('Speak with Maren');
+  }, { timeout: process.env.CI ? 840000 : 240000, intervals: [500] }).toBe(text);
+  await page.evaluate(() => window.__STORY_TEST__.follow(true, 'portal'));
+  await led('Read the keeper’s spellbook');
+  await page.evaluate(() => window.__STORY_TEST__.follow(false));
+  await cross(page, 'mesa');
+  await expect.poll(async () => (await snapshot(page)).guide.target).toBe('keeper:maren');
+  await page.evaluate(() => window.__STORY_TEST__.follow(true));
+  await led('Speak with Maren');
   await page.evaluate(() => window.__STORY_TEST__.follow(false));
   expect(farthest).toBeLessThan(16);
   await shoot(page, 'led-to-maren');
@@ -276,8 +316,11 @@ test('after the notice board, the light leads the hero on foot to Maren', async 
 // as the voice changes, and it all hands back once the talking is done.
 test('a conversation plays as film, cut to whoever is talking, and hands back', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The camera is checked once, on desktop.');
-  test.setTimeout(process.env.CI ? 600000 : 240000);
+  test.setTimeout(process.env.CI ? 900000 : 360000);
+  // Maren is at the Moonwell on the Red Mesa, which the game resumes on from a save left there.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ map: 'mesa' })));
   const errors = await boot(page);
+  await page.waitForFunction(() => window.__ASTRA_DEBUG__.terrain.activeMap === 'mesa', null, { timeout: 120000 });
   await page.evaluate(() => { window.__STORY_TEST__.quiet(); window.__STORY_TEST__.hold(); });
   const film = () => page.evaluate(() => window.__STORY_TEST__.film());
   const inPicture = p => Math.abs(p.x) < 1 && Math.abs(p.y) < .78 && p.z < 1;
@@ -318,7 +361,7 @@ test('a conversation plays as film, cut to whoever is talking, and hands back', 
 // hero who has the clips for it.
 test('the hero reads the notice board, talks with Maren, and emotes from the picker', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The imported rig is checked once on desktop.');
-  test.setTimeout(process.env.CI ? 600000 : 240000);
+  test.setTimeout(process.env.CI ? 900000 : 360000);
   const errors = await boot(page, 'Spiderman');
   const hero = async () => (await snapshot(page)).heroRuntime;
 
@@ -330,6 +373,7 @@ test('the hero reads the notice board, talks with Maren, and emotes from the pic
   await expect.poll(async () => (await hero()).bridge).toMatch(/SpellBook_Trans_Stand/);
   await expect.poll(async () => (await hero()).activeAction, { timeout: 30000 }).not.toMatch(/SpellBook/);
 
+  await cross(page, 'mesa');
   await approach(page, 'maren', 'Speak with Maren');
   const name = await page.locator('#hud-name').textContent();
   for (let presses = 0; presses < 40 && await page.locator('#conversation-name').textContent() !== name; presses++) {

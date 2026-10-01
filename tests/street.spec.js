@@ -137,8 +137,10 @@ test('Street City loads on selection, is walkable, resumes after reload, and ret
   expect(arrival.step).toBe(first.step);
 
   // Walk the road past the shops and along its bend using the real controller.
+  // The gate stands in the road where the passage lands, so the way goes
+  // round its eastern side, by the lane left between its arch and the shops.
   await page.evaluate(() => window.__STREET_TEST__.place(-412, -288));
-  for (const point of [[-412, -304], [-412, -320], [-412, -340], [-400, -348], [-388, -356], [-376, -364]]) {
+  for (const point of [[-412, -304], [-405, -306], [-405, -313], [-412, -318], [-412, -320], [-412, -340], [-400, -348], [-388, -356], [-376, -364]]) {
     const step = await page.evaluate(([x, z]) => window.__STREET_TEST__.walk(x, z), point);
     expect(step.distance, `Could not reach ${point.join(',')}`).toBeLessThan(.25);
     expect(step.inWater).toBe(false);

@@ -28,6 +28,9 @@ test('heroes take the flashlight out after dusk, and the player can switch it of
   // game and build their own shaders when they do. Left out, only the
   // flashlight can add one.
   await page.route(/plaza-night\.glb$|\/assets\/story\//, route => route.abort());
+  // The warden, whose hands are full with sword and shield, carries the lamp on
+  // the shield; a new player's Spiderman holds it in her free hand instead.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ hero: 'warden' })));
   const errors = await boot(page);
   await setHour(page, 13);
   expect(await flashlight(page)).toMatchObject({ ready: true, enabled: true, out: false, intensity: 0, mount: 'shield' });
