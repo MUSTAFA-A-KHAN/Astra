@@ -16,6 +16,8 @@ export const VOICES = Object.freeze({
       "Root unbound and silver thread, wake the road where iron has slept.": "voice/heroes/spiderman/root-unbound-and-silver-thread-wake-55ab42.ogg",
       "Voice returned and lantern bright, carry us home to the keeper's light.": "voice/heroes/spiderman/voice-returned-and-lantern-bright-carry-857e90.ogg",
       "By lantern glow and keeper's key, let distant streets unfold for me.": "voice/heroes/spiderman/by-lantern-glow-and-keepers-key-17e44e.ogg",
+      "By Duskbell's toll and amber flame, light the square that keeps its name.": "voice/heroes/spiderman/by-duskbells-toll-and-amber-flame-d79cc9.ogg",
+      "By silver moon and pinewood deep, open the road where shadows sleep.": "voice/heroes/spiderman/by-silver-moon-and-pinewood-deep-6ecf86.ogg",
     }),
   }),
   people: Object.freeze({

@@ -8,7 +8,17 @@ import { OBSERVATORY_ARRIVAL } from './observatory-world.js';
 import { STREET_ARRIVAL } from './street-world.js';
 
 const WATERLINE = -6.65;
-const ARRIVALS = { city: CITY_ARRIVAL, mesa: { x: -5, z: 125, radius: 1.2 }, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL, street: STREET_ARRIVAL };
+// The plaza's in its market square, the one open ground where the gate stands
+// clear of the streets; the Nightwood's where its road leaves the wood's
+// northern edge.
+const ARRIVALS = { city: CITY_ARRIVAL, mesa: { x: -5, z: 125, radius: 1.2 }, forest: { x: -96, z: 8, radius: 1.2 }, yard: { x: 170, z: 136, radius: 1.2 }, observatory: OBSERVATORY_ARRIVAL, street: STREET_ARRIVAL,
+  plaza: { x: 271, z: 17, radius: 1.2 }, nightwood: { x: 0, z: -176, radius: 1.2 } };
+// What each place is known for, marked where the player finds it: before the
+// cathedral's great door, and where the wood's road swings west.
+const SIGHTS = {
+  plaza: [{ id: 'cathedral', name: 'Duskbell Cathedral', at: [262, -40], color: '#ffb35c' }],
+  nightwood: [{ id: 'bend', name: 'Owl’s Bend', at: [60, -235], color: '#a9bcff' }],
+};
 const CITY_SHARDS = [[0,9],[1,0],[-1,-10],[2,-20],[0,-32],[-12,9],[-23,16],[-35,23],[-42,34],[-49,17],[14,-7],[25,-13],[36,-17],[47,-26],[55,-12],[-15,-42],[16,-43],[-28,-60],[30,-63],[60,30]];
 const within = (bounds, x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
 // Keep only the sanctuary's coordinates until its portal is crossed. Its
@@ -21,7 +31,21 @@ const districtLoaders = {
   yard: options => import('./skibidi-world.js').then(({ loadYardDistrict }) => loadYardDistrict(options)),
   observatory: options => import('./observatory-world.js').then(({ loadObservatoryDistrict }) => loadObservatoryDistrict(options)),
   street: options => import('./street-world.js').then(({ loadStreetDistrict }) => loadStreetDistrict(options)),
+  plaza: options => loadLanternPlaza(options),
+  nightwood: options => import('./nightwood-world.js').then(({ loadNightwoodDistrict }) => loadNightwoodDistrict(options)),
 };
+
+// The plaza is walked on its footprint from the moment it opens; its model
+// streams in after (see streamDetail). It brings its own lanterns, and its
+// ground is built of blocks: a half-block stair is a step, and nothing slopes.
+async function loadLanternPlaza(options) {
+  const [{ PLAZA_STEP, PLAZA_TRANSFORM, loadPlazaDistrict }, { createPlazaLights }] = await Promise.all([import('./plaza-world.js'), import('./plaza-lighting.js')]);
+  const district = await loadPlazaDistrict(options), choose = district.setQuality;
+  return Object.assign(district, {
+    meshes: [], step: PLAZA_STEP, level: true, lights: createPlazaLights({ transform: PLAZA_TRANSFORM }),
+    setQuality: low => choose(low ? 'low' : 'high'),
+  });
+}
 
 function cityLandmarks(navigation) {
   return [
@@ -87,6 +111,11 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
         record.landmarks = [{ ...landmarks[0], ...record.navigation.findWalkable(MOONWELL.x, MOONWELL.z, 4) }];
         record.markers = landmarkMarkers(mapRoot, record.landmarks);
       }
+      if (SIGHTS[map]) {
+        record.landmarks = SIGHTS[map].map(({ at: [x, z], ...sight }) => ({ ...sight, map, ...record.navigation.findWalkable(x, z, 2.2) }));
+        record.markers = landmarkMarkers(mapRoot, record.landmarks);
+      }
+      if (district.lights) { record.lights = district.lights; mapRoot.add(record.lights.group); }
       const water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), new THREE.MeshStandardMaterial({ color: '#355a64', roughness: .34, metalness: .25 }));
       water.name = 'Harbour water'; water.rotation.x = -Math.PI / 2; water.position.y = WATERLINE; water.receiveShadow = true; mapRoot.add(water);
       applySettings(record);
@@ -100,7 +129,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
       if (known) Object.assign(known, landmark);
       else landmarks.push({ ...landmark });
     }
-    for (const mesh of record.district.meshes) streaming.add(mesh);
+    for (const mesh of record.district.meshes ?? []) streaming.add(mesh);
     knownRegions.set(record.map, (record.district.regions ?? [{ biome: record.map, bounds: record.district.bounds }]).map(({ biome, bounds }) => ({ biome, bounds: { ...bounds } })));
   }
   active = await loadMap('city'); attach(active); scene.add(root);
@@ -113,7 +142,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get loadingMap() { return loadingMap; },
     get asset() { return active?.district.asset ?? null; },
     get assets() { return active ? active.district.assets ?? [active.district.asset] : []; },
-    get meshCount() { return active?.district.meshes.length ?? 0; },
+    get meshCount() { return active?.district.meshes?.length ?? 0; },
     get triangleCount() { return active?.navigation.diagnostics.triangleCount ?? 0; },
     get surfaceCount() { return active?.navigation.diagnostics.surfaceCount ?? 0; },
     get colliderCount() { return active?.navigation.colliders.length ?? 0; },
@@ -124,8 +153,25 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get yardReachable() { return active?.map === 'yard'; },
     get streetReachable() { return active?.map === 'street'; },
     get mesaReachable() { return active?.map === 'mesa'; },
-    plazaReachable: false, woodReachable: false,
+    get plazaReachable() { return active?.map === 'plaza'; },
+    get woodReachable() { return active?.map === 'nightwood'; },
+    // The plaza's model, streaming in behind its footprint, while it is the map.
+    get plaza() { return active?.map === 'plaza' ? active.district.diagnostics : null; },
   };
+  // A district whose detail streams in behind its footprint (the plaza's
+  // model) fetches it once it is the player's map. The fetch outlives a quick
+  // crossing back home, so a model that lands after its map has gone is let go.
+  function streamDetail(record, prepare) {
+    const district = record?.district;
+    if (!district?.load) return Promise.resolve();
+    let model = null;
+    return district.load(async detail => {
+      model = detail;
+      record.lights?.excludeScenery?.(detail);
+      await prepare?.(detail);
+      if (record.district) detail.traverse(tile => { if (tile.isMesh) streaming.add(tile); });
+    }).then(() => { if (!record.district && model) disposeMapResources(model); });
+  }
   return {
     root, landmarks, streaming, diagnostics, portalTravel: true,
     shardPositions: [...CITY_SHARDS, ...Array(28).fill(null)],
@@ -136,7 +182,13 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
     get spawn() { return active.navigation.spawn; },
     getHeight(...args) { return active.navigation.getHeight(...args); },
     getSupportHeight(...args) { return active.navigation.getSupportHeight(...args); },
-    getNormal(...args) { return active.navigation.getNormal(...args); },
+    // On ground built of blocks every change of height is a step, never a
+    // slope: read as a slope, a stair's edge would stop the player before the
+    // step height is even consulted.
+    getNormal(x, z, out, ...rest) {
+      if (active.district.level && within(active.district.bounds, x, z)) { out.x = 0; out.y = 1; out.z = 0; return out; }
+      return active.navigation.getNormal(x, z, out, ...rest);
+    },
     isWalkable(...args) { return active.navigation.isWalkable(...args); },
     findWalkable(...args) { return active.navigation.findWalkable(...args); },
     route(...args) { return active.navigation.route(...args); },
@@ -145,7 +197,8 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
       for (const regions of knownRegions.values()) for (const { biome, bounds } of regions) if (within(bounds, x, z)) return biome;
       return x < -75 ? 'forest' : x > 115 && z > 110 ? 'yard' : 'city';
     },
-    stepHeightAt() { return undefined; },
+    // How high a step the ground allows here, where it differs from the default.
+    stepHeightAt(x, z) { return active?.district.step && within(active.district.bounds, x, z) ? active.district.step : undefined; },
     setQuality(level) { quality = level; streaming.setQuality(level === 'performance' || level === 0 ? 'low' : level); if (active) applySettings(active); },
     setTime(hour) { daylight = THREE.MathUtils.clamp(Math.sin((hour - 6) / 12 * Math.PI) * 1.4, 0, 1); if (active) applySettings(active); },
     update(dt, time, position) {
@@ -157,7 +210,8 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
         marker.ring.material.opacity = .6 + Math.sin(time * .9 + i) * .12;
       }
     },
-    stream() { return Promise.resolve(); },
+    // The detail of the map the player is on, if it streams in behind them.
+    stream({ prepare } = {}) { return streamDetail(active, prepare); },
     async travelTo(map, { prepare } = {}) {
       if (disposed) throw new Error('This world has been disposed.');
       if (!Object.hasOwn(ARRIVALS, map) || typeof loaders[map] !== 'function') throw new Error(`Unknown portal destination: ${map}`);
@@ -175,6 +229,7 @@ export async function createPortalWorld(scene, { lowPower = false, loaders = dis
         const source = active; active = candidate; candidate = null;
         release(source);
         streaming.update(active.navigation.spawn);
+        streamDetail(active, prepare).catch(error => console.warn(`The ${map} model did not load; its footprint stands in for it.`, error));
         return { ...active.navigation.spawn };
       } catch (error) { if (candidate) release(candidate); throw error; }
       finally { loadingMap = null; stagedMap = null; }

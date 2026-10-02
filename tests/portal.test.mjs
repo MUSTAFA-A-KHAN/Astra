@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { portalRoute, portalChoices, portalConversation } from '../portal-script.js';
+import { portalRoute, portalChoices, portalConversation, EXPLORATIONS } from '../portal-script.js';
 import { readStory } from '../story-script.js';
 import { readChapterTwo } from '../chapter-two-script.js';
 
@@ -99,32 +99,41 @@ test('every passage requires a visible book reading before its distinct spoken s
   assert.ok(portalConversation(null).lines.length > 0);
 });
 
-test('Street City is an optional book passage with a homeward return', () => {
+// Places the book offers for their own sake: each one a passage of its own,
+// with its own spell, and a way home.
+test('Street City, the Lantern Plaza and Nightwood Road are optional book passages with a homeward return', () => {
   const progress = ready();
-  const street = portalRoute(progress, 'city', 'street');
-  assert.equal(street.destination, 'street');
-  assert.equal(street.mapName, 'Street City');
-  assert.equal(street.lockedReason, null);
+  const names = { street: 'Street City', plaza: 'Lantern Plaza', nightwood: 'Nightwood Road' };
+  assert.deepEqual([...EXPLORATIONS], Object.keys(names));
   assert.equal(portalRoute(progress, 'city').destination, 'forest');
   assert.equal(portalRoute(progress, 'city', 'forest').destination, 'forest');
-  assert.deepEqual(portalChoices(progress, 'city'), [portalRoute(progress, 'city'), portalRoute(progress, 'city', 'mesa'), street]);
-  assert.equal(portalRoute(progress, 'street').destination, 'city');
-  assert.equal(portalRoute(progress, 'street', 'city').destination, 'city');
-  assert.deepEqual(portalChoices(progress, 'street'), [portalRoute(progress, 'street')]);
-  const conversation = portalConversation(street);
-  assert.match(conversation.lines[0][1], /keeper's ledger/);
-  assert.ok(conversation.lines.some(([, text]) => text.includes('Street City')));
-  assert.deepEqual(conversation.lines.at(-1), ['you', street.spell, 'incantation']);
-  assert.notEqual(street.spell, portalRoute(progress, 'city').spell);
+  assert.deepEqual(portalChoices(progress, 'city'),
+    [portalRoute(progress, 'city'), portalRoute(progress, 'city', 'mesa'), ...EXPLORATIONS.map(map => portalRoute(progress, 'city', map))]);
+  const spells = new Set([portalRoute(progress, 'city').spell]);
+  for (const map of EXPLORATIONS) {
+    const route = portalRoute(progress, 'city', map);
+    assert.equal(route.destination, map);
+    assert.equal(route.mapName, names[map]);
+    assert.equal(route.lockedReason, null);
+    assert.equal(portalRoute(progress, map).destination, 'city');
+    assert.equal(portalRoute(progress, map, 'city').destination, 'city');
+    assert.deepEqual(portalChoices(progress, map), [portalRoute(progress, map)]);
+    const conversation = portalConversation(route);
+    assert.match(conversation.lines[0][1], /keeper's ledger/);
+    assert.ok(conversation.lines.some(([, text]) => text.includes(names[map])));
+    assert.deepEqual(conversation.lines.at(-1), ['you', route.spell, 'incantation']);
+    assert.ok(!spells.has(route.spell), `${map} has a spell of its own`);
+    spells.add(route.spell);
+  }
 });
 
-test('both Street City passages require every basic book prerequisite', () => {
+test('every exploration passage, there and back, requires every basic book prerequisite', () => {
   for (const key of ['ledger', 'restored', 'farewell', 'accepted']) {
     const progress = ready();
     if (key === 'restored') progress.restored = false;
     else if (key === 'accepted') progress.chapterTwo.accepted = false;
     else progress.story[key] = false;
-    for (const [source, destination] of [['city', 'street'], ['street', 'city']]) {
+    for (const [source, destination] of EXPLORATIONS.flatMap(map => [['city', map], [map, 'city']])) {
       const route = portalRoute(progress, source, destination);
       assert.equal(route.destination, null, `${source} requires ${key}`);
       assert.equal(route.spell, null);

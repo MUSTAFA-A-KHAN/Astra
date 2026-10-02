@@ -7,7 +7,8 @@ import { bank } from './bank.js';
 // (https://sketchfab.com/dasy444), used under CC-BY-4.0. A square of wooded
 // hillside with a dirt road winding through its valley, moored off the city's
 // north quay, across the city from the yard. Loaded as supplied, and only once
-// the player turns it on in the settings: world-map.js imports this module then.
+// the player reads its passage in the keeper's book: portal-map-world.js
+// imports this module then.
 export const NIGHTWOOD_ASSET = 'map/a_forest_3_with_a_road_at_night_for_game.glb';
 // The model is built small: its road is half a unit wide and its tallest pine
 // under three. At 14 the road takes a hero and a horse abreast, and the pines

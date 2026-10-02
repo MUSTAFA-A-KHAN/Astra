@@ -257,8 +257,10 @@ export class LocomotionController {
       this.verticalVelocity=clamp(this.verticalVelocity,-8,5);this.grounded=false;
     }
     if(this.grounded) {
+      // A stair the ground lets the player climb, they walk down too, rather
+      // than falling from every tread of it.
       const drop=p.y-this.groundHeight;
-      if(drop>.6) {this.grounded=false;this.verticalVelocity=0;}
+      if(drop>Math.max(.6,stepHeight)) {this.grounded=false;this.verticalVelocity=0;}
       else p.y=approach(p.y,this.groundHeight,Math.max(.09,Math.hypot(v.x,v.z)*.9*dt+dt*5));
     }
     if(!this.grounded) {

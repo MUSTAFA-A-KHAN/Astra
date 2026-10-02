@@ -11,7 +11,9 @@ window.__PLAZA_TEST__ = {
     position.set(...local).multiplyScalar(t.scale).applyAxisAngle(new THREE.Vector3(0,1,0),t.rotation).add(new THREE.Vector3(t.x,t.y,t.z));
     locomotion.reset();
     avatar.position.copy(position);
-    yaw=0;pitch=.2;radius=8;
+    // The stick is read against the view: the guiding light's welcome turn,
+    // still running from the arrival, would swing it off every line walked.
+    yaw=0;pitch=.2;radius=8;followLight=0;
     followCamera.reset(position,yaw,pitch,radius);
     setTime(0);
     world.update(0,time,position);
@@ -43,8 +45,10 @@ window.__PLAZA_TEST__ = {
 
 async function bootPlaza(page) {
   const errors = [];
-  // The plaza is only there once the player has turned it on.
-  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ plaza: true })));
+  // The plaza is a passage of the keeper's book: a journey left there resumes there.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({
+    hero: 'warden', map: 'plaza', restored: true, story: { keeper: true, ferryman: true, ledger: true, farewell: true, notice: true }, chapterTwo: { accepted: true },
+  })));
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/game.js', async route => {
     const response = await route.fetch();

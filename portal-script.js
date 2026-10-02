@@ -26,10 +26,21 @@ export const PASSAGES = Object.freeze({
     spell: 'Voice returned and lantern bright, carry us home to the keeper\'s light.',
   }),
   street: Object.freeze({
-    destination: 'street', mapName: 'Street City', title: 'The city passage',
+    destination: 'street', mapName: 'Street City', title: 'The city passage', explore: true,
     spell: 'By lantern glow and keeper\'s key, let distant streets unfold for me.',
   }),
+  plaza: Object.freeze({
+    destination: 'plaza', mapName: 'Lantern Plaza', title: 'The lamplit passage', explore: true,
+    spell: 'By Duskbell\'s toll and amber flame, light the square that keeps its name.',
+  }),
+  nightwood: Object.freeze({
+    destination: 'nightwood', mapName: 'Nightwood Road', title: 'The moonlit passage', explore: true,
+    spell: 'By silver moon and pinewood deep, open the road where shadows sleep.',
+  }),
 });
+// Places the book offers from the city for their own sake, once its other
+// passages have opened; each one's way back is the homeward passage.
+export const EXPLORATIONS = Object.freeze(Object.keys(PASSAGES).filter(map => PASSAGES[map].explore));
 
 const locked = reason => ({
   destination: null, mapName: null, title: 'The sleeping portal', spell: null, lockedReason: reason,
@@ -52,8 +63,8 @@ export function portalRoute(progress = {}, activeMap = 'city', requestedDestinat
   if (progress?.restored !== true) return locked('The book\'s passage remains dark. Restore the Moonwell with Maren before awakening a portal.');
   if (!story.farewell) return locked('The book asks you to finish Maren\'s promise. Tell Tobin what happened at the Moonwell.');
   if (!chapter.accepted) return locked('The portal has no destination yet. Read Tobin\'s tide chart at the west jetty to reveal the first passage.');
-  if (activeMap === 'city' && requestedDestination === 'street') return select(PASSAGES.street);
-  if (activeMap === 'street') return select(PASSAGES.city);
+  if (activeMap === 'city' && EXPLORATIONS.includes(requestedDestination)) return select(PASSAGES[requestedDestination]);
+  if (EXPLORATIONS.includes(activeMap)) return select(PASSAGES.city);
   if (chapterThreeUnlocked(progress)) {
     if (activeMap === 'yard' && third.relay) return select(PASSAGES.observatory);
     if (activeMap === 'observatory') return select(PASSAGES.city);
@@ -77,7 +88,7 @@ export function portalRoute(progress = {}, activeMap = 'city', requestedDestinat
 export function portalChoices(progress = {}, activeMap = 'city') {
   const route = portalRoute(progress, activeMap);
   if (activeMap !== 'city') return route.destination ? [route] : [];
-  return [route, ...['mesa', 'forest', 'street'].filter(destination => destination !== route.destination)
+  return [route, ...['mesa', 'forest', ...EXPLORATIONS].filter(destination => destination !== route.destination)
     .map(destination => portalRoute(progress, activeMap, destination))].filter(choice => choice.destination);
 }
 

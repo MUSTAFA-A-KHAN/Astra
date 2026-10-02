@@ -40,7 +40,7 @@ test('the city loads offline without portal destinations and the roster and menu
   expect(districtResponses.some(response => response.path.includes('/forest-loner-diorama/'))).toBe(false);
   expect(districtResponses.some(response => response.path.endsWith('/skibidi-toilet-79.glb'))).toBe(false);
   expect(districtResponses.some(response => response.path.includes('/map-79-void/source/'))).toBe(false);
-  // The plaza and the Nightwood are off until the player turns them on: no model, footprint or module of theirs is fetched.
+  // The plaza and the Nightwood wait until their passage is read: no model, footprint or module of theirs is fetched.
   expect(districtResponses.some(response => response.path.includes('/map/a_forest_3') || response.path.includes('/plaza-night-time/'))).toBe(false);
   expect(requested.some(path => /\/(plaza-world|plaza-lighting|plaza-light-sources|nightwood-world)\.js$/.test(path))).toBe(false);
   // Neither Red Mesa's terrain module nor its model is requested at startup.
@@ -58,7 +58,7 @@ test('the city loads offline without portal destinations and the roster and menu
   expect(terrain.colliderCount).toBeGreaterThan(0);
   expect(terrain.forestReachable).toBe(false);
   expect(terrain.yardReachable).toBe(false);
-  // There is no east jetty and no plaza to reach, no north jetty and no Nightwood.
+  // The plaza and the Nightwood are elsewhere, across the portal.
   expect(terrain.plazaReachable).toBe(false);
   expect(terrain.woodReachable).toBe(false);
   expect(terrain.mesaReachable).toBe(false);
@@ -794,8 +794,10 @@ test('both bundled GLBs keep skeleton bindings and in-place roots across animati
 });
 
 test('the plaza model streams in once the game is running', async ({ page }) => {
-  // The plaza is only there once the player has turned it on.
-  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({ plaza: true })));
+  // The plaza is a passage of the keeper's book: a journey left there resumes there.
+  await page.addInitScript(() => localStorage.setItem('astra-journey-v1', JSON.stringify({
+    hero: 'warden', map: 'plaza', restored: true, story: { keeper: true, ferryman: true, ledger: true, farewell: true, notice: true }, chapterTwo: { accepted: true },
+  })));
   const errors = await boot(page);
   await start(page);
   // It is fetched behind the game, so allow for a slow link as well as a slow renderer.
