@@ -145,10 +145,14 @@ try {
 }
 const groundHeight = (x, z) => world.getHeight(x, z);
 // The Reach is two districts: the ambience, the sky and the HUD all ask which.
-const region = () => world.biomeAt(position.x, position.z);
+// Out over the harbour on the Tidewarden's back, the hero is still over this
+// map, wherever another map's ground would lie at those coordinates.
+const region = () => skyRide || leap ? world.activeMap || 'city' : world.biomeAt(position.x, position.z);
 const spawn = new THREE.Vector3(world.spawn.x, groundHeight(world.spawn.x, world.spawn.z), world.spawn.z);
 const camp = world.landmarks.find(landmark => landmark.id === 'camp') || world.landmarks[1];
 const avatar = new THREE.Group(); scene.add(avatar); avatar.position.copy(spawn);
+// Turned as a mount's rig is (tidewarden.js), so a rider can lean with its bank.
+avatar.rotation.order = 'YXZ';
 const position = spawn.clone(), velocity = new THREE.Vector3();
 const stage = new THREE.Group(); stage.position.copy(spawn); scene.add(stage);
 const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 3.05, .3, 48), new THREE.MeshStandardMaterial({ color: '#627365', roughness: .88 })); pedestal.position.y = .06; pedestal.receiveShadow = true; stage.add(pedestal);
@@ -241,6 +245,12 @@ const questObjective = () => opening?.active ? opening.objective() : currentStep
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 // A ridden horse keeps its own heading and wheels round rather than turning on the spot.
 const reins = new MountSteering();
+// The Tidewarden (tidewarden.js), when it carries the hero: `skyRide` from the
+// leap onto its back until the leap off it, `leap` while either is under way.
+// The view's resting tilt flies level; looking up climbs and looking down dives.
+let skyRide = false, leap = null, jumpHeld = false;
+const FLIGHT_PITCH = .3, leapTarget = new THREE.Vector3();
+const tidewarden = () => inCity() ? story.tidewarden : null;
 const propPhysics = new PropPhysics(activities.terrain, collision);
 for (const crate of activities.crates) propPhysics.addBody(crate);
 const followCamera = new FollowCamera(camera, activities.terrain, collision);
@@ -404,7 +414,7 @@ function updateHUD(){
   }
 }
 function attack(special=false){
-  if(screen!=='game'||dialog.open||chat||portalJourney||opening?.locked||document.hidden||!hero||contextLost)return;
+  if(screen!=='game'||dialog.open||chat||portalJourney||opening?.locked||document.hidden||!hero||contextLost||skyRide||leap)return;
   if(special?abilityTimer>0:attackTimer>0)return;
   if(special)abilityTimer=7;attackTimer=heroMeta.cooldown;
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
@@ -442,6 +452,9 @@ function nearbyInteraction(){
     // Finish the local incident before a portal can unload its actors.
     return null;
   }
+  // On the Tidewarden's back, the one thing to do is come down.
+  if(leap)return null;
+  if(skyRide)return tidewarden()?.mode==='landing'?{type:'tidewarden',label:'Keep flying'}:{type:'tidewarden',label:'Land the Tidewarden'};
   const book = portal.nearby(position);
   // Whatever stands nearer than the keeper's book is what the player came for:
   // on Pine Islet the gate stands a few strides from the rain rune.
@@ -454,6 +467,12 @@ function nearbyInteraction(){
   if(!inCity())return activeTrials().nearby(position)||(!finale&&inStoryMap()?story.nearby(position,STEPS[storyStep(progress)].id):null);
   if(activities.mount.mounted)return {type:'mount',label:'Dismount'};
   if(locomotion.climbing)return {type:'climb',label:'Let go of ladder'};
+  // From the quay south of the ferryman, the Tidewarden can be called in.
+  const ray=tidewarden(),call=ray?.berth.call;
+  if(call&&Math.hypot(position.x-call.x,position.z-call.z)<7){
+    if(ray.mode==='waiting')return {type:'tidewarden',label:'Climb onto the Tidewarden'};
+    if(ray.mode==='circling'||ray.mode==='returning')return {type:'tidewarden',label:'Call the Tidewarden'};
+  }
   if(position.distanceTo(activities.mount.position)<4)return {type:'mount',label:'Ride trail horse'};
   const ladder=activities.climbables.find(c=>Math.hypot(position.x-c.x,position.z-c.z)<(c.r||1.8)&&position.y<c.top+.5);
   if(ladder)return {type:'climb',label:'Climb lookout · forward / back',ladder};
@@ -484,6 +503,13 @@ function interact(){
   }
   // The press that closes a conversation is not also the one that opens it again.
   if(action.type==='story'){if(action.person!==closed.person||performance.now()-closed.at>400)talk(action.person);return;}
+  if(action.type==='tidewarden'){
+    const ray=tidewarden();if(!ray)return;
+    if(skyRide){if(ray.mode==='landing')ray.ride();else landTidewarden(ray);}
+    else if(ray.mode==='waiting')boardTidewarden(ray);
+    else if(ray.call())toast('The Tidewarden turns toward the quay');
+    audio.play('interaction');return;
+  }
   if(action.type==='mount'){
     const mount=activities.mount;
     if(mount.mounted){
@@ -493,6 +519,40 @@ function interact(){
   }
   if(action.type==='climb'){if(locomotion.climbing)locomotion.stopClimb();else{locomotion.startClimb(action.ladder);cinematic=false;}return;}
   if(action.type==='push'){const dir={x:Math.sin(avatar.rotation.y),z:Math.cos(avatar.rotation.y)};propPhysics.push(position,dir,8,3);audio.play('landing',{position,volume:.3});perform('Push',1.4);}
+}
+// Up onto the Tidewarden's back in one leap from the quay, landing in the
+// seat wherever the wingbeat has carried it; from there, it flies.
+function boardTidewarden(ray){
+  if(!locomotion.grounded||activities.mount.mounted||!hero)return;
+  lockTarget=null;aiming=cinematic=false;emoting=pendingEmote=null;locomotion.reset();
+  const contact=new THREE.Vector3();
+  leap={from:position.clone(),height:3,duration:1.1,t:0,
+    // Less how high the hero's own seat is above their feet.
+    to:out=>ray.saddle.getWorldPosition(out).sub(hero.ridingAnchor.getWorldPosition(contact).sub(avatar.position)),
+    done(){skyRide=true;ray.ride();pitch=FLIGHT_PITCH;settling=0;position.copy(ray.position);syncCameraControls();}};
+  syncCameraControls();
+}
+// It comes down over the nearest open ground, roomy enough for its wings if
+// there is any, and the hero drops off its back there.
+function landTidewarden(ray){
+  const at=ray.position;let ground=null;
+  for(const room of [4,1.5]){try{ground=world.findWalkable(at.x,at.z,room);break;}catch{}}
+  if(ground)ray.land(ground);
+}
+function leaveTidewarden(ray){
+  const ground=ray.spot,to=new THREE.Vector3(ground.x,ground.y,ground.z);
+  skyRide=false;avatar.rotation.x=avatar.rotation.z=0;
+  leap={from:avatar.position.clone(),to:out=>out.copy(to),height:2,duration:.55+Math.min(.6,Math.max(0,avatar.position.y-to.y)*.025),t:0,
+    done(){position.copy(to);locomotion.reset();settling=.9;syncCameraControls();}};
+  ray.release();
+}
+// Off its back at once, wherever it is, for a respawn or the lobby: the hero
+// is set down on the quay it was called from, and it swims home.
+function endSkyRide(){
+  if(!skyRide&&!leap)return;
+  const ray=tidewarden();skyRide=false;leap=null;avatar.rotation.x=avatar.rotation.z=0;
+  if(ray){ray.release();const call=ray.berth.call;position.set(call.x,groundHeight(call.x,call.z),call.z);locomotion.reset();}
+  syncCameraControls();
 }
 
 /**
@@ -713,7 +773,7 @@ function readPortalBook(destination) {
   const map=world.activeMap || 'city';
   const route=portalRoute(progress,map,destination);
   if(route.lockedReason){begin('portalBook',portalConversation(route).lines);return;}
-  if(!locomotion.grounded || activities.mount.mounted)return;
+  if(!locomotion.grounded || activities.mount.mounted || skyRide || leap)return;
   const choices=portalChoices(progress,map);
   if(destination===undefined && choices.length>1){
     resetInput();
@@ -866,7 +926,7 @@ async function arriveThroughPortal(arrival) {
   // The light is left behind on the old map, and rises afresh on the new one.
   guideLight.reset();lightFor=lightIn=null;lightWelcome=true;
   spawn.set(arrival.x,arrival.y,arrival.z);position.copy(spawn);avatar.position.copy(position);stage.position.copy(spawn);
-  activities.mount.mounted=false;locomotion.waterZones=inCity()?activities.waterZones:[];locomotion.climbables=inCity()?activities.climbables:[];
+  activities.mount.mounted=false;skyRide=false;leap=null;avatar.rotation.x=avatar.rotation.z=0;locomotion.waterZones=inCity()?activities.waterZones:[];locomotion.climbables=inCity()?activities.climbables:[];
   locomotion.reset();lockTarget=null;aiming=cinematic=false;attackTimer=abilityTimer=hurtTimer=combatMemory=0;
   for(const enemy of enemies)enemy.group.visible=inCity()&&enemy.alive;
   shardMesh.visible=inCity();activities.root.visible=inCity();mapLayer=null;
@@ -930,7 +990,7 @@ function holdLook(on){
 function releaseLook(){look.pointer=null;look.yaw=look.pitch=0;holdLook(false);}
 function syncCameraControls(){
   $('aim-button').setAttribute('aria-pressed',String(aiming));$('lock-button').setAttribute('aria-pressed',String(!!lockTarget));$('cinematic-button').setAttribute('aria-pressed',String(cinematic));
-  $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=look.held?'FREE LOOK':activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
+  $('aim-reticle').hidden=!aiming;$('camera-mode').textContent=look.held?'FREE LOOK':skyRide?'FLYING':activities.mount.mounted?'MOUNTED':cinematic?'CINEMATIC':aiming?'AIM':lockTarget?'TARGET LOCKED':'';
 }
 // The flashlight comes out at dusk and goes away at dawn by itself; this is
 // the player's say over whether it comes out at all.
@@ -941,10 +1001,10 @@ function toggleFlashlight(){
   toast(flashlight.dark?`Flashlight ${preferences.flashlight?'on':'off'}`:preferences.flashlight?'Flashlight ready · it comes out at dusk':'Flashlight packed away for tonight');
 }
 syncFlashlight();
-function toggleAim(){if(screen!=='game'||dialog.open||chat)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
-function toggleCinematic(){if(screen!=='game'||dialog.open||chat)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
+function toggleAim(){if(screen!=='game'||dialog.open||chat||skyRide||leap)return;aiming=!aiming;cinematic=false;if(aiming)lockTarget=null;syncCameraControls();}
+function toggleCinematic(){if(screen!=='game'||dialog.open||chat||skyRide||leap)return;cinematic=!cinematic;aiming=false;lockTarget=null;syncCameraControls();}
 function toggleLock(){
-  if(screen!=='game'||dialog.open||chat)return;
+  if(screen!=='game'||dialog.open||chat||skyRide||leap)return;
   releaseLook();
   if(lockTarget){yaw=followCamera.yaw;lockTarget=null;}
   else{
@@ -953,7 +1013,7 @@ function toggleLock(){
   }
   aiming=cinematic=false;syncCameraControls();
 }
-function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;stickSprinting=false;dragId=null;emoting=null;aiming=false;releaseLook();closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';$('joystick').classList.remove('held','sprinting');}
+function resetInput(){keys.clear();joyX=joyY=0;joyId=null;sprinting=false;jumpHeld=false;stickSprinting=false;dragId=null;emoting=null;aiming=false;releaseLook();closeEmotes();syncCameraControls();velocity.set(0,0,0);$('joystick-knob').style.transform='';$('joystick').classList.remove('held','sprinting');}
 addEventListener('keydown',e=>{
   // While the controls are being arranged the hero stays put: no key
   // reaches the game, and Escape finishes the same as Done.
@@ -990,7 +1050,7 @@ addEventListener('keyup',e=>{keys.delete(e.code);if(e.code==='AltLeft'||e.code==
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
 addEventListener('pagehide',()=>{save();audio.setPaused(true);});
 document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){audio.setPaused(true);save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
-function jump(){if(screen==='game'&&!dialog.open&&!chat&&!opening?.locked){locomotion.requestJump();cinematic=false;}}
+function jump(){if(screen==='game'&&!dialog.open&&!chat&&!opening?.locked&&!skyRide&&!leap){locomotion.requestJump();cinematic=false;}}
 // Emotes are the one animation the player drives directly, so they
 // are held for exactly as long as the clip runs and dropped the
 // moment the character has somewhere else to be. `hero.emotes` only
@@ -1002,7 +1062,7 @@ const EMOTE_KEYS=Object.fromEntries(EMOTES.map(([state],i)=>[`Digit${(i+1)%10}`,
 // Emotes and the gestures the world asks for — a rune pressed, a crate
 // pushed — play the same way. `limit` cuts a looping one short.
 function perform(state,limit=Infinity){
-  if(screen!=='game'||dialog.open||chat||!hero||activities.mount.mounted||locomotion.climbing||locomotion.swimming)return false;
+  if(screen!=='game'||dialog.open||chat||!hero||activities.mount.mounted||skyRide||leap||locomotion.climbing||locomotion.swimming)return false;
   const duration=Math.min(limit,hero.cue(state));if(!duration)return false;
   emoting=state;emoteUntil=time+duration;closeEmotes();return true;
 }
@@ -1089,6 +1149,9 @@ function actionButton(id,run){
   button.addEventListener('click',e=>{if(e.detail&&performance.now()-touched<700)return;run();});
 }
 actionButton('view-button',()=>cycleView());actionButton('attack-button',()=>attack());actionButton('ability-button',()=>attack(true));actionButton('jump-button',jump);actionButton('interact-button',interact);
+// Held down, the jump button lifts the Tidewarden straight up.
+$('jump-button').addEventListener('pointerdown',()=>{jumpHeld=true;});
+for(const event of ['pointerup','pointercancel','pointerleave'])$('jump-button').addEventListener(event,()=>{jumpHeld=false;});
 actionButton('lock-button',toggleLock);actionButton('aim-button',toggleAim);actionButton('cinematic-button',toggleCinematic);actionButton('flashlight-button',toggleFlashlight);
 actionButton('emote-button',()=>toggleEmotes());
 // The picker's buttons come and go with the hero, so they are answered
@@ -1230,7 +1293,7 @@ function applyControlLook() {
 applyControlLook();
 
 function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;opening.start();updateCamera(1);updateHUD();lightDelay=1.2;lightWelcome=true;const step=currentStep();if(!opening.active&&step.id!=='notice')toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
-function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
+function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);endSkyRide();closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
 $('close-dialog').addEventListener('click',closeDialog);dialog.addEventListener('cancel',()=>{resetInput();save();});dialog.addEventListener('click',e=>{if(e.target===dialog){const b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)closeDialog();}});
@@ -1266,7 +1329,7 @@ function openMenu(type){
       (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
       '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';
   }else{
-    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1–9 · 0 · G</kbd><span>Emote · dance, wave, cheer and more, or pick one from the ☺ button · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
+    content.innerHTML='<p class="dialog-copy">The city will wait. Your progress is saved on this device.</p><div class="menu-buttons"><button id="resume-button" class="primary-button">Return to adventure</button><button id="menu-lobby">Choose another adventurer</button><button id="menu-settings">World & settings</button></div><div class="control-list"><kbd>WASD / ARROWS</kbd><span>Move · Shift to sprint</span><kbd>SPACE</kbd><span>Jump · held, climb on the Tidewarden</span><kbd>Q / CLICK</kbd><span>Attack the nearest wisp</span><kbd>E</kbd><span>Signature ability · 7 second recharge</span><kbd>F</kbd><span>Interact · talk, read, climb, push, ride / dismount · call the Tidewarden from the west quay, and land it</span><kbd>L / R / C</kbd><span>Target lock / aim / cinematic camera</span><kbd>V</kbd><span>Camera view · follow, shoulder, wide, overhead</span><kbd>T</kbd><span>Flashlight · comes out after dusk, or stays packed</span><kbd>1–9 · 0 · G</kbd><span>Emote · dance, wave, cheer and more, or pick one from the ☺ button · imported adventurers only</span><kbd>DRAG / SCROLL</kbd><span>Look around / zoom</span></div>';
     $('resume-button').onclick=closeDialog;$('menu-lobby').onclick=enterLobby;$('menu-settings').onclick=()=>openMenu('settings');
   }
   audio.setPaused(true);if(!dialog.open)dialog.showModal();
@@ -1274,6 +1337,7 @@ function openMenu(type){
 $('settings-button').onclick=()=>openMenu('settings');$('nav-journal').onclick=$('journal-button').onclick=()=>openMenu('journal');$('pause-button').onclick=()=>openMenu('pause');
 
 function respawnPlayer(){
+  endSkyRide();
   chapterTwo.resetChallenge();
   chapterThree.resetChallenge();
   health=100;activities.mount.mounted=false;position.copy(spawn);locomotion.reset();lockTarget=null;aiming=cinematic=false;
@@ -1302,37 +1366,40 @@ function updatePlayer(dt){
   const run=sprinting||stickSprinting||keys.has('ShiftLeft')||keys.has('ShiftRight'),mounted=activities.mount.mounted;
   const movementYaw=lockTarget?followCamera.yaw:yaw;
   let wx=Math.cos(movementYaw)*x+Math.sin(movementYaw)*z,wz=-Math.sin(movementYaw)*x+Math.cos(movementYaw)*z,magnitude=Math.min(1,length);
-  // Mounted, the controls ask for a way to go and the horse swings round to it.
-  if(mounted)({x:wx,z:wz,magnitude}=reins.update(dt,{x:wx,z:wz,speed:locomotion.speed}));
-  locomotion.radius=mounted?.85:.52;
-  // Badly hurt, the hero nurses the wound: hunched when standing, and
-  // limping at a walk. A limp covers less ground than a stride, so the
-  // walk slows to match it; a sprint can still get away.
-  const injured=health<=30&&!mounted;
-  locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!(run&&!locomotion.exhausted)?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
-  const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
-  updateStamina();
-  if(inCity())propPhysics.update(dt);
-  for(const event of locomotion.events){
-    if(event.type==='land'&&event.speed>13){health=Math.max(0,health-(event.speed-13)*4);hurtTimer=.8;audio.play('hit',{volume:.6});}
+  if(skyRide||leap)flyPlayer(dt,wx,wz,run);
+  else{
+    // Mounted, the controls ask for a way to go and the horse swings round to it.
+    if(mounted)({x:wx,z:wz,magnitude}=reins.update(dt,{x:wx,z:wz,speed:locomotion.speed}));
+    locomotion.radius=mounted?.85:.52;
+    // Badly hurt, the hero nurses the wound: hunched when standing, and
+    // limping at a walk. A limp covers less ground than a stride, so the
+    // walk slows to match it; a sprint can still get away.
+    const injured=health<=30&&!mounted;
+    locomotion.update(dt,{x:wx,z:wz,magnitude,walk:!run,sprint:run,mounted,heroSpeed:heroMeta.speed,speedScale:mounted?1.65:(aiming?.65:1)*(injured&&!(run&&!locomotion.exhausted)?.75:1),attacking:attackTimer>heroMeta.cooldown*.45,hurt:hurtTimer>.9,climbDirection:-z});
+    const bounds=world.bounds;position.x=clamp(position.x,bounds.minX+1,bounds.maxX-1);position.z=clamp(position.z,bounds.minZ+1,bounds.maxZ-1);
+    updateStamina();
+    if(inCity())propPhysics.update(dt);
+    for(const event of locomotion.events){
+      if(event.type==='land'&&event.speed>13){health=Math.max(0,health-(event.speed-13)*4);hurtTimer=.8;audio.play('hit',{volume:.6});}
+    }
+    if(health<=0){respawnPlayer();return;}
+    const floor=locomotion.groundHeight;
+    avatar.position.copy(position);
+    // Standing still, the hero turns round with the heading the player swipes;
+    // on the move they face the way they go.
+    faceHeading=Math.max(0,faceHeading-dt);
+    const turning=faceHeading>0&&locomotion.speed<=.2;
+    const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming||turning?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
+    if(mounted)avatar.rotation.y=reins.heading;
+    else if((locomotion.speed>.2||lockTarget||aiming||turning)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
+    if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
+    if(locomotion.climbing)avatar.rotation.y=Math.PI;
+    if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||hurtTimer>.9||!locomotion.grounded))emoting=null;
+    if(pendingEmote&&(time>pendingEmote.until||(!emoting&&length<=.08&&attackTimer<=0&&locomotion.grounded&&locomotion.speed<.5&&perform(pendingEmote.state))))pendingEmote=null;
+    // No idle fidgets with a fight on: a hero who has just been hit does
+    // not stop to scratch.
+    hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:locomotion.sprinting,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,injured,fidget:!lockTarget&&!aiming&&combatMemory<=0,state:emoting||(mounted?'Ride':locomotion.state),time});
   }
-  if(health<=0){respawnPlayer();return;}
-  const floor=locomotion.groundHeight;
-  avatar.position.copy(position);
-  // Standing still, the hero turns round with the heading the player swipes;
-  // on the move they face the way they go.
-  faceHeading=Math.max(0,faceHeading-dt);
-  const turning=faceHeading>0&&locomotion.speed<=.2;
-  const facing=lockTarget?.alive?Math.atan2(lockTarget.group.position.x-position.x,lockTarget.group.position.z-position.z):aiming||turning?yaw+Math.PI:Math.atan2(velocity.x,velocity.z);
-  if(mounted)avatar.rotation.y=reins.heading;
-  else if((locomotion.speed>.2||lockTarget||aiming||turning)&&attackTimer<=0)avatar.rotation.y+=Math.atan2(Math.sin(facing-avatar.rotation.y),Math.cos(facing-avatar.rotation.y))*(1-Math.exp(-14*dt));
-  if(mounted){activities.mount.position.copy(position);activities.mount.group.rotation.y=avatar.rotation.y;}
-  if(locomotion.climbing)avatar.rotation.y=Math.PI;
-  if(emoting&&(time>emoteUntil||length>.08||attackTimer>0||hurtTimer>.9||!locomotion.grounded))emoting=null;
-  if(pendingEmote&&(time>pendingEmote.until||(!emoting&&length<=.08&&attackTimer<=0&&locomotion.grounded&&locomotion.speed<.5&&perform(pendingEmote.state))))pendingEmote=null;
-  // No idle fidgets with a fight on: a hero who has just been hit does
-  // not stop to scratch.
-  hero.animate(dt,{speed:mounted?0:locomotion.speed,moving:!mounted&&length>.08,sprinting:locomotion.sprinting,jumping:!locomotion.grounded&&!locomotion.climbing,attacking:attackTimer>heroMeta.cooldown*.45,holding:flashlight.out,injured,fidget:!lockTarget&&!aiming&&combatMemory<=0,state:emoting||(mounted?'Ride':locomotion.state),time});
   if(Math.hypot(position.x-camp.x,position.z-camp.z)<12)health=Math.min(100,health+dt*12);
   const interaction=nearbyInteraction();$('interaction-hint').hidden=!interaction;if(interaction)$('interaction-text').textContent=interaction.label;
   attackTimer=Math.max(0,attackTimer-dt);abilityTimer=Math.max(0,abilityTimer-dt);hurtTimer=Math.max(0,hurtTimer-dt);
@@ -1376,6 +1443,29 @@ function updatePlayer(dt){
   audio.setPaused(false);
   audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':region(),state:locomotion.state,mounted}, {sources:activities.sources,threat,tension:opening?.tension||0});
   syncCameraControls();
+}
+// On the Tidewarden's back, or leaping on or off it. The stick asks it for a
+// way to go, the view's tilt climbs or dives, jump held lifts it, sprint
+// spurs it on; the hero rides in the seat and leans with it.
+function flyPlayer(dt,wx,wz,run){
+  const ray=tidewarden();
+  if(!ray){skyRide=false;leap=null;avatar.rotation.x=avatar.rotation.z=0;locomotion.reset();return;}
+  if(leap){
+    leap.t=Math.min(1,leap.t+dt/leap.duration);
+    const k=leap.t,to=leap.to(leapTarget);
+    position.lerpVectors(leap.from,to,k).y+=leap.height*4*k*(1-k);avatar.position.copy(position);
+    if(Math.hypot(to.x-leap.from.x,to.z-leap.from.z)>.5)avatar.rotation.y=Math.atan2(to.x-leap.from.x,to.z-leap.from.z);
+    hero.animate(dt,{speed:0,jumping:true,holding:flashlight.out,fidget:false,state:k<.5?'Jump':'Fall',time});
+    if(k>=1){const done=leap.done;leap=null;done();}
+    return;
+  }
+  // Pressing on while it comes in to land takes the reins back.
+  if(ray.mode==='landing'&&Math.hypot(wx,wz)>.3)ray.ride();
+  ray.fly(dt,{x:wx,z:wz,surge:run,rise:keys.has('Space')||jumpHeld,aim:clamp((FLIGHT_PITCH-pitch)*1.6,-1,1)});
+  position.copy(ray.position);avatar.position.copy(position);
+  avatar.rotation.set(-ray.pitch*.7,ray.heading,ray.roll*.7);
+  hero.animate(dt,{speed:0,holding:flashlight.out,fidget:false,state:'Ride',time});
+  if(ray.mode==='landed')leaveTidewarden(ray);
 }
 // The hero stands and listens, the line types itself out, and the camera
 // comes round over their shoulder to whoever is speaking.
@@ -1434,14 +1524,14 @@ function updateCamera(dt){
       }
       // Turned with the light only once it is clear of the hero's shoulder,
       // and only in the plain follow view: never against an aim or a lock.
-      const light=followLight>0&&!chat&&!aiming&&!cinematic&&!lockTarget&&guideLight.position;
+      const light=followLight>0&&!chat&&!aiming&&!cinematic&&!lockTarget&&!skyRide&&!leap&&guideLight.position;
       if(followLight>0)followLight=Math.max(0,followLight-dt);
       if(light&&Math.hypot(light.x-position.x,light.z-position.z)>2.5){const want=Math.atan2(position.x-light.x,position.z-light.z);yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*(1-Math.exp(-2.5*dt));faceHeading=.4;}
       // Let go, the free look swings back behind the hero, the short way round.
       if(look.held&&chat)holdLook(false);
       if(!look.held){look.yaw=damp(Math.atan2(Math.sin(look.yaw),Math.cos(look.yaw)),0,10,dt);look.pitch=damp(look.pitch,0,10,dt);}
-      const mode=activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
-      followCamera.update(dt,position,yaw+look.yaw,clamp(pitch+look.pitch,-1.2,1.08),radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:locomotion.speed,cinematicTime:reducedMotion?0:time});
+      const mode=skyRide||leap?'flight':activities.mount.mounted?'mount':cinematic?'cinematic':aiming?'aim':'follow';
+      followCamera.update(dt,position,yaw+look.yaw,clamp(pitch+look.pitch,-1.2,1.08),radius,{mode,lockTarget:mode==='follow'?lockTarget:null,height:view.height||1.9,shoulder:view.shoulder||0,fov:view.fov,speed:mode==='flight'?tidewarden()?.speed??0:locomotion.speed,cinematicTime:reducedMotion?0:time});
       if(lockTarget&&!followCamera.locked)lockTarget=null;
     }
     if(lockTarget&&weight===0){
@@ -1545,6 +1635,9 @@ function drawMap(){
   map.fillStyle='#c9a1e2';if(inCity())for(const e of enemies){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),2.5,0,Math.PI*2);map.fill();}
   map.fillStyle='#ff987d';for(const e of activeTrials().combatants){if(!e.alive)continue;map.beginPath();map.arc(px(e.group.position.x),pz(e.group.position.z),e.boss?4:2.5,0,Math.PI*2);map.fill();}
   map.strokeStyle='#9fe8ed';map.lineWidth=1.5;for(const p of activeTrials().mapTargets){map.beginPath();map.arc(px(p.x),pz(p.z),3.5,0,Math.PI*2);map.stroke();}
+  // The Tidewarden, and the quay it can be called to.
+  const ray=tidewarden();
+  if(ray&&!skyRide){map.strokeStyle=map.fillStyle='#8bdcff';map.beginPath();map.arc(px(ray.berth.call.x),pz(ray.berth.call.z),3.5,0,Math.PI*2);map.stroke();map.beginPath();map.arc(px(ray.position.x),pz(ray.position.z),2.5,0,Math.PI*2);map.fill();}
   map.save();map.translate(px(position.x),pz(position.z));map.rotate(-avatar.rotation.y);map.fillStyle='#fff6d6';map.beginPath();map.moveTo(0,6);map.lineTo(-4,-4);map.lineTo(4,-4);map.closePath();map.fill();map.restore();
 }
 
@@ -1573,6 +1666,8 @@ function animate(now){
     if(screen==='game'&&activities.mount.mounted&&hero)alignRider(avatar,hero.ridingAnchor,activities.mount.saddle);
     world.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position);updateShards();
     if(inStoryMap())story.update(dt,reducedMotion?0:time,screen==='game'?position:avatar.position,STEPS[storyStep(progress)].id,progress.story);
+    // The rider sits wherever the wingbeat has carried the Tidewarden's seat.
+    if(screen==='game'&&hero&&skyRide&&!leap&&tidewarden())alignRider(avatar,hero.ridingAnchor,tidewarden().saddle);
     updateGuideLight(dt,reducedMotion?0:time);
     chapterTwo.update(dt,reducedMotion?0:time,position,{active:screen==='game'&&!chat&&!portalJourney});
     chapterTwo.root.visible=chapterTwoUnlocked()&&screen==='game';
@@ -1580,11 +1675,12 @@ function animate(now){
     chapterThree.root.visible=chapterThreeUnlocked()&&screen==='game';
     pulseAge+=dt;boltAge+=dt;pulse.scale.setScalar(1+pulseAge*pulseSize*2);pulse.material.opacity=Math.max(0,1-pulseAge*2);pulse.visible=pulseAge<.5;bolt.material.opacity=Math.max(0,1-boltAge*5);bolt.visible=boltAge<.2;
     updateCamera(dt);
+    if(screen==='game')tidewarden()?.see(camera.position,dt);
     flashlight.update(dt,{facing:avatar.rotation.y,camera});
   }
   audio.setPaused(dialog.open||screen!=='game'||contextLost||document.hidden);
   const avatarFloor=screen==='game'?locomotion.groundHeight:groundHeight(avatar.position.x,avatar.position.z);
-  blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
+  blob.visible=!(screen==='game'&&(skyRide||leap));blob.position.set(avatar.position.x,avatarFloor+(screen==='lobby'?.225:.045),avatar.position.z);blob.material.opacity=screen==='game'?Math.max(.2,1-(position.y-avatarFloor)*.15):.8;
   atmosphere.update(dt,reducedMotion?0:time,camera.position,region());
   renderer.render(scene,camera);renderInfo={calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,programs:renderer.info.programs?.length??0};
   uiTime+=dt;if(uiTime>.15){uiTime=0;if(screen==='game'){updateHUD();drawMap();const landmark=world.landmarks.find(l=>(!l.map||!world.activeMap||l.map===world.activeMap)&&Math.hypot(position.x-l.x,position.z-l.z)<20);$('region-name').textContent=landmark?landmark.name:{forest:'Pine Islet',plaza:'Lantern Plaza',yard:'Skibidi Yard',nightwood:'Nightwood Road',mesa:'Red Mesa',observatory:'Ashen Observatory',street:'Street City'}[region()]||'City Quarter';$('world-clock').textContent=`${{forest:'ISLET',plaza:'PLAZA',yard:'YARD',nightwood:'WOODS',mesa:'MESA',observatory:'OBSERVATORY',street:'STREET'}[region()]||'CITY'} · ${formatTime(preferences.time)}`;}}
@@ -1600,12 +1696,13 @@ renderer.domElement.addEventListener('webglcontextrestored',()=>{contextLost=fal
 
 // Read-only diagnostics for browser verification and device profiling.
 function ridingStats(){
-  if(!hero||!activities.mount.mounted)return null;
+  const seat=skyRide&&!leap?tidewarden()?.saddle:activities.mount.mounted?activities.mount.saddle:null;
+  if(!hero||!seat)return null;
   const contact=hero.ridingAnchor.getWorldPosition(new THREE.Vector3());
-  const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
-  return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
+  const saddle=seat.getWorldPosition(new THREE.Vector3());
+  return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:skyRide?tidewarden().heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},opening:opening.diagnostics,story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),control:look.held?'freeLook':'playerFollow',heading:yaw,look:{yaw:look.yaw,pitch:look.pitch},facing:avatar.rotation.y,view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},opening:opening.diagnostics,story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),tidewarden:{riding:skyRide,leap:leap?+leap.t.toFixed(2):null,...(inCity()?story.tidewarden?.diagnostics:null)},portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),control:look.held?'freeLook':'playerFollow',heading:yaw,look:{yaw:look.yaw,pitch:look.pitch},facing:avatar.rotation.y,view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='mesa'||saved.map==='city'?saved.map:EXPLORATIONS.includes(saved.map)&&portalRoute(progress,'city',saved.map).destination===saved.map?saved.map:chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(resumeMap!=='city'&&(resumeMap==='mesa'||chapterTwoUnlocked())){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}

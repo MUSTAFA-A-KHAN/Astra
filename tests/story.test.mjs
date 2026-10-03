@@ -113,7 +113,7 @@ test('portal story loads only the current map and preserves city coordinates acr
   });
   t.mock.method(globalThis, 'fetch', async () => ({ json: async () => ['Idle', 'Talk'].map(name => THREE.AnimationClip.toJSON(new THREE.AnimationClip(name, 1, []))) }));
   const world = {
-    portalTravel: true, activeMap: 'city', spawn: { x: 0, y: 2, z: 18 },
+    portalTravel: true, activeMap: 'city', spawn: { x: 0, y: 2, z: 18 }, bounds: { minX: -80, maxX: 185, minZ: -150, maxZ: 107 },
     landmarks: [{ id: 'shrine', x: 90, y: 0, z: 140, approach: { x: -5, z: 125 } }],
     getHeight(x, z) { heightQueries.push({ x, z }); return this.activeMap === 'city' ? 2 : 5; },
     streaming: { add: object => registrations.add(object), remove: object => registrations.delete(object) },
@@ -126,7 +126,7 @@ test('portal story loads only the current map and preserves city coordinates acr
       this.stations.push({ id, x, z }); return { x: x + 1, y: 2, z: z + 1 };
     },
   };
-  const collision = { insert: (id, shape) => colliders.set(id, shape), remove: id => colliders.delete(id) };
+  const collision = { insert: (id, shape) => colliders.set(id, shape), remove: id => colliders.delete(id), query: () => [] };
   const city = createStory({ world, activities, collision });
   const cityMetadata = structuredClone(city.places);
   const streaming = city.stream();

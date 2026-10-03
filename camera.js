@@ -4,7 +4,7 @@ const clamp = THREE.MathUtils.clamp;
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
 const isPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
 const blend = (rate, dt) => 1 - Math.exp(-rate * dt);
-const MODES = new Set(['follow', 'combat', 'aim', 'cinematic', 'mount']);
+const MODES = new Set(['follow', 'combat', 'aim', 'cinematic', 'mount', 'flight']);
 // How far a blocked boom may climb, tried in turn, and the steepest it goes.
 const LIFTS = [.15, .3, .45], MAX_ORBIT = 1.25;
 
@@ -109,7 +109,7 @@ export class FollowCamera {
 
   /**
    * options: mode, lockTarget (Vector3, {position}, or {group}), height, shoulder,
-   * fov, speed (mount), cinematicTime. Dead, hidden or distant lock targets release.
+   * fov, speed (mount, flight), cinematicTime. Dead, hidden or distant lock targets release.
    */
   update(dt, position, yaw, pitch, distance, options = {}) {
     if (!isPoint(position)) return this.getStats();
@@ -153,6 +153,14 @@ export class FollowCamera {
       shoulder = .3;
       desiredDistance = clamp(desiredDistance + 3 + speed * .08, 13, 28);
       fov = 62 + speed * .45;
+    } else if (mode === 'flight') {
+      // On the Tidewarden's back the boom stands off far enough to take in
+      // both its wings, and draws out and widens as it picks up speed.
+      const speed = clamp(finite(options.speed, 0), 0, 45);
+      height = 2.2;
+      shoulder = 0;
+      desiredDistance = desiredDistance * .9 + 16 + speed * .3;
+      fov = Math.min(76, 58 + speed * .35);
     } else if (mode === 'cinematic') {
       this.cinematicTime = finite(options.cinematicTime, this.cinematicTime + dt);
       desiredYaw += this.cinematicTime * .16;

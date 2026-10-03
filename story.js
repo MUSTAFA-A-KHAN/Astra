@@ -5,6 +5,7 @@ import { CITY_ARRIVAL } from './city-world.js';
 import { disposeMapResources } from './map-resources.js';
 import { fit, meshes, materialsOf, shadows, softTexture, footprints } from './model-fit.js';
 import { createNpcPresence } from './npc-presence.js';
+import { createTidewarden, surfaceBelow, skyOver } from './tidewarden.js';
 
 // The Last Keeper, stood up in the Reach: the Moonwell and its keeper in the
 // sanctuary, the ferryman on the west quay, the wanderers' camp and its
@@ -28,6 +29,14 @@ const RANGE = { maren: 2.6 * M, tobin: 2.6 * M, notice: 2.2 * M, ledger: 2 * M }
 // The Tidewarden's water: open harbour west of the islet, in sight of the
 // ferryman's jetty.
 const TIDEWARDEN = { x: -134, z: 60, radius: 30, period: 80 };
+// Where it comes when called from the quay south of the ferryman: in low over
+// the promenade, head to the north, its back a leap from the kerb.
+const BERTH = { x: -85, z: 2, heading: Math.PI, call: { x: -71.5, z: 2 } };
+// Past the city's west quay, out where nobody walks, its model keeps a sunken
+// promenade between two low walls, fifteen units wide.
+const PROMENADE = { width: 15.5, top: 1 };
+// The seat on its back: between its wings, just behind its head.
+const SEAT = { x: 0, y: 4.15 * M, z: -6.5 * M };
 
 // Fades a model's own materials; they are cloned first so a fade never reaches
 // another model sharing them.
@@ -244,8 +253,19 @@ export function createStory({ world, activities, collision }) {
         for (const child of activities.campfire.group.children) if (child.isMesh) { fireVisibility.set(child, child.visible); child.visible = false; }
       }),
       place('tidewarden', () => load('harbour-mythic-whale', 20 * M, 'length'), part => {
-        // Streamed by the whole of the water it circles, as far out as the city.
-        add('The Tidewarden', part.model, { x: TIDEWARDEN.x, y: HARBOUR_LEVEL, z: TIDEWARDEN.z }, { kind: 'scenery', bounds: { x: TIDEWARDEN.x, z: TIDEWARDEN.z, radius: TIDEWARDEN.radius + 10 * M } }); loop(part);
+        let carrier = null;
+        part.gltf.scene.traverse(node => { if (!carrier && node.isBone && /^Neck/.test(node.name)) carrier = node; });
+        const bounds = skyOver(world.bounds);
+        part.ray = createTidewarden({
+          model: part.model, action: loop(part), seat: SEAT, carrier, water: TIDEWARDEN, waterline: HARBOUR_LEVEL, fade: fader(part.model),
+          berth: BERTH, bounds, floor: surfaceBelow({ world, collision, waterline: HARBOUR_LEVEL, shores: [
+            { minX: world.bounds.minX - PROMENADE.width, maxX: world.bounds.minX, minZ: world.bounds.minZ, maxZ: world.bounds.maxZ, top: PROMENADE.top },
+          ] }),
+        });
+        // A rider can take it anywhere over the city, so it is streamed by
+        // the whole of the sky it can fly in.
+        const sky = { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2, radius: Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2 };
+        add('The Tidewarden', part.ray.rig, { x: TIDEWARDEN.x, y: HARBOUR_LEVEL, z: TIDEWARDEN.z }, { kind: 'scenery', bounds: sky });
         shadows(part.model, false);
       }),
     ].filter(Boolean);
@@ -430,13 +450,8 @@ export function createStory({ world, activities, collision }) {
     if (wellLight && restored && !tweens.length) wellLight.intensity = 22 + Math.sin(time * 1.7) * 2.5;
     // The Tidewarden circles the harbour, breaking the surface as it goes.
     // Once the well is lit it comes up into the air to look.
-    const whale = parts.tidewarden?.model;
-    if (whale) {
-      const angle = time / TIDEWARDEN.period * Math.PI * 2;
-      const lift = (restored ? 2.6 + Math.sin(time * .45) * 1.1 : Math.max(-1.2, Math.sin(time * .35) * 1.4 - .3)) * M;
-      whale.position.set(TIDEWARDEN.x + Math.cos(angle) * TIDEWARDEN.radius, HARBOUR_LEVEL + lift, TIDEWARDEN.z + Math.sin(angle) * TIDEWARDEN.radius);
-      whale.rotation.y = -angle;
-    }
+    const lift = (restored ? 2.6 + Math.sin(time * .45) * 1.1 : Math.max(-1.2, Math.sin(time * .35) * 1.4 - .3)) * M;
+    parts.tidewarden?.ray.update(dt, time, { lift, player });
     // The notice board's call rises as it arrives, and falls away while it is
     // read, never to come back.
     const call = parts.notice?.call;
@@ -475,6 +490,8 @@ export function createStory({ world, activities, collision }) {
       speakingPerson = person; speakingFeeling = feeling; hasSpeakingCue = true;
     },
     react(person, feeling = 'concern') { if (!disposed) parts[person]?.presence?.react(feeling); },
+    /** The Tidewarden (tidewarden.js), once it is out on the water. */
+    get tidewarden() { return disposed ? null : parts.tidewarden?.ray ?? null; },
     get talking() { return talking; }, set talking(person) {
       if (disposed) return;
       talking = person;
@@ -484,6 +501,7 @@ export function createStory({ world, activities, collision }) {
       return {
         restored, departed, talking, disposed, loaded: Object.keys(loaded),
         presence: Object.fromEntries(['maren', 'tobin'].filter(name => parts[name]?.presence).map(name => [name, parts[name].presence.diagnostics])),
+        tidewarden: parts.tidewarden?.ray.diagnostics ?? null,
         places: Object.fromEntries(Object.entries(places).map(([name, p]) => [name, { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) }])),
       };
     },

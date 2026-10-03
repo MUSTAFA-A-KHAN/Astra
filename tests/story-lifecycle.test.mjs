@@ -14,10 +14,10 @@ function fixture() {
     reserve(id, x, z) { this.stations.push({ id, x, z }); return { x, y: 0, z }; },
   };
   const world = {
-    spawn: { x: 0, z: 0 }, landmarks: [{ id: 'shrine', x: 10, z: 20 }], getHeight: () => 0,
+    spawn: { x: 0, z: 0 }, landmarks: [{ id: 'shrine', x: 10, z: 20 }], getHeight: () => 0, bounds: { minX: -80, maxX: 185, minZ: -150, maxZ: 107 },
     streaming: { add: object => registrations.add(object), remove: object => registrations.delete(object) },
   };
-  const collision = { insert: (id, shape) => colliders.set(id, shape), remove: id => colliders.delete(id) };
+  const collision = { insert: (id, shape) => colliders.set(id, shape), remove: id => colliders.delete(id), query: () => [] };
   const story = createStory({ world, activities, collision });
   new THREE.Group().add(story.root);
   return { story, world, activities, collision, registrations, colliders, visible, hidden };
