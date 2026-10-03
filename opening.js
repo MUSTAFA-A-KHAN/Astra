@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { fit } from './model-fit.js';
+import { disposeMapResources } from './map-resources.js';
 import { OPENING_LINES, OPENING_TITLE, openingClue, openingChoice } from './opening-script.js';
 
 // Owns only the arrival-square incident. Combat, conversations, navigation,
@@ -35,7 +36,7 @@ export function createOpening({ scene, world, state, places: storyPlaces, audio,
   const loader = new GLTFLoader();
   let loadedLantern = null;
   const ready = loader.loadAsync(new URL('./assets/story/old-lantern.glb', import.meta.url).href).then(gltf => {
-    if (disposed) return;
+    if (disposed) { disposeMapResources(gltf.scene); return; }
     loadedLantern = fit(gltf.scene, 1.2, 'height'); lantern.add(loadedLantern); standin.visible = false;
   }).catch(() => {});
   // Broken slats, a snapped mooring ring, salt water and a line of wet prints.
@@ -195,6 +196,6 @@ export function createOpening({ scene, world, state, places: storyPlaces, audio,
     get active() { return active(); }, get cinematic() { return cinematic(); }, get locked() { return cinematic() || choosing; },
     get tension() { return ['breach', 'encounter'].includes(state.stage) ? 1 : active() ? .4 : 0; },
     get diagnostics() { return { ...state, active: active(), cinematic: cinematic(), choosing, elapsed, beat, places, lanternLoaded: !!loadedLantern }; },
-    dispose() { disposed = true; root.removeFromParent(); skipButton.removeEventListener('click', skip); buttons.forEach((b, i) => b.removeEventListener('click', handlers[i])); }
+    dispose() { if(disposed)return; disposed = true; root.removeFromParent(); disposeMapResources(root); skipButton.removeEventListener('click', skip); buttons.forEach((b, i) => b.removeEventListener('click', handlers[i])); }
   };
 }

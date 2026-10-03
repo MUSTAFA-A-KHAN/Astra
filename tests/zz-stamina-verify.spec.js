@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 test('stamina live check', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop');
   test.setTimeout(120000);
+  await existingJourney(page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?debug=1');

@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 async function boot(page, path = '/?debug=1') {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await existingJourney(page);
   await page.goto(path);
   await page.waitForFunction(() => window.astraReady === true);
   await expect(page.locator('#play-button')).toBeEnabled();

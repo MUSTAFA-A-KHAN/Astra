@@ -61,7 +61,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await page.keyboard.press('f');
   await expect(page.locator('#conversation')).toBeVisible();
   // Maren greets the traveller in her own voice.
-  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/ah-someone-who-can-still-see-\w+\.ogg$/);
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/do-not-touch-the-water-it-\w+\.ogg$/);
 
   // Watched from inside the page, where a second-long line can't slip by
   // between two of the test's looks: what is heard, how long her line takes
@@ -80,7 +80,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
       if (name.textContent === 'Maren' && typing.start) typing.moved ??= performance.now();
     }).observe(name, watch);
     new MutationObserver(() => { if (typing.start && text.textContent === line) typing.end ??= performance.now(); }).observe(text, watch);
-  }, 'How many do you need?');
+  }, 'A bell rang in the city. Something followed it through.');
   // Page on through her greeting to the hero's line.
   for (let presses = 0; presses < 20 && await page.locator('#conversation-title').textContent() !== 'You'; presses++) {
     await page.keyboard.press('f'); await page.waitForTimeout(40);
@@ -88,7 +88,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   await expect(page.locator('#conversation-name')).toHaveText('Spiderman');
   // Typed at her pace, a little over a second, where unvoiced text takes a third of one.
   const typing = await (await page.waitForFunction(() => window.__TYPING__.end && window.__TYPING__)).jsonValue();
-  expect(typing.heard).toMatch(/^voice\/heroes\/spiderman\/how-many-do-you-need-\w+\.ogg$/);
+  expect(typing.heard).toMatch(/^voice\/heroes\/spiderman\/a-bell-rang-in-the-city-\w+\.ogg$/);
   expect(typing.end - typing.start).toBeGreaterThan(700);
   expect((await audio(page)).failed).toEqual([]);
   // She says it to the end, and with no press at all, a beat later, Maren answers.
@@ -96,7 +96,7 @@ test('Maren, Gwen and Tobin speak their lines aloud', async ({ page }, info) => 
   expect(moved.quiet, 'she finished before the conversation moved on').toBeLessThan(moved.moved);
   expect(moved.moved - moved.quiet).toBeGreaterThan(200);
   expect(moved.moved - moved.quiet).toBeLessThan(3000);
-  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/five-will-wake-it-\w/);
+  await expect.poll(async () => (await audio(page)).speaking).toMatch(/^voice\/people\/maren\/then-the-moonwell-is-calling-for-\w/);
   // Skipping the rest quiets her.
   await page.keyboard.press('Escape');
   await expect(page.locator('#conversation')).toBeHidden();

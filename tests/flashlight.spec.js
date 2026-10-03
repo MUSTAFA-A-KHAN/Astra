@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 async function boot(page) {
+  await existingJourney(page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?debug=1');

@@ -339,12 +339,8 @@ test('a conversation plays as film, cut to whoever is talking, and hands back', 
   for (const part of ['.quest-tracker', '.minimap-wrap', '.player-panel', '.game-menu']) await expect(page.locator(part)).toBeHidden();
   await expect(page.locator('#conversation')).toBeVisible();
   await shoot(page, 'film-two');
-  // She goes on: the picture cuts to her alone.
+  // The hero reports the bell: the picture cuts round to the hero.
   await page.evaluate(() => window.__STORY_TEST__.step());
-  await expect.poll(() => shows('them', 'maren', 'hero')).toBe(true);
-  await shoot(page, 'film-maren');
-  // The hero asks how many: the picture cuts round to the hero.
-  while ((await film()).line < 4) await page.evaluate(() => window.__STORY_TEST__.step());
   await expect(page.locator('#conversation-name')).toHaveText(await page.locator('#hud-name').textContent());
   await expect.poll(() => shows('hero', 'hero', 'maren')).toBe(true);
   await shoot(page, 'film-hero');

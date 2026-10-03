@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 const terrainFiles = ['/mesa-world.js', '/map/worldmachine_terrain.glb'];
 // The lantern is shared with the city's camp; these belong only to the mesa.
@@ -74,6 +75,7 @@ window.__MESA_TEST__ = {
 `;
 
 async function boot(page) {
+  await existingJourney(page);
   const errors = [], requested = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => requested.push(new URL(request.url()).pathname));

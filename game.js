@@ -336,7 +336,7 @@ const RESPAWN_DELAY=9,RESPAWN_CLEARANCE=26;
 for (const enemy of enemies) enemy.ragdoll = new RagdollController(enemy.group.position, activities.terrain, collision, { rotation: enemy.group.rotation, radius: .65 });
 function revive(e){
   e.ragdoll.reset(); e.group.rotation.x=e.group.rotation.z=0;
-  e.alive=true;e.hp=80;e.hit=0;e.swing=0;e.dying=0;e.respawn=0;
+  e.alive=true;e.hp=80;e.hit=0;e.swing=0;e.dying=0;e.respawn=0;e.windup=0;e.recovery=0;
   e.group.position.set(e.x,groundHeight(e.x,e.z)+(e.rig?0:1.4),e.z);e.group.scale.setScalar(1);e.group.visible=true;e.rig?.reset();
 }
 const effectGroup=new THREE.Group();scene.add(effectGroup);
@@ -964,7 +964,10 @@ addEventListener('keydown',e=>{
   if(opening?.locked){
     if(e.code==='Escape'&&opening.cinematic){e.preventDefault();opening.skip();}
     else if(e.code==='KeyP'){e.preventDefault();openMenu('pause');}
-    else if(!e.target.closest('[data-opening-choice]'))e.preventDefault();
+    else if(e.code==='Tab'&&!opening.cinematic){
+      const buttons=[...document.querySelectorAll('[data-opening-choice]')],current=buttons.indexOf(document.activeElement);
+      buttons[(current+(e.shiftKey?-1:1)+buttons.length)%buttons.length].focus();e.preventDefault();
+    }else if(e.code!=='Tab'&&!e.target.closest('[data-opening-choice],#opening-skip'))e.preventDefault();
     return;
   }
   if(portalJourney&&!chat){e.preventDefault();return;}
@@ -1350,12 +1353,23 @@ function updatePlayer(dt){
     e.group.visible=d<world.streaming.reach('props');if(!e.group.visible)continue;
     const visible=d<30&&collision.cameraFraction(new THREE.Vector3(e.group.position.x,e.group.position.y+1.7,e.group.position.z),new THREE.Vector3(position.x,position.y+1.7,position.z),.1)>.98;
     if(visible)nearestThreat=Math.min(nearestThreat,d);
-    const chasing=visible&&d<18&&d>1.9;
+    e.recovery=Math.max(0,(e.recovery||0)-dt);
+    const chasing=visible&&d<18&&d>1.9&&!(e.openingEnemy&&(e.windup>0||e.recovery>0));
     if(chasing){e.group.position.x+=dx/d*2.9*dt;e.group.position.z+=dz/d*2.9*dt;collide(e.group.position,.8);}
     e.group.rotation.y=Math.atan2(dx,dz);
     if(e.rig){e.group.position.y=groundHeight(e.group.position.x,e.group.position.z);e.group.scale.setScalar(e.hit>0?.92:1);e.rig.animate(dt,{speed:chasing?2.9:0,moving:chasing,attacking:e.swing>0,state:e.hit>0?'Hit':undefined,time});}
     else{e.group.position.y=groundHeight(e.group.position.x,e.group.position.z)+1.5+Math.sin(time*2+e.index)*.25;e.core.rotation.z=Math.sin(time+e.index)*.14;e.core.scale.setScalar(e.hit>0?.8:1);}
-    if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
+    if(e.openingEnemy){
+      if(e.windup>0){
+        e.windup=Math.max(0,e.windup-dt);
+        if(e.windup===0){
+          e.recovery=1.6;
+          if(visible&&d<3&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
+        }
+      }else if(visible&&d<3&&e.recovery===0){
+        e.windup=.8;e.swing=.8;showPulse(e.group.position.x,e.group.position.z,2,'#df8d95');
+      }
+    }else if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
   }
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
   const threat=nearestThreat<10||combatMemory>0||activeTrials().combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26||opening?.active?'suspicion':'exploration';
@@ -1448,7 +1462,7 @@ function updateCamera(dt){
       holdCamera();
       const goal=openingShot.target,want=openingShot.position;
       const safe=followCamera.safeFraction(goal,want,.25);
-      camera.position.copy(goal).lerp(want,Math.max(.08,safe));
+      camera.position.copy(goal).lerp(want,safe);
       camera.position.y=Math.max(camera.position.y,followCamera.floorHeight(camera.position.x,camera.position.z));
       camera.lookAt(goal);camera.fov=openingShot.fov;camera.updateProjectionMatrix();
     }
@@ -1548,6 +1562,10 @@ function animate(now){
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
     if(screen==='game')updatePortalJourney(dt);
     opening.update(dt,reducedMotion?0:time,position,{running:screen==='game',paused:!!chat||!!portalJourney});
+    if(screen==='game'&&opening.locked&&!chat){
+      audio.update(dt,position,region(),{speed:0,moving:false,state:'Idle'},
+        {sources:activities.sources,threat:'suspicion',tension:opening.tension});
+    }
     portal.root.visible=screen==='game';portal.watch(portalJourney?.weight>0?camera.position:null);
     // Each stone that breaks the ground lands a thud and a jolt of the camera.
     for(const event of portal.update(dt,reducedMotion?0:time))if(event.type==='stone'){audio.play('landing',{volume:.55,rate:.66});if(portalJourney)portalJourney.shake=Math.min(1,(portalJourney.shake||0)+.35);}

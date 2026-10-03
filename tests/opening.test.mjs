@@ -6,7 +6,7 @@ test('new journeys keep the prologue while existing earned progress is preserved
   const fresh = { stage: 'prologue', lantern: false, memorial: false, choice: null };
   assert.deepEqual(readOpening(), fresh);
   assert.deepEqual(readOpening({ quality: 'low', hero: 'warden', sound: false }), fresh, 'changing lobby settings does not skip the story');
-  for (const saved of [{ restored: true }, { xp: 20 }, { kills: 1 }, { collected: [4] }, { story: { notice: true } }]) {
+  for (const saved of [{ restored: true }, { xp: 20 }, { kills: 1 }, { collected: [4] }, { story: { notice: true } }, {map:'mesa'}, {map:'street'}]) {
     assert.equal(readOpening(saved).stage, 'complete', 'a returning player retains the chapter they already reached');
   }
   assert.equal(readOpening({ xp: 20, opening: { stage: 'investigate', lantern: true } }).stage, 'investigate', 'new opening saves take precedence over legacy migration');

@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 const snapshot = page => page.evaluate(() => window.__ASTRA_DEBUG__);
 async function enterCity(page, heroId) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await existingJourney(page);
   await page.goto('/?debug=1');
   await page.waitForFunction(() => window.astraReady === true);
   if (heroId) {

@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { existingJourney } from './existing-journey.js';
 
 test('jj-mo-jj can be selected and uses Spiderman’s full animation library', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Asset validation runs once on desktop.');
   test.setTimeout(240000);
+  await existingJourney(page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/?debug=1');

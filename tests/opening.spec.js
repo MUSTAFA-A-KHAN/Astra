@@ -19,7 +19,7 @@ window.__OPENING_TEST__ = {
   },
   enemy() {
     const e = enemies.find(e => e.openingEnemy);
-    return e ? { alive: e.alive, hp: e.hp, x: e.group.position.x, z: e.group.position.z } : null;
+    return e ? { alive: e.alive, hp: e.hp, windup: e.windup, recovery: e.recovery, x: e.group.position.x, z: e.group.position.z } : null;
   },
   approachEnemy(distance = 3.2) {
     const e = enemies.find(e => e.openingEnemy && e.alive);
@@ -42,6 +42,7 @@ const coarse = page => page.evaluate(() => matchMedia('(pointer:coarse)').matche
 async function boot(page, { reducedMotion = false } = {}) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if(response.status()>=400&&new URL(response.url()).hostname==='127.0.0.1')errors.push(`${response.status()} ${new URL(response.url()).pathname}`); });
   await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
   await page.addInitScript(() => {
     // These are preferences only, deliberately without any progression seed.
@@ -86,6 +87,12 @@ async function winEncounter(page) {
   await closeSpeech(page);
   await expect.poll(async () => (await enemy(page))?.alive).toBe(true);
   const hp = (await enemy(page)).hp;
+  await page.evaluate(() => window.__OPENING_TEST__.approachEnemy(2.4));
+  await expect.poll(async () => (await enemy(page)).windup, { intervals: [40], timeout: 10000 }).toBeGreaterThan(0);
+  const health = (await snapshot(page)).health;
+  await page.evaluate(() => window.__OPENING_TEST__.approachEnemy(6));
+  await expect.poll(async () => (await enemy(page)).recovery, { intervals: [40], timeout: 10000 }).toBeGreaterThan(0);
+  expect((await snapshot(page)).health, 'stepping away during the windup avoids the strike').toBe(health);
   // Cooldown, damage, targeting and the death callback all remain real.
   for (let hit = 0; hit < 12 && (await opening(page)).stage === 'encounter'; hit++) {
     await page.evaluate(() => window.__OPENING_TEST__.approachEnemy());
@@ -107,12 +114,21 @@ for (const choice of ['mercy', 'seal']) {
     expect((await opening(page)).stage).toBe('prologue');
     expect((await opening(page)).locked).toBe(true);
     await expect.poll(async () => (await snapshot(page)).audio.speaking, { timeout: 20000 }).not.toBeNull();
+    await expect.poll(async () => (await snapshot(page)).audio.loops, { timeout: 15000 }).toBeGreaterThan(0);
     await page.screenshot({ path: info.outputPath(`opening-${choice}-prologue.png`) });
     const atStart = (await snapshot(page)).position;
     await page.keyboard.down('w'); await page.waitForTimeout(350); await page.keyboard.up('w');
     const whileLocked = (await snapshot(page)).position;
     expect(Math.hypot(whileLocked.x - atStart.x, whileLocked.z - atStart.z)).toBeLessThan(.1);
-    await page.locator('#opening-skip').click();
+    if(choice==='mercy'&&info.project.name==='desktop'){
+      await page.keyboard.press('p');
+      await expect(page.locator('#menu-dialog')).toBeVisible();
+      const pausedAt=(await snapshot(page)).opening.elapsed;
+      await page.waitForTimeout(400);
+      expect((await snapshot(page)).opening.elapsed).toBe(pausedAt);
+      await page.locator('#resume-button').click();
+      await expect.poll(async () => (await opening(page)).stage, { timeout: 65000 }).toBe('investigate');
+    }else await page.locator('#opening-skip').click();
     await expect.poll(async () => (await opening(page)).stage).toBe('investigate');
     await expect(page.locator('#opening-cinema')).toBeHidden();
     expect((await opening(page)).locked).toBe(false);
@@ -142,6 +158,9 @@ for (const choice of ['mercy', 'seal']) {
     expect((await opening(page)).choice).toBe(choice);
     await closeSpeech(page);
     await expect(page.locator('#opening-choices')).toBeHidden();
+    await page.locator('#journal-button').click();
+    await expect(page.locator('#dialog-content')).toContainText(choice==='mercy'?'A memory released':'Black glass recovered');
+    await page.locator('#close-dialog').click();
 
     await page.evaluate(() => window.__OPENING_TEST__.place('tobin', 3.4));
     await expect(page.locator('#interaction-text')).toContainText(/Tobin/i);
@@ -165,3 +184,18 @@ for (const choice of ['mercy', 'seal']) {
     expect(errors).toEqual([]);
   });
 }
+
+test('unavailable voice files still hand control back with readable subtitles', async ({ page }, info) => {
+  test.skip(info.project.name!=='desktop', 'Failure recovery is checked once.');
+  test.setTimeout(120000);
+  await page.route('**/assets/audio/voice/**', route => route.abort());
+  await boot(page);
+  await expect(page.locator('#opening-subtitle')).toContainText('Twenty winters');
+  await expect.poll(async () => (await opening(page)).stage, { timeout: 65000 }).toBe('investigate');
+  await expect(page.locator('#opening-cinema')).toBeHidden();
+  await expect(page.locator('#quest-title')).toHaveText('Something came ashore');
+  const before=(await snapshot(page)).position;
+  await page.keyboard.down('s');await page.waitForTimeout(750);await page.keyboard.up('s');
+  const after=(await snapshot(page)).position;
+  expect(Math.hypot(after.x-before.x,after.z-before.z)).toBeGreaterThan(.5);
+});
