@@ -37,6 +37,30 @@ test('time wraps across midnight and transitions continuously through dusk', () 
   assert.ok(getCelestialState(18).daylight > getCelestialState(18.5).daylight);
 });
 
+test('night retains fill lighting in shadows across quality levels without changing daylight', () => {
+  const scene = new THREE.Scene();
+  const sun = new THREE.DirectionalLight(), hemi = new THREE.HemisphereLight();
+  const renderer = { toneMappingExposure: 1 };
+  const atmosphere = createAtmosphere({ scene, sun, hemi, renderer });
+  for (const quality of ['low', 'balanced', 'high', 'ultra']) {
+    atmosphere.setQuality(quality);
+    for (const hour of [0, 5, 19, 23]) {
+      atmosphere.setTime(hour);
+      assert.ok(hemi.intensity >= .8, `Missing shadow fill at ${hour} on ${quality}`);
+      assert.ok(hemi.color.r > .3);
+      assert.ok(hemi.groundColor.b > .3);
+      assert.ok(renderer.toneMappingExposure >= 1.17);
+    }
+  }
+  atmosphere.setTime(0);
+  assert.ok(atmosphere.diagnostics.moonIntensity > .7);
+  atmosphere.setTime(12);
+  close(hemi.intensity, 1.87);
+  close(renderer.toneMappingExposure, 1.09);
+  assert.equal(atmosphere.diagnostics.moonIntensity, 0);
+  atmosphere.dispose();
+});
+
 test('visible sky directions and shadow-casting lights follow the same orbit while the camera moves', () => {
   const scene = new THREE.Scene();
   const sun = new THREE.DirectionalLight(), hemi = new THREE.HemisphereLight();

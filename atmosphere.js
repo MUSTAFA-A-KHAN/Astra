@@ -22,7 +22,7 @@ export function getCelestialState(value, sunDirection = new THREE.Vector3(), moo
     hour, sunDirection, moonDirection, daylight,
     twilight: Math.pow(1 - Math.abs(sunDirection.y), 5) * daylight,
     sunIntensity: Math.max(0, sunDirection.y) ** .45 * 3.1,
-    moonIntensity: Math.max(0, moonDirection.y) ** .45 * .48 * (1 - daylight),
+    moonIntensity: Math.max(0, moonDirection.y) ** .45 * .8 * (1 - daylight),
   };
 }
 
@@ -33,7 +33,9 @@ export function createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lo
   const horizon = new THREE.Color(), zenith = new THREE.Color(), warm = new THREE.Color('#dfb497');
   const dayHorizon = new THREE.Color('#b7c6c7'), dayZenith = new THREE.Color('#587f9f');
   const nightHorizon = new THREE.Color('#28384b'), nightZenith = new THREE.Color('#0b172d');
-  const nightAmbient = new THREE.Color('#596e91');
+  const nightAmbient = new THREE.Color('#a0b6d5');
+  const nightGround = new THREE.Color('#78869c');
+  const dayGround = new THREE.Color('#656450');
   const uniforms = {
     uTime: { value: 0 }, uDay: { value: 1 }, uClouds: { value: .8 },
     uSun: { value: direction }, uMoon: { value: moonDirection }, uHorizon: { value: horizon }, uZenith: { value: zenith },
@@ -93,7 +95,7 @@ export function createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lo
   sky.name = 'Atmospheric sky'; sky.frustumCulled = false; sky.renderOrder = -1000;
   scene.add(sky);
   sun.name = 'Sunlight';
-  const moonLight = new THREE.DirectionalLight('#a9bfdb', .48);
+  const moonLight = new THREE.DirectionalLight('#a9bfdb', .8);
   moonLight.name = 'Moonlight';
   moonLight.shadow.mapSize.copy(sun.shadow.mapSize);
   scene.add(moonLight, moonLight.target);
@@ -113,12 +115,14 @@ export function createAtmosphere({ scene, sun, hemi, portraitLight, renderer, lo
     uniforms.uSunColor.value.copy(sun.color);
     sun.intensity = state.sunIntensity;
     hemi.color.set('#c6d7df').lerp(nightAmbient, 1 - daylight);
-    hemi.groundColor.set('#656450'); hemi.intensity = .22 + daylight * 1.65;
+    // Keep unlit paths and shadowed faces readable even when the moon is low.
+    hemi.groundColor.copy(nightGround).lerp(dayGround, daylight);
+    hemi.intensity = .85 + daylight * 1.02;
     moonLight.intensity = state.moonIntensity;
     sun.castShadow = quality !== 'low' && direction.y > .035;
     moonLight.castShadow = quality !== 'low' && moonDirection.y > .035;
     if (scene.background?.isColor) scene.background.copy(horizon);
-    renderer.toneMappingExposure = 1.02 + daylight * .07;
+    renderer.toneMappingExposure = 1.18 - daylight * .09;
   }
   function setQuality(value) {
     quality = qualityProfiles[value] ? value : 'balanced';
