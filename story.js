@@ -4,6 +4,7 @@ import { HARBOUR_LEVEL } from './world-map.js';
 import { CITY_ARRIVAL } from './city-world.js';
 import { disposeMapResources } from './map-resources.js';
 import { fit, meshes, materialsOf, shadows, softTexture, footprints } from './model-fit.js';
+import { createNpcPresence } from './npc-presence.js';
 
 // The Last Keeper, stood up in the Reach: the Moonwell and its keeper in the
 // sanctuary, the ferryman on the west quay, the wanderers' camp and its
@@ -117,6 +118,7 @@ export function createStory({ world, activities, collision }) {
   }
 
   let restored = false, departed = false, talking = null;
+  let speakingPerson = null, speakingFeeling = '', hasSpeakingCue = false;
   const loaded = {}, tweens = [];
   // Each model stands in a holder of its own: the world shows and hides the
   // holder by the player's distance, and the story the model inside it.
@@ -150,6 +152,7 @@ export function createStory({ world, activities, collision }) {
   function disposePart(part) {
     if (!part || part.disposed) return;
     part.disposed = true; liveParts.delete(part);
+    part.presence?.dispose();
     if (part.mixer) { part.mixer.stopAllAction(); part.mixer.uncacheRoot(part.gltf.scene); }
     disposeMapResources(part.model);
     part.mixer = null; part.gltf = null; part.clips = [];
@@ -196,6 +199,7 @@ export function createStory({ world, activities, collision }) {
       // No shadow of her own, and a little cold light: the first clues.
       place('maren', () => load('moonwell-keeper', 1.62 * M, 'height', { castShadow: false }), part => {
         add('Maren', part.model, places.maren); loop(part);
+        part.presence = createNpcPresence(part, { name: 'maren', place: places.maren, radius: 5 * M });
         for (const material of materialsOf(part.model)) if (material.emissive) { material.emissive.set('#6f93ad'); material.emissiveIntensity = .28; }
         part.fade = fader(part.model);
         part.glow = materialsOf(part.model).filter(material => material.emissive);
@@ -221,6 +225,7 @@ export function createStory({ world, activities, collision }) {
         add('Tobin', part.model, places.tobin);
         part.idle = part.mixer.clipAction(part.clips.find(c => c.name === 'Idle')).play();
         part.talk = part.mixer.clipAction(part.clips.find(c => c.name === 'Talk'));
+        part.presence = createNpcPresence(part, { name: 'tobin', place: places.tobin, radius: 5 * M });
       }),
       place('boat', () => load('harbour-rowboat', 4.6 * M, 'length'), ({ model }) => {
         add('Tobin’s rowboat', model, places.boat); model.rotation.z = .1;
@@ -401,28 +406,25 @@ export function createStory({ world, activities, collision }) {
   // flares, and the notice board, whose papers blaze.
   const flares = { maren: 0, notice: 0 };
   const glow = person => { if (!disposed && person in flares) flares[person] = 1; };
-  const turn = (object, target, dt, rate = 5) => { object.rotation.y += Math.atan2(Math.sin(target - object.rotation.y), Math.cos(target - object.rotation.y)) * (1 - Math.exp(-rate * dt)); };
 
   // `flags` are the story's own, as the save keeps them.
   function update(dt, time, player, step, flags = {}) {
     if (disposed) return;
     // Nobody out of sight is animated: they pick up where they left off.
-    for (const part of Object.values(parts)) if (part.mixer && part.model.parent?.visible) part.mixer.update(dt);
+    for (const part of Object.values(parts)) if (part.mixer && !part.presence && part.model.parent?.visible) part.mixer.update(dt);
     for (let i = tweens.length - 1; i >= 0; i--) {
       const t = tweens[i]; t.t = Math.min(t.duration, t.t + dt); t.step(t.t / t.duration);
       if (t.t >= t.duration) { tweens.splice(i, 1); t.resolve(); }
     }
-    // The keeper and the ferryman look up at whoever comes close, and the
-    // ferryman talks with his hands while he is being listened to.
-    for (const [name, place] of [['maren', places.maren], ['tobin', places.tobin]]) {
+    // Speaking and listening have different performances, with an arrival
+    // reaction, natural glances, and a head turn that leads the planted body.
+    for (const name of ['maren', 'tobin']) {
       const part = parts[name]; if (!part || (name === 'maren' && departed)) continue;
-      const near = Math.hypot(player.x - place.x, player.z - place.z) < 5 * M;
-      turn(part.model, near ? faceToward(place, player) : place.facing, dt, near ? 4 : 1.5);
-    }
-    const tobin = parts.tobin;
-    if (tobin?.talk) {
-      const wanted = talking === 'tobin' ? tobin.talk : tobin.idle, other = wanted === tobin.talk ? tobin.idle : tobin.talk;
-      if (!wanted.isRunning()) { wanted.reset().play(); other.crossFadeTo(wanted, .4, false); }
+      part.presence?.update(dt, time, player, {
+        conversation: talking === name,
+        speaking: hasSpeakingCue ? speakingPerson === name : talking === name,
+        feeling: speakingFeeling,
+      });
     }
     if (parts.hart && restored) parts.hart.model.rotation.y = places.hart.facing + Math.sin(time * .3) * .25;
     if (wellLight && restored && !tweens.length) wellLight.intensity = 22 + Math.sin(time * 1.7) * 2.5;
@@ -468,10 +470,20 @@ export function createStory({ world, activities, collision }) {
 
   return {
     root, places, stream, shard, nearby, objective, update, awaken, depart, setState, glow,
-    get talking() { return talking; }, set talking(person) { if (!disposed) talking = person; },
+    speaking(person, feeling = '') {
+      if (disposed) return;
+      speakingPerson = person; speakingFeeling = feeling; hasSpeakingCue = true;
+    },
+    react(person, feeling = 'concern') { if (!disposed) parts[person]?.presence?.react(feeling); },
+    get talking() { return talking; }, set talking(person) {
+      if (disposed) return;
+      talking = person;
+      if (!person) { speakingPerson = null; speakingFeeling = ''; hasSpeakingCue = false; }
+    },
     get diagnostics() {
       return {
         restored, departed, talking, disposed, loaded: Object.keys(loaded),
+        presence: Object.fromEntries(['maren', 'tobin'].filter(name => parts[name]?.presence).map(name => [name, parts[name].presence.diagnostics])),
         places: Object.fromEntries(Object.entries(places).map(([name, p]) => [name, { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2) }])),
       };
     },

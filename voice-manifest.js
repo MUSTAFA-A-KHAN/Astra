@@ -21,6 +21,18 @@ export const VOICES = Object.freeze({
     }),
   }),
   people: Object.freeze({
+    "narrator": Object.freeze({
+      "Twenty winters ago, the sea climbed these streets. The harbour bell rang once. Then nothing.": "voice/people/narrator/twenty-winters-ago-the-sea-climbed-5e1a7e.ogg",
+      "Tonight, it rang again. The ropes are cut. The bell tower is empty.": "voice/people/narrator/tonight-it-rang-again-the-ropes-202f9f.ogg",
+      "Inside the glass, a tiny handprint appears. From the other side.": "voice/people/narrator/inside-the-glass-a-tiny-handprint-180844.ogg",
+      "In memory of those taken by the Long Tide. One name has been scraped away. The cuts are fresh.": "voice/people/narrator/in-memory-of-those-taken-by-5c7d4e.ogg",
+      "The bell answers from beneath your feet.": "voice/people/narrator/the-bell-answers-from-beneath-your-0460be.ogg",
+      "The shape breaks. A human voice remains, caught inside the light.": "voice/people/narrator/the-shape-breaks-a-human-voice-a50948.ogg",
+      "A last breath: the keeper did not put out the light. Someone called it away.": "voice/people/narrator/a-last-breath-the-keeper-did-7334cc.ogg",
+      "The lantern seals around a sliver of black glass. Three notches. Root, bell, iron.": "voice/people/narrator/the-lantern-seals-around-a-sliver-4a1107.ogg",
+    }),
+    "traveller": Object.freeze({
+    }),
     "maren": Object.freeze({
       "Ah. Someone who can still see me. Come closer, traveller — my eyes aren’t what they were.": "voice/people/maren/ah-someone-who-can-still-see-517d13.ogg",
       "This is the Moonwell. Twenty winters ago it burned so bright the fishing boats steered home by it, and the dead of the Reach slept easy beneath it.": "voice/people/maren/this-is-the-moonwell-twenty-winters-a588f2.ogg",

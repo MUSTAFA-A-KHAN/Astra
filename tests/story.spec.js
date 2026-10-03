@@ -85,6 +85,12 @@ async function shoot(page, name) {
 async function boot(page, hero) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  // This suite covers the original Moonwell chapter; opening.spec.js plays
+  // the new arrival sequence from an empty save through its own controls.
+  await page.addInitScript(() => {
+    const saved = JSON.parse(localStorage.getItem('astra-journey-v1') || '{}');
+    localStorage.setItem('astra-journey-v1', JSON.stringify({ ...saved, opening: saved.opening || { stage: 'complete' } }));
+  });
   await page.route('**/game.js', async route => {
     const response = await route.fetch();
     await route.fulfill({ response, body: `${await response.text()}\n${probe}` });

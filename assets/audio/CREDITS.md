@@ -1,6 +1,6 @@
 # Audio credits
 
-Every sound in this folder comes from OpenGameArt.org, except the walking recordings in walks/, which come from Pixabay, and the spoken lines in voice/, which are synthesised (see Voices below). Recordings under CC0 need no attribution, but they are listed here anyway. CC-BY 3.0 recordings are used under the terms of that licence.
+Sounds in this folder come from OpenGameArt.org, except the walking recordings in walks/, which come from Pixabay, the original procedural opening/ effects, and the synthesised spoken lines in voice/ (see below). Recordings under CC0 need no attribution, but they are listed here anyway. CC-BY 3.0 recordings are used under the terms of that licence.
 
 Every sound ships as Ogg Vorbis plus an AAC copy (.m4a) for Safari versions that cannot decode Vorbis, both at 44.1 kHz. One-shot effects were mixed down to mono, had leading silence trimmed and were peak-normalised. Loops were given an equal-power crossfade from tail to head so that they repeat seamlessly. Other edits are listed per file.
 
@@ -44,11 +44,24 @@ Recordings of someone walking, supplied as MP3 and converted like the rest: mono
 
 ## Voices
 
+### Original opening effects
+
+`opening/drowned-bell.ogg`, `opening/rift-breach.ogg`, and `opening/ward-pulse.ogg`
+(and their AAC twins) are original procedural sound design created for Astra.
+They contain no external samples. Reproduce them with
+`python tools/generate-opening-audio.py`: inharmonic decaying bell partials,
+a falling low-frequency breach with filtered noise, and a rising ward chord.
+They are mono at 44.1 kHz with faded boundaries and a peak of -1.7 dBFS.
+
+### Spoken cast
+
 The spoken lines are synthesised with Microsoft's neural text-to-speech by `tools/generate-voice.py`, from the lines and feelings in `tools/voice-direction.mjs`. Each line is spoken a sentence at a time (a spell, a clause at a time) at the rate, pitch and volume of its feeling and its speaker, and the pieces are joined with timed pauses. Every line is then high-passed at 85 Hz, lightly compressed and loudness-normalised to −18 LUFS. The spells are given a ringing echo, and everything Maren says a faint one.
 
 | Folder | Speaker | Voice | Service |
 | --- | --- | --- | --- |
 | voice/heroes/spiderman/ | Spiderman (Gwen Stacy), the hero | en-US-AvaMultilingualNeural, Microsoft | Microsoft Edge read-aloud |
+| voice/people/narrator/ | The Reach, opening narrator | en-US-GuyNeural, Microsoft | Microsoft Edge read-aloud |
+| voice/people/traveller/ | The traveller, fallback protagonist | en-US-AndrewMultilingualNeural, Microsoft | Microsoft Edge read-aloud |
 | voice/people/maren/ | Maren, Keeper of the Moonwell | en-GB-SoniaNeural, Microsoft | Microsoft Edge read-aloud |
 | voice/people/tobin/ | Tobin, the ferryman, and his tide chart | en-GB-RyanNeural, Microsoft | Microsoft Edge read-aloud |
 

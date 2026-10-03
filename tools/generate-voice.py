@@ -26,6 +26,7 @@ Requires edge-tts and imageio-ffmpeg (pip install edge-tts imageio-ffmpeg), or
 an ffmpeg on the PATH, and Node for the direction.
 """
 
+import argparse
 import asyncio
 import hashlib
 import json
@@ -121,8 +122,23 @@ def azure(text, voice, rate, pitch, volume, style=None, degree=1):
     with urllib.request.urlopen(request, timeout=60) as response: return response.read()
 
 
-def service():
-    return 'azure' if os.environ.get('AZURE_SPEECH_KEY') and os.environ.get('AZURE_SPEECH_REGION') else 'edge'
+def service(requested='auto'):
+    key, region = bool(os.environ.get('AZURE_SPEECH_KEY')), bool(os.environ.get('AZURE_SPEECH_REGION'))
+    if requested == 'azure' and not (key and region):
+        sys.exit('Azure Speech requires both AZURE_SPEECH_KEY and AZURE_SPEECH_REGION. No audio or manifest was changed.')
+    if requested == 'auto' and key != region:
+        sys.exit('Azure Speech is partly configured. Set both AZURE_SPEECH_KEY and AZURE_SPEECH_REGION, or choose --backend edge explicitly.')
+    return 'azure' if requested == 'azure' or requested == 'auto' and key and region else 'edge'
+
+
+def previous_manifest():
+    """Keep unselected cast recordings, even when changing speech providers."""
+    if not MANIFEST.exists():
+        return {'heroes': {}, 'people': {}}
+    script = "import { VOICES } from './voice-manifest.js'; process.stdout.write(JSON.stringify(VOICES));"
+    result = subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT,
+                            capture_output=True, text=True, encoding='utf-8', check=True)
+    return json.loads(result.stdout)
 
 
 def take_name(cast, line, feeling, backend):
@@ -180,12 +196,30 @@ def manifest(voices):
 
 async def main():
     sys.stdout.reconfigure(encoding='utf-8')
-    ff, plan, backend = ffmpeg(), direction(), service()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('members', nargs='*', help='Cast ids to record; omit to record everyone.')
+    parser.add_argument('--backend', choices=['auto', 'azure', 'edge'], default='auto')
+    parser.add_argument('--check', action='store_true', help='Report access and script coverage without recording or changing files.')
+    parser.add_argument('--keep-unused', action='store_true', help='Retain unused takes for editorial review.')
+    args = parser.parse_args()
+    plan, backend = direction(), service(args.backend)
     members = [(kind, member) for kind in ('heroes', 'people') for member in plan['cast'][kind]]
-    wanted = set(sys.argv[1:]) or {member for _, member in members}
+    wanted = set(args.members) or {member for _, member in members}
     unknown = wanted - {member for _, member in members}
     if unknown: sys.exit(f'{", ".join(sorted(unknown))}: not in the cast in tools/voice-direction.mjs')
     print(f'Recording with {"Azure Speech" if backend == "azure" else "Microsoft Edge read-aloud"}.')
+    if backend == 'edge':
+        print('Development voice takes. Use --backend azure for the commercial release master.')
+    if args.check:
+        previous = previous_manifest()
+        for kind, member in members:
+            if member not in wanted: continue
+            lines = plan['scripts'][kind][member]
+            recorded = previous.get(kind, {}).get(member, {})
+            present = sum(bool(recorded.get(line['text'])) and all((AUDIO / recorded[line['text']]).with_suffix(suffix).exists() for suffix in ('.ogg', '.m4a')) for line in lines)
+            print(f'  {member}: {present}/{len(lines)} current lines packaged; voice {plan["cast"][kind][member][backend]}')
+        return
+    ff, previous = ffmpeg(), previous_manifest()
     voices, keep, missing = {'heroes': {}, 'people': {}}, set(), []
     at_once = asyncio.Semaphore(AT_ONCE)
     with tempfile.TemporaryDirectory() as temp:
@@ -206,15 +240,24 @@ async def main():
                 feeling = plan['feelings'][line['feeling']]
                 stem = take_name(cast, line, feeling, backend)
                 file = AUDIO / folder / f'{stem}.ogg'
-                voices[kind][member][line['text']] = f'{folder}/{stem}.ogg'
+                if member not in wanted and not (file.exists() and file.with_suffix('.m4a').exists()):
+                    old = previous.get(kind, {}).get(member, {}).get(line['text'])
+                    if old and all((AUDIO / old).with_suffix(suffix).exists() for suffix in ('.ogg', '.m4a')):
+                        file = AUDIO / old
+                    else:
+                        missing.append(f'{member}: {line["text"]}')
+                        continue
+                voices[kind][member][line['text']] = file.relative_to(AUDIO).as_posix()
                 keep |= {file, file.with_suffix('.m4a')}
                 if file.exists() and file.with_suffix('.m4a').exists(): continue
                 if member in wanted: jobs.append(take(member, cast, line, feeling, stem, file))
                 else: missing.append(f'{member}: {line["text"]}')
         await asyncio.gather(*jobs)
-    kept = sum(len(lines) for kind in voices.values() for lines in kind.values()) - len(jobs) - len(missing)
+    kept = sum(len(lines) for kind in voices.values() for lines in kind.values()) - len(jobs)
     print(f'{len(jobs)} recorded, {kept} kept.')
     for stale in sorted(p for p in OUT.rglob('*') if p.is_file() and p not in keep):
+        if args.keep_unused or not any((OUT / kind / member.lower()) in stale.parents for kind, member in members if member in wanted):
+            continue
         stale.unlink(); print(f'  removed {stale.relative_to(AUDIO).as_posix()}')
     for folder in sorted((p for p in OUT.rglob('*') if p.is_dir()), reverse=True):
         if not any(folder.iterdir()): folder.rmdir()

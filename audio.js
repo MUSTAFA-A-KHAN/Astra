@@ -5,7 +5,7 @@ const MUSIC_STATES = new Set(['exploration', 'suspicion', 'combat', 'victory']);
 // Loaded first, ahead of ambience and music. Every walk is among them, so the
 // first steps on new ground are not lost while its recording downloads.
 const WALKS = Object.keys(AUDIO_ASSETS).filter(name => AUDIO_ASSETS[name].steps);
-const CORE = [...WALKS, 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction'];
+const CORE = [...WALKS, 'sword', 'jump', 'landing', 'hit', 'climb', 'interaction', 'bellToll', 'riftBreach', 'wardPulse'];
 // How loud a step is brought to, whatever level it was recorded at: the RMS
 // of its loudest hundredth of a second.
 const STEP_LEVEL = .05;
@@ -348,6 +348,13 @@ export class GameAudio {
         positions[type] = source.position;
       }
     }
+    // Scene direction changes the world mix without fighting voice ducking.
+    const tension = clamp(environment.tension ?? 0);
+    levels.birds *= 1 - tension;
+    levels.market *= 1 - tension * .85;
+    levels.wind = Math.min(1, levels.wind + tension * .25);
+    strengths.animals *= 1 - tension;
+    strengths.blacksmith *= 1 - tension;
     for (const name of ['wind', 'birds', 'water', 'fire', 'market']) this.loop(name, levels[name], dt, positions[name]);
     this.loop('breathing', this.breathLevel, dt);
     this.smithTimer -= dt; this.animalTimer -= dt;

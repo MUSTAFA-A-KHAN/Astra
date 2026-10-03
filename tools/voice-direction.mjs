@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { PEOPLE, CONVERSATIONS, CAMP_DIRECTIONS, conversation } from '../story-script.js';
 import { CHAPTER_TWO_PEOPLE, chapterTwoConversation } from '../chapter-two-script.js';
 import { PASSAGES, portalConversation } from '../portal-script.js';
+import { OPENING_LINES, OPENING_PEOPLE } from '../opening-script.js';
 
 // Who speaks aloud: heroes by hero id, for the lines the scripts give to
 // 'you', and people by the voice their speakers name (their own id, unless
@@ -30,6 +31,9 @@ export const CAST = {
     Spiderman: { edge: 'en-US-AvaMultilingualNeural', azure: 'en-US-JaneNeural', f0: 200, pitch: 3, rate: 4 },
   },
   people: {
+    // A low, close storyteller; the stranger's voice stays natural beside him.
+    narrator: { edge: 'en-US-GuyNeural', azure: 'en-US-GuyNeural', f0: 105, pitch: -7, rate: -4 },
+    traveller: { edge: 'en-US-AndrewMultilingualNeural', azure: 'en-US-AndrewMultilingualNeural', f0: 125, pitch: -1, rate: 0 },
     // The keeper, twenty years drowned: older and slower than the voice, and
     // not quite in the room with you.
     maren: { edge: 'en-GB-SoniaNeural', azure: 'en-GB-SoniaNeural', f0: 190, pitch: -6, rate: -8, echo: 'faint' },
@@ -92,7 +96,7 @@ export const FEELINGS = {
 };
 
 // Whose voice a speaker in the scripts speaks with.
-const SPEAKERS = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE };
+const SPEAKERS = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, ...OPENING_PEOPLE };
 export const voiceOf = who => (who === 'you' ? 'you' : SPEAKERS[who]?.voice ?? who);
 
 // Every line with words in it that anyone speaks, as { voice, text, feeling },
@@ -112,6 +116,7 @@ export function spokenLines() {
   for (const [person, table] of Object.entries(CONVERSATIONS)) {
     for (const step of Object.keys(table)) for (const camp of Object.keys(CAMP_DIRECTIONS)) take(conversation(person, step, { camp }));
   }
+  for (const lines of Object.values(OPENING_LINES)) take({ lines });
   const flags = ['accepted', 'roots', 'bells', 'valves', 'vigil', 'warden', 'complete'];
   for (let bits = 0; bits < 1 << flags.length; bits++) {
     const state = Object.fromEntries(flags.map((flag, i) => [flag, !!(bits & 1 << i)]));
@@ -128,7 +133,7 @@ export function scripts() {
   const lines = spokenLines();
   return {
     heroes: Object.fromEntries(Object.keys(CAST.heroes).map(id => [id, lines.filter(line => line.voice === 'you')])),
-    people: Object.fromEntries(Object.keys(CAST.people).map(id => [id, lines.filter(line => line.voice === id)])),
+    people: Object.fromEntries(Object.keys(CAST.people).map(id => [id, lines.filter(line => line.voice === (id === 'traveller' ? 'you' : id))])),
   };
 }
 
