@@ -75,7 +75,7 @@ const readLayout = stored => Object.fromEntries(CONTROLS
 const DEFAULT_HERO = 'Spiderman', DEFAULT_VIEW = 'close';
 // How big the joystick and the on-screen buttons are drawn, and how solid.
 const CONTROL_SCALE = { min: .7, max: 1.5 }, CONTROL_OPACITY = { min: .2, max: 1 };
-const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 15.5, 0, 24), flashlight: saved.flashlight !== false, layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : DEFAULT_VIEW,
+const preferences = { quality: ['auto','low','balanced','high'].includes(saved.quality) ? saved.quality : 'auto', sound: saved.sound !== false, showFPS: saved.showFPS === true, time: finite(saved.time, 18.8, 0, 24), flashlight: saved.flashlight !== false, layout: readLayout(saved.layout), view: VIEWS.some(view => view.id === saved.view) ? saved.view : DEFAULT_VIEW,
   controlScale: finite(saved.controlScale, 1, CONTROL_SCALE.min, CONTROL_SCALE.max), controlOpacity: finite(saved.controlOpacity, 1, CONTROL_OPACITY.min, CONTROL_OPACITY.max) };
 // One city day lasts twenty minutes of active play. Menus pause the clock.
 const DAY_LENGTH_SECONDS = 20 * 60;
@@ -1253,9 +1253,12 @@ function openMenu(type){
       const done=i<at,detail=done?step.recap:step.description;
       return '<div class="journal-entry"><span>'+ (done?'✓':'◇') +'</span><div><h3>'+step.title+'</h3><p>'+detail+'</p>'+(!done&&step.goal?'<div class="journal-reward">'+Math.min(step.goal,step.count(progress))+' / '+step.goal+'</div>':!done&&step.where?'<div class="journal-reward">◇ '+step.where+'</div>':'')+'</div></div>';
     }).join('');
-    content.innerHTML='<p class="dialog-copy">'+(second?currentChapter().intro:INTRO)+'</p>'+
+    const decision=progress.opening.choice;
+    const openingJournal=opening.active?'<div class="journal-entry"><span>◇</span><div><h3>'+currentStep().title+'</h3><p>'+currentStep().description+'</p></div></div>':'';
+    const evidence=decision?'<div class="journal-entry"><span>✓</span><div><h3>'+(decision==='mercy'?'A memory released':'Black glass recovered')+'</h3><p>'+(decision==='mercy'?'You listened to the drowned. Its last words: the keeper did not put out the light. Someone called it away. The released light healed your wounds.':'You sealed the lantern. Inside it was black glass marked with three notches: root, bell, iron. Tobin believes Maren knows what the marks were keeping out.')+'</p></div></div>':'';
+    content.innerHTML='<p class="dialog-copy">'+(second?currentChapter().intro:INTRO)+'</p>'+openingJournal+evidence+
       (second?'<div class="chapter-route">CITY → PINE ISLET → SKIBIDI YARD → '+(third?'ASHEN OBSERVATORY → ':'')+'MOONWELL</div>':'')+
-      entries(steps,index)+(second&&activeTrials().status?'<p class="dialog-copy">'+activeTrials().status+'</p>':'')+
+      (opening.active?'':entries(steps,index))+(second&&activeTrials().status?'<p class="dialog-copy">'+activeTrials().status+'</p>':'')+
       (third?'<details class="previous-chapter"><summary>✓ Chapter Two · The Drowned Meridian</summary>'+entries(CHAPTER_TWO_STEPS.slice(0,-1),CHAPTER_TWO_STEPS.length)+'</details>':'')+
       (second?'<details class="previous-chapter"><summary>✓ Chapter One · The Last Keeper</summary>'+entries(STEPS.slice(0,-1),STEPS.length)+'</details>':'<p class="dialog-copy">More of the story waits ahead.</p>')+
       '<p class="dialog-copy">Rest near the golden camp marker to recover health. Follow the gold diamond on the map to your next objective. Read each lock’s inscription for its sequence. Completed missions are saved; failed challenges can be retried.</p>';

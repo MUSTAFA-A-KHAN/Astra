@@ -149,7 +149,11 @@ export function createOpening({ scene, world, state, places: storyPlaces, audio,
   }
   function update(dt, time, player, { running = true, paused = false } = {}) {
     root.visible = running && (!world.activeMap || world.activeMap === 'city');
-    if (!running) { cinema.hidden = choices.hidden = caption.hidden = true; return; }
+    if (!running) {
+      cinema.hidden = choices.hidden = caption.hidden = true;
+      document.body.classList.remove('opening-cinematic', 'opening-choice');
+      return;
+    }
     if (paused) return;
     if (captionLife > 0) { captionLife -= dt; caption.hidden = captionLife <= 0; }
     const agitated = ['breach', 'encounter', 'choice'].includes(state.stage);
