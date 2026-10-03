@@ -259,6 +259,19 @@ export const HEROES = [
   },
 ];
 
+// Share Spiderman's gameplay and clip selection; the supplied model has the
+// complete animation library baked onto its own Mixamo skeleton.
+HEROES.splice(HEROES.findIndex(hero => hero.id === 'Spiderman') + 1, 0, {
+  ...HEROES.find(hero => hero.id === 'Spiderman'),
+  id: 'jj-mo-jj',
+  name: 'jj-mo-jj',
+  title: 'The Trailblazer',
+  description: 'A new adventurer with a lively step and a dance for every occasion.',
+  color: '#e2a57e',
+  model: './jj-mo-jj.glb',
+  size: '24 MB',
+});
+
 /**
  * Enemy
  */
