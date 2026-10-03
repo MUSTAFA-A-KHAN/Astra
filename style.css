@@ -57,3 +57,23 @@ body.portal-cinematic #portal-status{bottom:max(3vh,env(safe-area-inset-bottom))
 #game-hud [data-control],#game-hud .camera-tools{zoom:var(--control-scale,1)}#game-hud [data-control],#game-hud .camera-tools button{opacity:var(--control-opacity,1)}#game-hud [data-control]:active,#game-hud #joystick.held,#game-hud .camera-tools button:active{opacity:1}
 /* The stick sprints on its own when pushed most of the way out; its ring lights to say so. */
 #joystick.sprinting .joystick-ring{border-color:var(--gold);box-shadow:0 0 14px #d8c28b66}
+
+/* The arrival film and the one decision in it are usable without a keyboard. */
+body.opening-cinematic #cinema-bars::before,body.opening-cinematic #cinema-bars::after{transform:scaleY(1)}
+body.opening-cinematic #game-hud,body.opening-choice #game-hud{opacity:0;visibility:hidden}
+#opening-cinema{position:fixed;inset:0;z-index:76;pointer-events:none;background:linear-gradient(#05121a55,transparent 28%,transparent 65%,#031017aa)}
+.opening-heading{position:absolute;left:7vw;top:15vh;max-width:65vw;text-shadow:0 2px 18px #000}
+.opening-heading small,#opening-choices>small{font-size:10px;letter-spacing:4px;color:#d1bd94}
+.opening-heading h2{font:400 clamp(25px,3.3vw,52px)/1.13 Georgia,serif;max-width:620px;margin:16px 0;color:#edf6f8}
+#opening-subtitle{position:absolute;bottom:3.6vh;left:50%;transform:translateX(-50%);width:min(760px,82vw);margin:0;text-align:center;color:#eff6f4;font:400 17px/1.55 Georgia,serif;text-shadow:0 1px 5px #000}
+#opening-skip{position:absolute;right:max(24px,env(safe-area-inset-right));top:max(24px,env(safe-area-inset-top));pointer-events:auto;min-height:44px;padding:10px 14px;background:#0b1825d9;border:1px solid #b6cdd266;color:#e8e4d5;font-size:12px;letter-spacing:1px}
+#opening-caption{position:fixed;z-index:55;left:50%;bottom:23vh;transform:translateX(-50%);max-width:min(660px,86vw);padding:12px 20px;background:#08151be6;border-left:2px solid #a7d7e6;color:#e4f3f7;text-align:center;font:15px/1.5 Georgia,serif;pointer-events:none}
+#opening-choices{position:fixed;z-index:80;left:50%;bottom:max(8vh,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(680px,calc(100vw - 32px));padding:28px;background:linear-gradient(140deg,#11282ff7,#07161cf7);border:1px solid #aecad577;box-shadow:0 20px 100px #000b;color:#ebf3ee}
+#opening-choices h2{font:400 30px Georgia,serif;margin:12px 0}#opening-choices p{font-size:14px;line-height:1.5;color:#c5d8dc}
+.opening-choice-buttons{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+.opening-choice-buttons button{min-height:110px;text-align:left;padding:18px;background:#abcbd50b;border:1px solid #91bccb66;color:#ecf5ef}
+.opening-choice-buttons strong{display:block;font:400 20px Georgia,serif;margin-bottom:10px}.opening-choice-buttons span{font-size:12px;line-height:1.6;color:#aec6cd}
+.opening-choice-buttons button:hover,.opening-choice-buttons button:focus-visible{background:#b3dce224;border-color:#f1d29b;outline:2px solid #f1d29b;outline-offset:3px}
+body.conversing #opening-caption{visibility:hidden}
+@media(max-width:600px){.opening-heading{top:17vh;left:7vw}.opening-heading small{font-size:8px;letter-spacing:2px}#opening-subtitle{font-size:14px;bottom:4vh;width:88vw}#opening-choices{padding:20px}.opening-choice-buttons{grid-template-columns:1fr;gap:8px;margin-top:16px}.opening-choice-buttons button{min-height:85px;padding:13px}.opening-choice-buttons strong{font-size:19px;margin-bottom:5px}#opening-choices h2{font-size:26px}#opening-caption{font-size:13px;width:85vw;bottom:27vh}}
+@media(max-height:500px){.opening-heading{top:17vh}.opening-heading h2{font-size:25px;margin-top:8px}#opening-subtitle{bottom:3vh;font-size:13px}#opening-choices{bottom:3vh;padding:15px}.opening-choice-buttons{grid-template-columns:1fr 1fr;margin-top:10px}.opening-choice-buttons button{min-height:75px;padding:12px}#opening-choices h2{font-size:22px;margin:8px 0}#opening-choices p{margin:5px 0}}

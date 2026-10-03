@@ -41,6 +41,20 @@
 <div id="toast" role="status" aria-live="polite"><span>✦</span><div id="toast-text"></div></div>
 <div id="character-loading" role="status" hidden><span class="spinner"></span><span id="character-loading-text">Preparing adventurer…</span></div>
 <div id="cinema-bars" aria-hidden="true"></div>
+<section id="opening-cinema" hidden aria-label="Opening cinematic">
+  <div class="opening-heading"><small>ASTRA · THE LAST KEEPER</small><h2 id="opening-title">The bell that should not ring</h2></div>
+  <p id="opening-subtitle" aria-live="polite"></p>
+  <button id="opening-skip">Skip introduction <kbd>ESC</kbd></button>
+</section>
+<p id="opening-caption" hidden role="status"></p>
+<section id="opening-choices" hidden role="dialog" aria-modal="true" aria-labelledby="opening-choice-title">
+  <small>THE DROWNED LANTERN</small><h2 id="opening-choice-title">Someone is still inside.</h2>
+  <p>The danger has passed. A human voice clings to the flame.</p>
+  <div class="opening-choice-buttons">
+    <button data-opening-choice="mercy"><strong>Listen. Let them go.</strong><span>Release the memory. Learn what it remembers; recover more health.</span></button>
+    <button data-opening-choice="seal"><strong>Seal the lantern.</strong><span>Close the breach. Keep the marked glass as evidence; recover a little health.</span></button>
+  </div>
+</section>
 <div id="portal-veil" aria-hidden="true"></div>
 <div id="portal-status" role="status" aria-live="polite" hidden></div>
 <dialog id="menu-dialog" aria-labelledby="dialog-title"><div class="dialog-header"><div><div class="eyebrow" id="dialog-eyebrow">TAKE A BREATH</div><h2 id="dialog-title">Your journey</h2></div><button class="icon-button" id="close-dialog" aria-label="Close menu">×</button></div><div id="dialog-content"></div></dialog>

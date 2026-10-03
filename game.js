@@ -21,6 +21,8 @@ import { PORTAL_TIMING, portalShot, shotPose, landingPose, cinematicWeight } fro
 import { createConversationDirector } from './conversation-cinematic.js';
 import { portalRoute, portalChoices, portalConversation, SPELL_TAKES, EXPLORATIONS } from './portal-script.js';
 import { VOICES } from './voice-manifest.js';
+import { createOpening } from './opening.js';
+import { OPENING_PEOPLE, readOpening, openingStep } from './opening-script.js';
 
 const $ = id => document.getElementById(id);
 const touch = matchMedia('(pointer:coarse)').matches;
@@ -34,10 +36,12 @@ const finite = (v, fallback, min = 0, max = 1e7) => Number.isFinite(v) ? clamp(v
 const progress = { xp: finite(saved.xp, 0), kills: finite(saved.kills, 0), restored: saved.restored === true, collected: new Set(Array.isArray(saved.collected) ? saved.collected.filter(v => Number.isInteger(v) && v >= 0) : []), story: readStory(saved) };
 progress.chapterTwo = readChapterTwo(saved);
 progress.chapterThree = readChapterThree(saved);
+progress.opening = readOpening(saved);
+let opening = null;
 const chapterTwoUnlocked = () => progress.restored && progress.story.farewell;
 const chapterThreeUnlocked = () => canStartChapterThree(progress);
 const currentChapter = () => chapterThreeUnlocked() ? CHAPTER_THREE : chapterTwoUnlocked() ? CHAPTER_TWO : CHAPTER;
-const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, ...CHAPTER_THREE_PEOPLE, portalBook: { name: 'The keeper’s spellbook', color: '#bceee6', read: true } };
+const speakers = { ...PEOPLE, ...CHAPTER_TWO_PEOPLE, ...CHAPTER_THREE_PEOPLE, ...OPENING_PEOPLE, portalBook: { name: 'The keeper’s spellbook', color: '#bceee6', read: true } };
 let portalJourney = null;
 // Where the player has put each on-screen control, as a fraction of
 // the viewport: a phone that rotates, or a window that resizes, keeps
@@ -89,7 +93,7 @@ let lockTarget = null, aiming = false, cinematic = false, combatMemory = 0, vict
 let lastSave = 0, dirtySave = false, previewYaw = .23;
 const level = () => Math.floor(progress.xp / 150) + 1;
 function save() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, chapterThree: progress.chapterThree, map: world.activeMap || 'city', hero: heroMeta.id })); dirtySave = false; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...preferences, xp: progress.xp, kills: progress.kills, restored: progress.restored, collected: [...progress.collected], story: progress.story, chapterTwo: progress.chapterTwo, chapterThree: progress.chapterThree, opening: progress.opening, map: world.activeMap || 'city', hero: heroMeta.id })); dirtySave = false; }
   catch { /* Private browsing and full storage must never stop play. */ }
 }
 // A toast marked `after` waits for the one on screen instead of replacing it:
@@ -161,8 +165,8 @@ const activities = await createGameplayWorld(scene, world, collision);
 // starts; who stands where is known already, so they can be spoken to at once.
 let story = createStory({ world, activities, collision });
 scene.add(story.root); story.setState({ restored: progress.restored });
-const currentStep = () => chapterThreeUnlocked() ? chapterThreeStep(progress.chapterThree) : chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
-const questIndex = () => chapterThreeUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.length + CHAPTER_THREE_STEPS.indexOf(currentStep()) : chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
+const currentStep = () => opening?.active ? openingStep(progress.opening) : chapterThreeUnlocked() ? chapterThreeStep(progress.chapterThree) : chapterTwoUnlocked() ? chapterTwoStep(progress.chapterTwo) : STEPS[storyStep(progress)];
+const questIndex = () => opening?.active ? currentStep().id : chapterThreeUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.length + CHAPTER_THREE_STEPS.indexOf(currentStep()) : chapterTwoUnlocked() ? STEPS.length + CHAPTER_TWO_STEPS.indexOf(currentStep()) : storyStep(progress);
 const chapterTwo = createChapterTwo({ world, collision, state: progress.chapterTwo, storyPlaces: story.places, isUnlocked: chapterTwoUnlocked,
   onChange: ({ flag, reward }) => { gainXP(reward); save(); sound(); react('Cheer'); if(flag==='warden'){victoryTime=10;audio.play('victory');} },
   onMessage: message => toast(message),
@@ -232,7 +236,7 @@ function placePortal() {
   portal.setPhase('dormant');
 }
 placePortal();
-const questObjective = () => currentStep().id !== 'complete' && currentStep().map !== (world.activeMap || 'city')
+const questObjective = () => opening?.active ? opening.objective() : currentStep().id !== 'complete' && currentStep().map !== (world.activeMap || 'city')
   ? portal.places.book : chapterTwoUnlocked() ? activeTrials().objective() : story.objective(currentStep().id);
 const locomotion = new LocomotionController(position, velocity, activities.terrain, collision, { waterZones: activities.waterZones, climbables: activities.climbables });
 // A ridden horse keeps its own heading and wheels round rather than turning on the spot.
@@ -342,6 +346,31 @@ const bolt=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,1,6),new THREE.Mesh
 const direction=new THREE.Vector3(),targetPoint=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 function showPulse(x,z,size,color) { pulse.position.set(x,groundHeight(x,z)+.3,z);pulse.material.color.set(color);pulseAge=0;pulseSize=size; }
 function gainXP(amount) {const previous=level();progress.xp+=amount;dirtySave=true;if(level()>previous){health=100;toast(`Level ${level()} · Your light grows stronger`);sound();react('Cheer');}updateHUD();}
+opening = createOpening({ scene, world, state: progress.opening, places: story.places, audio, reducedMotion,
+  voiceOf: (who, text) => voiceOf(who, text),
+  onChange: () => { resetInput(); save(); updateHUD(); settling = .9; },
+  onSpeak: (person, lines, done) => begin(person, lines, done),
+  onPulse: (place, color) => showPulse(place.x, place.z, 8, color),
+  onEncounter: place => {
+    const e = enemies.find(enemy => enemy.openingEnemy); if (!e) return;
+    e.x = place.x; e.z = place.z; revive(e); e.hp = 65;
+    story.react?.('tobin', 'fear'); combatMemory = 4;
+    toast('The drowned are reaching through · Attack, then move out of reach');
+  },
+  onChoice: choice => {
+    health = Math.min(100, health + (choice === 'mercy' ? 35 : 15));
+    gainXP(40); victoryTime = 8; combatMemory = 0; save();
+    toast(choice === 'mercy' ? 'A memory released · The light mends your wounds' : 'A breach sealed · Black glass kept in your journal');
+  },
+  onComplete: () => {
+    progress.story.notice = true; gainXP(25); save();
+    toast('Find Maren at the Moonwell · The portal book knows the way');
+    lightDelay = .5; updateHUD();
+  },
+});
+if (opening.active) {
+  const first = enemies[0]; first.openingEnemy = true; first.alive = false; first.group.visible = false;
+}
 $('quest-eyebrow').textContent=`${CHAPTER.eyebrow} · ${CHAPTER.title.toUpperCase()}`;
 // The step the tracker last showed: when the story moves on, the new step is
 // announced once, and the tracker flashes to draw the eye to it.
@@ -375,7 +404,7 @@ function updateHUD(){
   }
 }
 function attack(special=false){
-  if(screen!=='game'||dialog.open||chat||portalJourney||document.hidden||!hero||contextLost)return;
+  if(screen!=='game'||dialog.open||chat||portalJourney||opening?.locked||document.hidden||!hero||contextLost)return;
   if(special?abilityTimer>0:attackTimer>0)return;
   if(special)abilityTimer=7;attackTimer=heroMeta.cooldown;
   cinematic=false; combatMemory=5; audio.play('sword', { position, volume: special ? .9 : .65 });
@@ -395,6 +424,7 @@ function attack(special=false){
       e.ragdoll.start({x:dx/d*4,y:2,z:dz/d*4});
       if(lockTarget===e)lockTarget=null;
       progress.kills++;gainXP(35);toast(`${whisper(progress.kills)} · +35 experience`);
+      if(e.openingEnemy){opening.defeat();save();}
       if(!enemies.some(other=>other.alive&&position.distanceTo(other.group.position)<20)){victoryTime=7;combatMemory=0;react('Cheer');}
     }
   }
@@ -406,7 +436,12 @@ function attack(special=false){
   updateHUD();
 }
 function nearbyInteraction(){
-  if(portalJourney)return null;
+  if(portalJourney||opening?.locked)return null;
+  if(opening?.active){
+    const action=opening.nearby(position);if(action)return action;
+    // Finish the local incident before a portal can unload its actors.
+    return null;
+  }
   const book = portal.nearby(position);
   // Whatever stands nearer than the keeper's book is what the player came for:
   // on Pine Islet the gate stands a few strides from the rain rune.
@@ -427,8 +462,9 @@ function nearbyInteraction(){
   return null;
 }
 function interact(){
-  if(screen!=='game'||dialog.open||chat||portalJourney)return;
+  if(screen!=='game'||dialog.open||chat||portalJourney||opening?.locked)return;
   const action=nearbyInteraction();if(!action)return;
+  if(action.type==='opening'){opening.interact(action);return;}
   if(action.type==='portal'){readPortalBook();return;}
   if(action.type==='chapterThree'){
     if(action.id===closed.person&&performance.now()-closed.at<400)return;
@@ -507,6 +543,11 @@ const lightHeight=place=>(place.y??groundHeight(place.x,place.z))+(place.face??(
 // film is on, or the story has nowhere left to send them.
 function lightTarget(){
   if(screen!=='game'||!hero||portalJourney||finale||contextLost)return null;
+  if(opening?.active){
+    if(opening.cinematic||progress.opening.stage==='encounter')return null;
+    const goal=opening.objective();
+    return goal&&{key:`${progress.opening.stage}:${goal.x}:${goal.z}`,x:goal.x,y:goal.y+1.5,z:goal.z};
+  }
   const current=currentStep();
   if(current.id!=='complete'&&current.map!==(world.activeMap||'city')){
     const goal=portal.places.book;
@@ -558,7 +599,7 @@ function updateGuideLight(dt,t){
   }
   guideLight.update(dt,t,position,{paused:!!chat});
 }
-const voiceOf=(who,text)=>who==='you'?VOICES.heroes[heroMeta.id]?.[text]:who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
+const voiceOf=(who,text)=>who==='you'?(VOICES.heroes[heroMeta.id]?.[text]??VOICES.people.traveller?.[text]):who?VOICES.people[speakers[who]?.voice??who]?.[text]:undefined;
 // How long a line holds once it is all there: a short beat after a line that
 // was heard spoken, and time to finish reading one that was not (it typed
 // itself out at sixty letters a second meanwhile), a third of a second and a
@@ -569,7 +610,8 @@ function talk(person){
   begin(person,entry.lines,()=>heard(entry));
 }
 function begin(person,lines,onEnd){
-  const place=person==='portalBook'?portal.places.book:chapterThree.places[person]||chapterTwo.places[person]||story.places[person]||story.places.maren;
+  const openingPlace={openingLantern:'lantern',openingMemorial:'memorial',openingEcho:'lantern'}[person];
+  const place=openingPlace?opening.places[openingPlace]:person==='portalBook'?portal.places.book:chapterThree.places[person]||chapterTwo.places[person]||story.places[person]||story.places.maren;
   const dx=place.x-position.x,dz=place.z-position.z;
   chat={person,lines,index:0,shown:0,onEnd,yaw:Math.atan2(-dx,-dz)+.6};
   // The film is shot round the two of them: the hero's eyes, and the face or page of whatever they face.
@@ -581,6 +623,7 @@ function begin(person,lines,onEnd){
 }
 function showLine(){
   const [who,text]=chat.lines[chat.index],host=speakers[chat.person],reading=!host.title;
+  story.speaking?.(who,chat.lines[chat.index][2]||'');
   director.cue(who);
   const speaker=who==='you'?{name:heroMeta.name,title:'You',color:heroMeta.color}:who?speakers[who]:reading?host:null;
   // A notice, a ledger or an inscription is read from start to finish;
@@ -918,6 +961,12 @@ addEventListener('keydown',e=>{
   if(dialog.open){if(e.code==='Escape'){e.preventDefault();closeDialog();}return;}
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
   if(screen!=='game')return;
+  if(opening?.locked){
+    if(e.code==='Escape'&&opening.cinematic){e.preventDefault();opening.skip();}
+    else if(e.code==='KeyP'){e.preventDefault();openMenu('pause');}
+    else if(!e.target.closest('[data-opening-choice]'))e.preventDefault();
+    return;
+  }
   if(portalJourney&&!chat){e.preventDefault();return;}
   // A conversation takes the keys it pages with; everything else waits.
   if(chat){if(['KeyF','Space','Enter','NumpadEnter'].includes(e.code)){e.preventDefault();if(!e.repeat)advance();}else if(e.code==='Escape'){e.preventDefault();skipConversation();}return;}
@@ -938,7 +987,7 @@ addEventListener('keyup',e=>{keys.delete(e.code);if(e.code==='AltLeft'||e.code==
 addEventListener('blur',()=>{resetInput();if(screen==='game'&&!dialog.open)openMenu('pause');save();});
 addEventListener('pagehide',()=>{save();audio.setPaused(true);});
 document.addEventListener('visibilitychange',()=>{resetInput();if(document.hidden){audio.setPaused(true);save();renderer.setAnimationLoop(null);if(screen==='game'&&!dialog.open)openMenu('pause');}else{lastFrame=performance.now();if(!contextLost)renderer.setAnimationLoop(animate);}});
-function jump(){if(screen==='game'&&!dialog.open&&!chat){locomotion.requestJump();cinematic=false;}}
+function jump(){if(screen==='game'&&!dialog.open&&!chat&&!opening?.locked){locomotion.requestJump();cinematic=false;}}
 // Emotes are the one animation the player drives directly, so they
 // are held for exactly as long as the clip runs and dropped the
 // moment the character has somewhere else to be. `hero.emotes` only
@@ -1177,7 +1226,7 @@ function applyControlLook() {
 }
 applyControlLook();
 
-function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;updateCamera(1);updateHUD();lightDelay=1.2;lightWelcome=true;const step=currentStep();if(step.id!=='notice')toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
+function enterGame(){if(!hero||switching)return;if(editingLayout)editLayout(false);enableAudio();screen='game';audio.setPaused(false);followCamera.reset(position,yaw,currentView().pitch,currentView().radius);sessionStarted=true;document.body.dataset.screen=screen;$('topbar').hidden=true;$('lobby').hidden=true;$('game-hud').hidden=false;refitLayout();stage.visible=false;portraitLight.intensity=0;resetInput();avatar.position.copy(position);cameraTarget.copy(position).y+=2;pitch=currentView().pitch;radius=currentView().radius;camera.fov=currentView().fov;camera.updateProjectionMatrix();settling=0;opening.start();updateCamera(1);updateHUD();lightDelay=1.2;lightWelcome=true;const step=currentStep();if(!opening.active&&step.id!=='notice')toast(step.id==='keeper'?'Someone is waiting at the Moonwell · Follow the light':step.id==='complete'?'The Moonwell shines over the Reach':`${step.title} · ${step.description}`);}
 function enterLobby(){if(portalJourney)return;if(editingLayout)editLayout(false);closeDialog();screen='lobby';audio.setPaused(true);lockTarget=null;cinematic=false;document.body.dataset.screen=screen;$('topbar').hidden=false;$('lobby').hidden=false;$('game-hud').hidden=true;stage.visible=true;portraitLight.intensity=1.6;avatar.position.copy(spawn).y+=.22;resetInput();save();updateHeroUI();$('play-button').firstElementChild.textContent=sessionStarted?'Continue journey':'Enter the city';}
 $('play-button').addEventListener('click',enterGame);$('lobby-button').addEventListener('click',enterLobby);$('nav-heroes').addEventListener('click',()=>{closeDialog();});
 function closeDialog(){dialog.close();resetInput();audio.setPaused(screen!=='game');lastFrame=performance.now();save();}
@@ -1289,7 +1338,7 @@ function updatePlayer(dt){
     if(!e.alive){
       if(e.dying>0){e.dying=Math.max(0,e.dying-dt);e.rig?.animate(dt,{state:'Dead',time});e.ragdoll.update(dt);if(e.dying===0)e.group.visible=false;}
       e.respawn=Math.max(0,e.respawn-dt);
-      if(e.respawn===0&&e.dying===0&&Math.hypot(position.x-e.x,position.z-e.z)>RESPAWN_CLEARANCE)revive(e);
+      if(!e.openingEnemy&&e.respawn===0&&e.dying===0&&Math.hypot(position.x-e.x,position.z-e.z)>RESPAWN_CLEARANCE)revive(e);
       continue;
     }
     e.hit=Math.max(0,e.hit-dt);e.swing=Math.max(0,e.swing-dt);
@@ -1306,9 +1355,9 @@ function updatePlayer(dt){
     if(visible&&d<2.5&&hurtTimer<=0&&Math.abs(position.y-groundHeight(e.group.position.x,e.group.position.z))<1.5){health=Math.max(0,health-12);hurtTimer=1.2;e.swing=.6;combatMemory=5;audio.play('hit',{position,volume:.7});if(health<=0)respawnPlayer();}
   }
   if(lockTarget&&(!lockTarget.alive||position.distanceTo(lockTarget.group.position)>40))lockTarget=null;
-  const threat=nearestThreat<10||combatMemory>0||activeTrials().combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26?'suspicion':'exploration';
+  const threat=nearestThreat<10||combatMemory>0||activeTrials().combatants.some(e=>e.alive)?'combat':victoryTime>0?'victory':nearestThreat<26||opening?.active?'suspicion':'exploration';
   audio.setPaused(false);
-  audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':region(),state:locomotion.state,mounted}, {sources:activities.sources,threat});
+  audio.update(dt,position,region(),{...locomotion.getStats(),events:locomotion.events,surface:locomotion.inWater?'water':region(),state:locomotion.state,mounted}, {sources:activities.sources,threat,tension:opening?.tension||0});
   syncCameraControls();
 }
 // The hero stands and listens, the line types itself out, and the camera
@@ -1339,7 +1388,7 @@ function updateShards(){
   for(let i=0;i<shardPositions.length;i++){
     if(!shardPositions[i]){dummy.scale.setScalar(0);dummy.updateMatrix();shardMesh.setMatrixAt(i,dummy.matrix);continue;}
     const [x,z]=shardPositions[i];
-    if(screen==='game'&&!dialog.open&&!progress.collected.has(i)&&Math.hypot(position.x-x,position.z-z)<2&&position.y-groundHeight(x,z)<3){progress.collected.add(i);gainXP(15);sound();if(progress.collected.size===5)toast('The light gathers · Seek the restless wisps');}
+    if(screen==='game'&&!dialog.open&&!opening?.locked&&!progress.collected.has(i)&&Math.hypot(position.x-x,position.z-z)<2&&position.y-groundHeight(x,z)<3){progress.collected.add(i);gainXP(15);sound();if(progress.collected.size===5)toast('The light gathers · Seek the restless wisps');}
     dummy.position.set(x,groundHeight(x,z)+1.6+Math.sin(time*2+i)*.22,z);dummy.rotation.set(0,time*.7+i,.12);dummy.scale.setScalar(progress.collected.has(i)?0:1);dummy.updateMatrix();shardMesh.setMatrixAt(i,dummy.matrix);
   }
   shardMesh.instanceMatrix.needsUpdate=true;
@@ -1391,6 +1440,15 @@ function updateCamera(dt){
     const talk=director.update(dt,{reducedMotion,aspect:camera.aspect});
     if(talk&&weight<1)filmConversation(talk);
     if(weight>0)filmPortal(shot,weight,dt);
+    const openingShot=opening?.shot(position);
+    if(openingShot){
+      holdCamera();
+      const goal=openingShot.target,want=openingShot.position;
+      const safe=followCamera.safeFraction(goal,want,.25);
+      camera.position.copy(goal).lerp(want,Math.max(.08,safe));
+      camera.position.y=Math.max(camera.position.y,followCamera.floorHeight(camera.position.x,camera.position.z));
+      camera.lookAt(goal);camera.fov=openingShot.fov;camera.updateProjectionMatrix();
+    }
   }
 }
 // The portal crossing's camera. Buildings and hills draw it in toward its
@@ -1483,9 +1541,10 @@ function animate(now){
   const raw=Math.max(0,(now-lastFrame)/1000);lastFrame=now;const dt=Math.min(raw,.08);time+=dt;
   if(!dialog.open){
     if(screen==='game'){setTime(preferences.time+dt*24/DAY_LENGTH_SECONDS);dirtySave=true;}
-    if(screen==='game'&&hero){if(chat)updateConversation(dt);else if(!portalJourney){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
+    if(screen==='game'&&hero){if(chat)updateConversation(dt);else if(opening?.locked){hero.animate(dt,{speed:0,fidget:false,state:progress.opening.stage==='breach'?'Fear':'Idle',time});$('interaction-hint').hidden=true;}else if(!portalJourney){const steps=Math.max(1,Math.ceil(dt/.025));for(let i=0;i<steps;i++)updatePlayer(dt/steps);}}
     else if(hero){avatar.position.copy(spawn).y+=.22;avatar.rotation.y=previewYaw;hero.animate(dt,{speed:0,holding:flashlight.out,state:time<greetUntil?'Wave':undefined,time:reducedMotion?0:time});}
     if(screen==='game')updatePortalJourney(dt);
+    opening.update(dt,reducedMotion?0:time,position,{running:screen==='game',paused:!!chat||!!portalJourney});
     portal.root.visible=screen==='game';portal.watch(portalJourney?.weight>0?camera.position:null);
     // Each stone that breaks the ground lands a thud and a jolt of the camera.
     for(const event of portal.update(dt,reducedMotion?0:time))if(event.type==='stone'){audio.play('landing',{volume:.55,rate:.66});if(portalJourney)portalJourney.shake=Math.min(1,(portalJourney.shake||0)+.35);}
@@ -1525,7 +1584,7 @@ function ridingStats(){
   const saddle=activities.mount.saddle.getWorldPosition(new THREE.Vector3());
   return {seatGap:contact.distanceTo(saddle),rootHeight:avatar.position.y-position.y,heading:reins.heading};
 }
-Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),control:look.held?'freeLook':'playerFollow',heading:yaw,look:{yaw:look.yaw,pitch:look.pitch},facing:avatar.rotation.y,view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
+Object.defineProperty(window,'__ASTRA_DEBUG__',{get:()=>({screen,hero:heroMeta.id,ready:!!hero,switching,paused:dialog.open,quality,pixelRatio:renderer.getPixelRatio(),fps:Math.round(1000/frameMS),position:{x:position.x,y:position.y,z:position.z},progress:{xp:progress.xp,kills:progress.kills,shards:progress.collected.size,quest:storyStep(progress)},chapterTwo:{unlocked:chapterTwoUnlocked(),...chapterTwo.diagnostics},chapterThree:{unlocked:chapterThreeUnlocked(),...chapterThree.diagnostics},guide:{...guideLight.diagnostics,target:lightFor?.key??null,shown:guideLight.position},opening:opening.diagnostics,story:{step:STEPS[storyStep(progress)].id,flags:{...progress.story},finale,chat:chat?{person:chat.person,line:chat.index,lines:chat.lines.length}:null,...story.diagnostics},health,enemies:enemies.filter(e=>e.alive).length,enemyModel:enemies.filter(e=>e.rig).length,heroRuntime:hero?.diagnostics||null,riding:ridingStats(),portal:{...portal.diagnostics(),journey:portalJourney?{phase:portalJourney.phase,destination:portalJourney.route.destination,ready:portalJourney.ready}:null,places:portal.places},terrain:{...world.diagnostics,height:groundHeight(position.x,position.z)},atmosphere:atmosphere.diagnostics,flashlight:flashlight.diagnostics,locomotion:locomotion.getStats(),audio:audio.getStats(),activities:activities.getStats(),physics:{bodies:propPhysics.bodies.length,moving:propPhysics.bodies.filter(body=>!body.sleeping).length},camera:{...followCamera.getStats(),control:look.held?'freeLook':'playerFollow',heading:yaw,look:{yaw:look.yaw,pitch:look.pitch},facing:avatar.rotation.y,view:currentView().id,name:currentView().name,pitch,radius,fov:camera.fov,settling,conversation:director.diagnostics,shown:{x:camera.position.x,y:camera.position.y,z:camera.position.z}},render:renderInfo,input:{joyX,joyY,sprinting,stickSprinting,keys:[...keys]}})});
 try{
   const resumeMap=saved.map==='mesa'||saved.map==='city'?saved.map:EXPLORATIONS.includes(saved.map)&&portalRoute(progress,'city',saved.map).destination===saved.map?saved.map:chapterThreeUnlocked()&&saved.map==='observatory'&&progress.chapterThree.relay?'observatory':saved.map==='yard'&&progress.chapterTwo.roots?'yard':saved.map==='forest'&&progress.chapterTwo.accepted?'forest':progress.chapterTwo.accepted&&!progress.chapterTwo.complete?(progress.chapterTwo.roots?'yard':'forest'):'city';
   if(resumeMap!=='city'&&(resumeMap==='mesa'||chapterTwoUnlocked())){const arrival=await world.travelTo(resumeMap,{prepare:prepareModel});await arriveThroughPortal(arrival);}

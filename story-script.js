@@ -56,7 +56,7 @@ export function readStory(saved) {
   return story;
 }
 
-export const INTRO = 'An old light sleeps beneath the city. Its keeper is still waiting for it.';
+export const INTRO = 'A bell rings in an empty tower. A warm lantern washes onto a dry street. Twenty winters after the Long Tide, something beneath the Reach is trying to come home.';
 
 // A line is [speaker, text]. 'you' is the hero, by name; null is narration.
 // A line spoken aloud also says how it feels, [speaker, text, feeling]:
@@ -78,13 +78,10 @@ export const CAMP_DIRECTIONS = {
 export const CONVERSATIONS = {
   maren: {
     keeper: { sets: 'keeper', lines: [
-      say('maren', 'Ah. Someone who can still see me. Come closer, traveller — my eyes aren’t what they were.', 'wistful'),
-      say('maren', 'This is the Moonwell. Twenty winters ago it burned so bright the fishing boats steered home by it, and the dead of the Reach slept easy beneath it.', 'fond'),
-      say('maren', 'Then came the Night of the Long Tide. The sea climbed the quay, the well went dark, and its light broke into shards and scattered through the streets.', 'haunted'),
-      say('maren', 'I have been waiting a long while for hands that can carry them. Mine can’t. Not anymore.', 'weary'),
-      say('you', 'How many do you need?', 'eager'),
-      say('maren', 'Five will wake it. They glitter like frost on the cobbles; you’ll know them when you see them.', 'warm'),
-      say('maren', 'And when you have them, find Tobin, the ferryman at the west jetty. He’ll tell you what walks these streets after dark.', 'mysterious'),
+      say('maren', 'Do not touch the water. It has started answering in voices I know.', 'haunted'),
+      say('you', 'A bell rang in the city. Something followed it through.', 'hesitant'),
+      say('maren', 'Then the Moonwell is calling for its heart. Five shards of light, scattered in the city. Bring them home before something else answers.', 'resolute'),
+      say('maren', 'Ask Tobin about the drowned. He counts them every night. He always comes up one short.', 'mysterious'),
     ] },
     shards: { lines: [say('maren', 'Five shards, traveller. The light remembers where it fell, even if the city has forgotten.', 'wistful')] },
     ferryman: { lines: [say('maren', 'You found them. I can feel them humming from here. Now go and see Tobin at the west jetty — and don’t let him tell you he’s busy. He isn’t.', 'amused')] },
@@ -109,14 +106,10 @@ export const CONVERSATIONS = {
   tobin: {
     default: { lines: [say('tobin', 'Ferry’s closed. Tide’s wrong. Tide’s always wrong, these days.', 'gruff')] },
     ferryman: { sets: 'ferryman', lines: [
-      say('tobin', 'Mind those boards, they’re older than I am. Name’s Tobin. I ferry folk out to the islet, when there’s anyone left who wants to go.', 'gruff'),
       say('you', 'Maren sent me. The keeper, up at the Moonwell.', 'earnest'),
-      say('tobin', '…Maren.', 'stunned'),
-      say('tobin', 'You’ve a cruel sense of humour, stranger. Or you’ve been drinking harbour water.', 'bitter'),
-      say('tobin', 'Never mind. Those shards — I can see them glowing through your pack. So the old stories are true.', 'awed'),
-      say('tobin', 'The wisps came the morning after the Long Tide. One for every soul the sea took. They aren’t wicked. They’re lost, and lost things lash out.', 'haunted'),
+      say('tobin', 'You found her. I was afraid you would. Those lights in the streets... they were my passengers.', 'grieving'),
       say('tobin', 'Quiet three of them. Then go to the Wanderer’s Camp, {camp}. The wanderers dragged a book out of the flooded cistern, years back. Nobody’s had the stomach to read it.', 'earnest'),
-      say('tobin', 'And if you see something big out in the harbour, glowing blue under the water — that’s the Tidewarden. It’s circled the bay since the well went dark. Leave it be.', 'mysterious'),
+      say('tobin', 'If you see blue light moving under the harbour, leave it be. The Tidewarden is listening too.', 'mysterious'),
     ] },
     wisps: { lines: [say('tobin', 'Three of them. They drift where they drowned — the lanes, the square, the old cistern steps.', 'haunted')] },
     ledger: { lines: [say('tobin', 'The camp’s {camp}. Look for the fire; the wanderers never let it go out.', 'gruff')] },
@@ -136,10 +129,9 @@ export const CONVERSATIONS = {
   // already knowing more than she does.
   notice: {
     default: { sets: 'notice', lines: [
-      say(null, 'WANTED: lamp oil, any quantity. Enquire at the camp market.'),
-      say(null, 'FERRY to Pine Islet — ask for Tobin at the west jetty. No crossings after dark.'),
-      say(null, 'Beneath the newer notices, a weathered plaque is nailed to the wood: IN MEMORY OF THOSE TAKEN BY THE LONG TIDE.'),
-      say(null, 'The names run to the bottom of the board. The last is carved deeper than the rest: MAREN ASHDOWN, KEEPER OF THE MOONWELL.'),
+      say(null, 'NO CROSSINGS AFTER DARK. Someone has underlined it until the paper tore.'),
+      say(null, 'Beneath the ferry notice: IN MEMORY OF THOSE TAKEN BY THE LONG TIDE. Twenty winters of salt have worn the names smooth.'),
+      say(null, 'The final name is missing. Fresh scratches cut through the old wood. Below them, untouched: KEEPER OF THE MOONWELL.'),
     ] },
   },
   ledger: {

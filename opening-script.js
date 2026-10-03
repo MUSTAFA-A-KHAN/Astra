@@ -48,7 +48,9 @@ export const OPENING_STAGES = ['prologue', 'investigate', 'breach', 'encounter',
 export function readOpening(saved = {}) {
   const raw = saved.opening;
   // Lobby/settings saves alone are still newcomers; actual old story progress is not.
-  const legacy = !raw && (saved.restored || saved.xp > 0 || saved.kills > 0 || saved.collected?.length || Object.values(saved.story || {}).some(v => v === true));
+  const legacy = !raw && (saved.restored === true || saved.xp > 0 || saved.kills > 0 || saved.collected?.length ||
+    ['mesa', 'forest', 'yard', 'plaza', 'nightwood', 'observatory', 'street'].includes(saved.map) ||
+    Object.values(saved.story || {}).some(v => v === true));
   const state = { stage: legacy ? 'complete' : 'prologue', lantern: false, memorial: false, choice: null };
   if (raw && OPENING_STAGES.includes(raw.stage)) state.stage = raw.stage;
   state.lantern = raw?.lantern === true; state.memorial = raw?.memorial === true;

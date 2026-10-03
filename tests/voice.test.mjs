@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { GameAudio } from '../audio.js';
 import { HEROES } from '../characters.js';
-import { PEOPLE, CAMP_DIRECTIONS } from '../story-script.js';
+import { PEOPLE, CONVERSATIONS, CAMP_DIRECTIONS } from '../story-script.js';
 import { VOICES } from '../voice-manifest.js';
 import { PASSAGES } from '../portal-script.js';
 import { CAST, FEELINGS, scripts, spokenLines, voiceOf } from '../tools/voice-direction.mjs';
@@ -19,7 +19,8 @@ test('every line the cast speaks has a feeling the recording knows', () => {
   // The hero's spells are among theirs, one for each of the book's passages.
   assert.equal(heroes.Spiderman.filter(line => line.feeling === 'incantation').length, Object.keys(PASSAGES).length);
   // Maren and Tobin say every line they have that has words in it.
-  assert.equal(people.maren.length, 18);
+  const marenLines = new Set(Object.values(CONVERSATIONS.maren).flatMap(entry => entry.lines.filter(([who]) => who === 'maren').map(([, text]) => text)));
+  assert.deepEqual(new Set(people.maren.map(line => line.text)), marenLines);
   assert.ok(people.tobin.every(line => /\p{L}/u.test(line.text)));
 });
 
